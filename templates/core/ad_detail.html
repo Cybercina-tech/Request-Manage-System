@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Request {{ ad.uuid }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    Request Detail
+  </h1>
+  <a href="{% url 'ad_list' %}" class="btn btn-action">Back to List</a>
+</div>
+
+<div class="card-soul mb-4">
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <span class="badge badge-cat {{ ad.category }}">{{ ad.get_category_display }}</span>
+    <span class="badge-glow {{ ad.status }}">{{ ad.get_status_display }}</span>
+    <span class="text-muted small">Submitted {{ ad.created_at|date:"M d, Y H:i" }}</span>
+  </div>
+  <h6 class="text-muted mb-2">Content</h6>
+  <form method="post" id="editForm" action="{% url 'approve_ad' %}">
+    {% csrf_token %}
+    <input type="hidden" name="ad_id" value="{{ ad.uuid }}">
+    <textarea name="content" id="adContent" class="form-control form-soul mb-3" rows="8">{{ ad.content }}</textarea>
+  </form>
+  {% if ad.ai_suggested_reason %}
+  <div class="alert alert-warning border border-warning mb-3">
+    <strong>AI suggested rejection:</strong> {{ ad.ai_suggested_reason }}
+  </div>
+  {% endif %}
+  {% if ad.rejection_reason %}
+  <p class="text-muted mb-0"><strong>Rejection reason:</strong> {{ ad.rejection_reason }}</p>
+  {% endif %}
+</div>
+
+<div class="card-soul mb-4">
+  <h6 class="text-muted mb-2">Metadata</h6>
+  <ul class="list-unstyled mb-0 small text-muted">
+    <li>UUID: <code>{{ ad.uuid }}</code></li>
+    <li>Telegram User ID: {{ ad.telegram_user_id|default:"—" }}</li>
+    <li>Telegram Username: {{ ad.telegram_username|default:"—" }}</li>
+  </ul>
+</div>
+
+{% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
+<div class="d-flex gap-2">
+  <button type="button" class="btn btn-action" id="approveDetailBtn">Approve (with edits above)</button>
+  <button type="button" class="btn btn-hot" data-bs-toggle="modal" data-bs-target="#rejectDetailModal">Reject</button>
+</div>
+
+<!-- Reject Modal (Detail page) -->
+<div class="modal modal-soul fade" id="rejectDetailModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger">Reject Ad</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Rejection reason (required)</label>
+        <select id="detailRejectQuick" class="form-select form-select-sm mb-2">
+          <option value="">— Choose or type below —</option>
+          {% for val, label in rejection_reasons %}
+          <option value="{{ label }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <textarea id="detailRejectReason" class="form-control" rows="3" placeholder="Required"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-hot" id="detailRejectConfirm">Reject</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
+<script>
+(function() {
+  const adId = '{{ ad.uuid }}';
+  const approveBtn = document.getElementById('approveDetailBtn');
+  const contentEl = document.getElementById('adContent');
+
+  approveBtn.addEventListener('click', function() {
+    const content = contentEl.value.trim();
+    fetch('{% url "approve_ad" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_id: adId, content: content })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'success') window.location.href = '{% url "ad_list" %}';
+      else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+
+  document.getElementById('detailRejectQuick').addEventListener('change', function() {
+    if (this.value) document.getElementById('detailRejectReason').value = this.value;
+  });
+
+  document.getElementById('detailRejectConfirm').addEventListener('click', function() {
+    const reason = document.getElementById('detailRejectReason').value.trim();
+    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    fetch('{% url "reject_ad" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_id: adId, reason: reason })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'success') window.location.href = '{% url "ad_list" %}';
+      else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

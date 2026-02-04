@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if is_create %}Add bot{% else %}Edit {{ bot.name }}{% endif %}{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  {% if is_create %}Add bot{% else %}Edit {{ bot.name }}{% endif %}
+</h1>
+
+<form id="botForm" class="form-soul card-soul" style="max-width: 540px;" action="{% if is_create %}{% url 'bot_create' %}{% else %}{% url 'bot_edit' bot.pk %}{% endif %}" method="post" data-create="{% if is_create %}1{% else %}0{% endif %}">
+  {% csrf_token %}
+  <div class="mb-3">
+    <label class="form-label">Name</label>
+    <input type="text" class="form-control" name="name" required
+           value="{% if bot %}{{ bot.name }}{% endif %}"
+           placeholder="My Bot">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Bot token</label>
+    <div class="input-group">
+      <input type="password" class="form-control" name="bot_token" id="bot_token"
+             placeholder="{% if bot %}Leave blank to keep current{% else %}123456:ABC...{% endif %}"
+             {% if is_create %}required{% endif %}>
+      <span class="input-group-text toggle-password" id="toggleToken" style="cursor:pointer" title="Show/hide"><i data-lucide="eye" style="width:18px;height:18px"></i></span>
+    </div>
+    {% if bot and not is_create %}
+    <small class="text-muted">Current: {{ bot.get_masked_token }}</small>
+    {% endif %}
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Username (without @)</label>
+    <input type="text" class="form-control" name="username"
+           value="{% if bot %}{{ bot.username }}{% endif %}"
+           placeholder="MyBot">
+  </div>
+  <div class="mb-3">
+    <div class="form-check form-switch">
+      <input class="form-check-input" type="checkbox" name="is_active" id="is_active" {% if not bot or bot.is_active %}checked{% endif %}>
+      <label class="form-check-label" for="is_active">Active (only active bots send/receive)</label>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Webhook URL (optional)</label>
+    <input type="url" class="form-control" name="webhook_url"
+           value="{% if bot %}{{ bot.webhook_url }}{% endif %}"
+           placeholder="https://your-domain.com/telegram/webhook/1/">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Webhook secret (optional, for verification)</label>
+    <input type="text" class="form-control" name="webhook_secret"
+           value="{% if bot %}{{ bot.webhook_secret }}{% endif %}"
+           placeholder="Secret token">
+  </div>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
+    <button type="submit" class="btn btn-soul">{% if is_create %}Create{% else %}Save{% endif %}</button>
+    {% if not is_create %}
+    <button type="button" class="btn btn-outline-primary" id="regenerateWebhookBtn" data-regenerate-url="{% url 'bot_regenerate_webhook' bot.pk %}" data-webhook-url="{{ bot.webhook_url }}">Regenerate webhook</button>
+    <a href="{% url 'bot_list' %}" class="btn btn-outline-secondary">Cancel</a>
+    <a href="{% url 'bot_delete' bot.pk %}" class="btn btn-outline-danger ms-auto">Delete</a>
+    {% else %}
+    <a href="{% url 'bot_list' %}" class="btn btn-outline-secondary">Cancel</a>
+    {% endif %}
+  </div>
+</form>
+
+<div id="formResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var form = document.getElementById('botForm');
+  var resultEl = document.getElementById('formResult');
+  var tokenInput = document.getElementById('bot_token');
+
+  document.getElementById('toggleToken').onclick = function() {
+    var isPass = tokenInput.type === 'password';
+    tokenInput.type = isPass ? 'text' : 'password';
+    var icon = this.querySelector('i');
+    if (icon) { icon.setAttribute('data-lucide', isPass ? 'eye-off' : 'eye'); if (typeof lucide !== 'undefined') lucide.createIcons(); }
+  };
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    resultEl.textContent = '';
+    var formData = new FormData(form);
+    if (form.dataset.create === '0' && !formData.get('bot_token')) {
+      formData.delete('bot_token');
+    }
+    fetch(form.action, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrfToken },
+      body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'success') {
+        resultEl.className = 'mt-2 small text-success';
+        resultEl.textContent = 'Saved.';
+        if (data.redirect) window.location.href = data.redirect;
+        else resultEl.textContent = 'Saved.';
+      } else {
+        resultEl.className = 'mt-2 small text-danger';
+        resultEl.textContent = data.message || 'Error';
+      }
+    })
+    .catch(function() {
+      resultEl.className = 'mt-2 small text-danger';
+      resultEl.textContent = 'Request failed';
+    });
+  });
+
+  var regenBtn = document.getElementById('regenerateWebhookBtn');
+  if (regenBtn) {
+    regenBtn.addEventListener('click', function() {
+      var url = (document.querySelector('[name=webhook_url]') && document.querySelector('[name=webhook_url]').value) || this.getAttribute('data-webhook-url') || '';
+      fetch(this.getAttribute('data-regenerate-url'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ webhook_url: url })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) { resultEl.className = 'mt-2 small text-success'; resultEl.textContent = data.message; }
+        else { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = data.message || 'Failed'; }
+      })
+      .catch(function() { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = 'Request failed'; });
+    });
+  }
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+})();
+</script>
+{% endblock %}

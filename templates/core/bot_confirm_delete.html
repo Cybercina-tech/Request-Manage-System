@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Delete {{ bot.name }}{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Delete bot
+</h1>
+
+<div class="card-soul" style="max-width: 480px;">
+  <p class="mb-3">Are you sure you want to delete <strong>{{ bot.name }}</strong>{% if bot.username %} (@{{ bot.username }}){% endif %}?</p>
+  <p class="text-muted small mb-3">Sessions and ad requests linked to this bot will be affected. This cannot be undone.</p>
+  <form id="deleteForm" method="post" action="{% url 'bot_delete' bot.pk %}">
+    {% csrf_token %}
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-danger">Delete</button>
+      <a href="{% url 'bot_edit' bot.pk %}" class="btn btn-outline-secondary">Cancel</a>
+      <a href="{% url 'bot_list' %}" class="btn btn-outline-secondary ms-auto">Back to list</a>
+    </div>
+  </form>
+</div>
+
+<div id="deleteResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  document.getElementById('deleteForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var resultEl = document.getElementById('deleteResult');
+    resultEl.textContent = '';
+    fetch(this.action, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrfToken },
+      body: new FormData(this)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'success' && data.redirect) {
+        window.location.href = data.redirect;
+      } else {
+        resultEl.className = 'mt-2 small text-danger';
+        resultEl.textContent = data.message || 'Error';
+      }
+    })
+    .catch(function() {
+      document.getElementById('deleteResult').className = 'mt-2 small text-danger';
+      document.getElementById('deleteResult').textContent = 'Request failed';
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Analytics
+</h1>
+<p class="text-muted mb-4">Bird's-eye view of request velocity and workload.</p>
+
+<!-- Pulse: System Health gauge (central, glowing) -->
+<div class="row g-4 mb-4 align-items-center">
+  <div class="col-auto">
+    <div class="pulse-gauge {{ system_health }}" id="pulseGauge">
+      <span class="pulse-value" id="pulseValue">{{ pulse_score }}</span>
+      <span class="pulse-label">System Health</span>
+    </div>
+  </div>
+  <div class="col">
+    <p class="text-muted small mb-0">
+      <span id="pulseDesc">{% if system_health == 'healthy' %}Queue and rejection rate are in a healthy range.{% else %}High rejection rate or backlog — review pending requests.{% endif %}</span>
+    </p>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-3">
+    <div class="kpi-card total">
+      <div class="text-muted small text-uppercase mb-1">Total Requests</div>
+      <div class="number" id="kpiTotal">{{ total }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="kpi-card pending live-pulse" id="kpiPendingAi">
+      <div class="text-muted small text-uppercase mb-1">Pending AI</div>
+      <div class="number" id="valPendingAi">{{ pending_ai }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="kpi-card pending live-pulse" id="kpiPendingManual">
+      <div class="text-muted small text-uppercase mb-1">Pending Manual</div>
+      <div class="number" id="valPendingManual">{{ pending_manual }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="kpi-card approved">
+      <div class="text-muted small text-uppercase mb-1">Approved Today</div>
+      <div class="number" id="valApprovedToday">{{ approved_today }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-4">
+    <div class="kpi-card rejected">
+      <div class="text-muted small text-uppercase mb-1">Rejected Today</div>
+      <div class="number" id="valRejectedToday">{{ rejected_today }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="kpi-card total">
+      <div class="text-muted small text-uppercase mb-1">Rejection Rate (Today)</div>
+      <div class="number" id="valRejectionRate">{{ rejection_rate }}%</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <a href="{% url 'ad_list' %}" class="btn btn-soul w-100 d-flex align-items-center justify-content-center" style="height: 80px;">
+      <i data-lucide="inbox" class="me-2" style="width:24px;height:24px"></i>
+      Go to Requests
+    </a>
+  </div>
+</div>
+
+{% if last_7_days %}
+<div class="chart-container card-soul">
+  <h5 class="mb-3">Requests (Last 7 Days) — Neon trend</h5>
+  <canvas id="chartRequests" height="120"></canvas>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if last_7_days %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endif %}
+<script>
+(function() {
+  const data = {{ last_7_days_json|default:"[]"|safe }};
+  const labels = data.map(d => d.date);
+  const counts = data.map(d => d.count);
+
+  if (typeof Chart !== 'undefined' && document.getElementById('chartRequests')) {
+    const ctx = document.getElementById('chartRequests').getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 0, 120);
+    gradient.addColorStop(0, 'rgba(124, 77, 255, 0.35)');
+    gradient.addColorStop(0.5, 'rgba(124, 77, 255, 0.12)');
+    gradient.addColorStop(1, 'rgba(124, 77, 255, 0)');
+    const gradientCyan = ctx.createLinearGradient(0, 0, 0, 120);
+    gradientCyan.addColorStop(0, 'rgba(0, 229, 255, 0.25)');
+    gradientCyan.addColorStop(1, 'rgba(0, 229, 255, 0)');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Requests',
+          data: counts,
+          borderColor: '#7C4DFF',
+          borderWidth: 2,
+          backgroundColor: gradient,
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: '#7C4DFF',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointHoverBorderWidth: 2
+        }, {
+          label: 'Trend',
+          data: counts,
+          borderColor: '#00E5FF',
+          borderWidth: 1,
+          backgroundColor: gradientCyan,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8B949E' } },
+          x: { grid: { display: false }, ticks: { color: '#8B949E' } }
+        }
+      }
+    });
+  }
+
+  // Live polling: update Pulse + KPI counts
+  let lastPendingAi = {{ pending_ai }};
+  let lastPendingManual = {{ pending_manual }};
+  const POLL_INTERVAL = 8000;
+
+  function fetchPulse() {
+    fetch('{% url "api_pulse" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('pulseValue').textContent = d.pulse_score;
+        document.getElementById('valPendingAi').textContent = d.pending_ai;
+        document.getElementById('valPendingManual').textContent = d.pending_manual;
+        document.getElementById('kpiTotal').textContent = d.total;
+        document.getElementById('valApprovedToday').textContent = d.approved_today;
+        document.getElementById('valRejectedToday').textContent = d.rejected_today;
+        document.getElementById('valRejectionRate').textContent = d.rejection_rate + '%';
+        const gauge = document.getElementById('pulseGauge');
+        gauge.className = 'pulse-gauge ' + d.system_health;
+        document.getElementById('pulseDesc').textContent = d.system_health === 'healthy'
+          ? 'Queue and rejection rate are in a healthy range.'
+          : 'High rejection rate or backlog — review pending requests.';
+        if (d.pending_ai !== lastPendingAi || d.pending_manual !== lastPendingManual) {
+          document.getElementById('kpiPendingAi').classList.add('pulse-animate');
+          document.getElementById('kpiPendingManual').classList.add('pulse-animate');
+          setTimeout(function() {
+            document.getElementById('kpiPendingAi').classList.remove('pulse-animate');
+            document.getElementById('kpiPendingManual').classList.remove('pulse-animate');
+          }, 600);
+          lastPendingAi = d.pending_ai;
+          lastPendingManual = d.pending_manual;
+        }
+      })
+      .catch(() => {});
+  }
+
+  setInterval(fetchPulse, POLL_INTERVAL);
+})();
+</script>
+{% endblock %}

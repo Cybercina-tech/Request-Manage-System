@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Bots{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Bots
+</h1>
+<p class="text-muted mb-4">Manage Telegram bots. Only active bots send and receive messages.</p>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <span class="text-muted">{{ bots|length }} bot(s)</span>
+  <a href="{% url 'bot_create' %}" class="btn btn-soul">
+    <i data-lucide="plus" class="me-1" style="width:18px;height:18px;vertical-align:middle"></i>
+    Add bot
+  </a>
+</div>
+
+<div class="card-soul">
+  <div class="table-responsive">
+    <table class="table table-dark table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Username</th>
+          <th>Status</th>
+          <th>Last heartbeat</th>
+          <th>Active</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bot in bots %}
+        <tr>
+          <td><strong>{{ bot.name }}</strong></td>
+          <td>{% if bot.username %}@{{ bot.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td>
+            {% if bot.status == 'online' %}
+              <span class="badge bg-success">Online</span>
+            {% elif bot.status == 'error' %}
+              <span class="badge bg-danger">Error</span>
+            {% else %}
+              <span class="badge bg-secondary">Offline</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if bot.last_heartbeat %}
+              {{ bot.last_heartbeat|timesince }} ago
+            {% else %}
+              <span class="text-muted">Never</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if bot.is_active %}
+              <span class="badge bg-info">Yes</span>
+            {% else %}
+              <span class="badge bg-secondary">No</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <button type="button" class="btn btn-sm btn-outline-primary me-1 bot-test-btn" data-test-url="{% url 'bot_test' bot.pk %}" title="Test connection">
+              <i data-lucide="wifi" style="width:16px;height:16px"></i>
+            </button>
+            <a href="{% url 'bot_edit' bot.pk %}" class="btn btn-sm btn-outline-secondary me-1">Edit</a>
+            <a href="{% url 'bot_delete' bot.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="botTestResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  document.querySelectorAll('.bot-test-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var url = this.getAttribute('data-test-url');
+      var resultEl = document.getElementById('botTestResult');
+      resultEl.textContent = 'Testing…';
+      resultEl.className = 'mt-2 small text-muted';
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrfToken },
+        body: 'csrfmiddlewaretoken=' + encodeURIComponent(csrfToken)
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        resultEl.textContent = data.message || (data.success ? 'OK' : 'Failed');
+        resultEl.className = 'mt-2 small ' + (data.success ? 'text-success' : 'text-danger');
+        if (data.success) window.location.reload();
+      })
+      .catch(function() {
+        resultEl.textContent = 'Request failed';
+        resultEl.className = 'mt-2 small text-danger';
+      });
+    });
+  });
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+})();
+</script>
+{% endblock %}

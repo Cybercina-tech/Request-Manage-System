@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Settings
+</h1>
+<p class="text-muted mb-4">Global configuration — AI, Telegram, and maintenance.</p>
+
+<div class="d-flex gap-4 flex-wrap">
+  <ul class="nav nav-tabs-vertical flex-column mb-0" style="width:200px; flex-shrink:0">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-ai">AI (OpenAI)</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-messages">Messages</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-maintenance">Maintenance</a></li>
+  </ul>
+  <div class="flex-grow-1" style="min-width:320px">
+<form id="settingsForm" class="form-soul">
+  {% csrf_token %}
+  <div class="tab-content">
+    <!-- AI Tab -->
+    <div class="tab-pane fade show active" id="tab-ai">
+      <div class="card-soul mb-3">
+        <h5 class="mb-3" style="color: var(--brand-vivid); border-bottom: 2px solid var(--brand-vivid); padding-bottom: 0.5rem;">AI Configuration</h5>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" name="is_ai_enabled" id="is_ai_enabled" {% if config.is_ai_enabled %}checked{% endif %}>
+          <label class="form-check-label" for="is_ai_enabled">Enable AI content moderation</label>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">OpenAI API Key</label>
+          <div class="input-group">
+            <input type="password" class="form-control" name="openai_api_key" id="openai_api_key" value="{{ config.openai_api_key }}" placeholder="sk-...">
+            <span class="input-group-text toggle-password" id="toggleOpenAI" style="cursor:pointer" title="Show/hide"><i data-lucide="eye" style="width:18px;height:18px"></i></span>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Model</label>
+          <input type="text" class="form-control" name="openai_model" value="{{ config.openai_model }}" placeholder="gpt-3.5-turbo or gpt-4o">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">System prompt (moderation instructions)</label>
+          <textarea class="form-control" name="ai_system_prompt" rows="4">{{ config.ai_system_prompt }}</textarea>
+        </div>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <button type="button" class="btn btn-action test-connection-btn" id="testOpenAI">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+            <i data-lucide="check" class="checkmark" style="width:18px;height:18px"></i>
+            <span class="btn-text">Test OpenAI connection</span>
+          </button>
+          <span id="testOpenAIResult" class="small text-muted"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Messages Tab (templates used when sending via bots) -->
+    <div class="tab-pane fade" id="tab-messages">
+      <div class="card-soul mb-3">
+        <h5 class="mb-3" style="color: var(--brand-vivid); border-bottom: 2px solid var(--brand-vivid); padding-bottom: 0.5rem;">Message templates</h5>
+        <p class="text-muted small mb-3">Used when sending approval/rejection and submission ack. Manage bots under <a href="{% url 'bot_list' %}">Bots</a>.</p>
+        <div class="mb-3">
+          <label class="form-label">Submission ack (when user submits ad)</label>
+          <textarea class="form-control" name="submission_ack_message" rows="2">{{ config.submission_ack_message }}</textarea>
+          <small class="text-muted">e.g. "Your broadcast is currently under AI scrutiny. We'll notify you the moment it goes live."</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Approval message template</label>
+          <textarea class="form-control" name="approval_message_template" rows="2">{{ config.approval_message_template }}</textarea>
+          <small class="text-muted">Use {ad_id} for the ad UUID.</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Rejection message template</label>
+          <textarea class="form-control" name="rejection_message_template" rows="2">{{ config.rejection_message_template }}</textarea>
+          <small class="text-muted">Use {reason} and {ad_id}. Rejection will include "Edit & Resubmit" button if bot username is set.</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Maintenance Tab -->
+    <div class="tab-pane fade" id="tab-maintenance">
+      <div class="card-soul mb-3">
+        <h5 class="mb-3" style="color: var(--brand-vivid); border-bottom: 2px solid var(--brand-vivid); padding-bottom: 0.5rem;">Maintenance</h5>
+        <p class="text-muted mb-3">Export configuration as JSON (no API keys). Import merges non-secret fields.</p>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{% url 'export_config' %}" class="btn btn-action" target="_blank">Export config</a>
+          <button type="button" class="btn btn-soul" id="importConfigBtn">Import from JSON</button>
+        </div>
+        <div class="mt-3 d-none" id="importArea">
+          <textarea id="importJson" class="form-control font-monospace small" rows="8" placeholder='{"is_ai_enabled": false, ...}'></textarea>
+          <button type="button" class="btn btn-action mt-2" id="doImport">Apply import</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-soul">Save all settings</button>
+</form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  function togglePassword(inputId, wrapEl) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const isPass = input.type === 'password';
+    input.type = isPass ? 'text' : 'password';
+    const icon = wrapEl.querySelector('i');
+    if (icon) { icon.setAttribute('data-lucide', isPass ? 'eye-off' : 'eye'); lucide.createIcons(); }
+    wrapEl.classList.toggle('active', isPass);
+  }
+  document.getElementById('toggleOpenAI').onclick = function() { togglePassword('openai_api_key', this); };
+
+  document.getElementById('settingsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    fetch('{% url "settings_save" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrfToken },
+      body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'success') alert('Settings saved.');
+      else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+
+  function runTest(btnId, resultId, url, bodyKey, bodyValue) {
+    const btn = document.getElementById(btnId);
+    const resultEl = document.getElementById(resultId);
+    btn.classList.remove('success');
+    btn.classList.add('loading');
+    resultEl.textContent = '';
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrfToken },
+      body: bodyKey + '=' + encodeURIComponent(bodyValue)
+    })
+    .then(r => r.json())
+    .then(data => {
+      btn.classList.remove('loading');
+      if (data.success) {
+        btn.classList.add('success');
+        resultEl.className = 'small text-success';
+        resultEl.textContent = data.message;
+      } else {
+        resultEl.className = 'small text-danger';
+        resultEl.textContent = data.message || 'Failed';
+      }
+      lucide.createIcons();
+    })
+    .catch(() => {
+      btn.classList.remove('loading');
+      resultEl.className = 'small text-danger';
+      resultEl.textContent = 'Request failed';
+    });
+  }
+
+  document.getElementById('testOpenAI').addEventListener('click', function() {
+    const key = document.querySelector('[name=openai_api_key]').value;
+    runTest('testOpenAI', 'testOpenAIResult', '{% url "test_openai" %}', 'openai_api_key', key);
+  });
+
+  document.getElementById('importConfigBtn').addEventListener('click', function() {
+    document.getElementById('importArea').classList.toggle('d-none');
+  });
+
+  document.getElementById('doImport').addEventListener('click', function() {
+    const raw = document.getElementById('importJson').value.trim();
+    if (!raw) { alert('Paste JSON first.'); return; }
+    try {
+      const data = JSON.parse(raw);
+      fetch('{% url "import_config" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: raw
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === 'success') { alert('Import applied.'); window.location.reload(); }
+        else alert(res.message || 'Error');
+      })
+      .catch(() => alert('Request failed'));
+    } catch (e) { alert('Invalid JSON: ' + e.message); }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,764 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Requests{% endblock %}
+
+{% block content %}
+<h1 class="mb-2" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  New Requests
+</h1>
+
+<!-- Mini Status Bar -->
+<div class="mini-status-bar mb-3">
+  <span class="status-pill">
+    <i data-lucide="inbox" style="width:14px;height:14px"></i>
+    <strong>{{ quick_stats.pending }}</strong> Pending
+  </span>
+  <span class="status-pill flagged">
+    <i data-lucide="alert-triangle" style="width:14px;height:14px"></i>
+    <strong>{{ quick_stats.flagged_by_ai }}</strong> Flagged by AI
+  </span>
+  <span class="status-pill priority">
+    <i data-lucide="clock" style="width:14px;height:14px"></i>
+    <strong>{{ quick_stats.high_priority }}</strong> High Priority
+  </span>
+</div>
+
+<p class="text-muted mb-4">Triage queue — move items from Pending to Approved or Rejected.</p>
+
+<!-- Filter Bar — Glassmorphic Container -->
+<div class="filter-bar-glass mb-4">
+  <form method="get" action="{% url 'ad_list' %}" class="filter-form">
+    <div class="row g-3 align-items-end">
+      <div class="col-auto">
+        <label class="form-label d-block small text-muted mb-1">Search</label>
+        <div class="input-group input-group-sm" style="min-width: 200px;">
+          <span class="input-group-text" style="background: var(--bg-obsidian); border: 1px solid #30363d; border-right: none; color: var(--text-muted);">
+            <i data-lucide="search" style="width:16px;height:16px"></i>
+          </span>
+          <input type="text" name="search" value="{{ filters.search }}" class="form-control" placeholder="Content keywords..." style="border-left: none;">
+        </div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label d-block small text-muted mb-1">Category</label>
+        <select name="category" class="form-select form-select-sm filter-select" style="min-width:140px">
+          <option value="">All</option>
+          {% for v, l in category_choices %}
+          <option value="{{ v }}" {% if filters.category == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label d-block small text-muted mb-1">Status</label>
+        <select name="status" class="form-select form-select-sm filter-select" style="min-width:140px">
+          <option value="">All</option>
+          {% for v, l in status_choices %}
+          <option value="{{ v }}" {% if filters.status == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label d-block small text-muted mb-1">From</label>
+        <input type="date" name="date_from" value="{{ filters.date_from|default:'' }}" class="form-control form-control-sm filter-date">
+      </div>
+      <div class="col-auto">
+        <label class="form-label d-block small text-muted mb-1">To</label>
+        <input type="date" name="date_to" value="{{ filters.date_to|default:'' }}" class="form-control form-control-sm filter-date">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-gold btn-sm">
+          <i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i>
+          Filter
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Active Filter Chips -->
+  {% if filters.category or filters.status or filters.date_from or filters.date_to or filters.search %}
+  <div class="filter-chips mt-3">
+    {% if filters.search %}
+    <span class="filter-chip">
+      Search: "{{ filters.search }}"
+      <a href="?{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
+        <i data-lucide="x" style="width:12px;height:12px"></i>
+      </a>
+    </span>
+    {% endif %}
+    {% if filters.category %}
+    <span class="filter-chip">
+      Category: {{ filters.category|title }}
+      <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
+        <i data-lucide="x" style="width:12px;height:12px"></i>
+      </a>
+    </span>
+    {% endif %}
+    {% if filters.status %}
+    <span class="filter-chip">
+      Status: {{ filters.status|title }}
+      <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
+        <i data-lucide="x" style="width:12px;height:12px"></i>
+      </a>
+    </span>
+    {% endif %}
+    {% if filters.date_from %}
+    <span class="filter-chip">
+      From: {{ filters.date_from }}
+      <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
+        <i data-lucide="x" style="width:12px;height:12px"></i>
+      </a>
+    </span>
+    {% endif %}
+    {% if filters.date_to %}
+    <span class="filter-chip">
+      To: {{ filters.date_to }}
+      <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}{% endif %}" class="chip-remove">
+        <i data-lucide="x" style="width:12px;height:12px"></i>
+      </a>
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="table-responsive">
+  <table class="table table-soul table-hover mb-0">
+    <thead>
+      <tr>
+        <th style="width: 44px">
+          <input type="checkbox" class="form-check-input" id="selectAll" title="Select all actionable">
+        </th>
+        <th>User</th>
+        <th>Category</th>
+        <th>Status</th>
+        <th>Content</th>
+        <th style="width: 140px">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ad in page_obj %}
+      <tr data-ad-id="{{ ad.uuid }}" class="ad-main-row {% if ad.ai_suggested_reason %}ai-flagged{% endif %}">
+        <td class="align-middle">
+          {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
+          <input type="checkbox" class="form-check-input ad-select" value="{{ ad.uuid }}">
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="align-middle">
+          <div class="user-cell">
+            {% if ad.telegram_username %}
+            <span class="user-avatar">{{ ad.telegram_username|first|upper }}</span>
+            <span class="user-name">{{ ad.telegram_username }}</span>
+            {% else %}
+            <span class="user-avatar">?</span>
+            <span class="user-name text-muted">ID: {{ ad.telegram_user_id|default:"—" }}</span>
+            {% endif %}
+          </div>
+        </td>
+        <td class="align-middle"><span class="badge badge-cat {{ ad.category }}">{{ ad.get_category_display }}</span></td>
+        <td class="align-middle">
+          <span class="badge-glow {{ ad.status }}">{{ ad.get_status_display }}</span>
+        </td>
+        <td class="align-middle">
+          <div class="content-preview">
+            <span class="content-text">{{ ad.content|truncatewords:15 }}</span>
+            {% if ad.content|wordcount > 15 %}
+            <a href="#" class="view-more-link" data-bs-toggle="modal" data-bs-target="#contentModal{{ ad.uuid }}">View More</a>
+            {% endif %}
+          </div>
+        </td>
+        <td class="align-middle">
+          <div class="action-hub">
+            {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
+            <button type="button" class="action-btn action-approve" data-ad-id="{{ ad.uuid }}" title="Approve">
+              <i data-lucide="check" style="width:18px;height:18px"></i>
+            </button>
+            <button type="button" class="action-btn action-reject" data-ad-id="{{ ad.uuid }}" data-ai-reason="{{ ad.ai_suggested_reason|escapejs }}" title="Reject">
+              <i data-lucide="x" style="width:18px;height:18px"></i>
+            </button>
+            {% endif %}
+            <a href="{% url 'ad_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
+              <i data-lucide="external-link" style="width:18px;height:18px"></i>
+            </a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="6" class="empty-state-cell">
+          <div class="empty-state">
+            <i data-lucide="search-x" style="width:64px;height:64px;color:var(--brand-vivid);opacity:0.5;margin-bottom:1rem"></i>
+            <p class="empty-state-text">The queue is empty. You're all caught up!</p>
+            <p class="empty-state-subtext text-muted">No requests match your filters.</p>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Content Preview Modals -->
+{% for ad in page_obj %}
+<div class="modal modal-soul fade" id="contentModal{{ ad.uuid }}" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Full Content</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p style="white-space: pre-wrap; color: var(--text-main);">{{ ad.content }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<!-- Bulk actions bar (sticky footer) -->
+<div class="bulk-actions-bar" id="bulkBar">
+  <span class="count"><strong id="bulkCount">0</strong> selected</span>
+  <button type="button" class="btn btn-action" id="bulkApproveBtn">
+    <i data-lucide="check" style="width:16px;height:16px;vertical-align:middle"></i>
+    Approve selected
+  </button>
+  <button type="button" class="btn btn-hot" id="bulkRejectBtn">
+    <i data-lucide="x" style="width:16px;height:16px;vertical-align:middle"></i>
+    Reject selected
+  </button>
+  <button type="button" class="btn btn-secondary btn-sm" id="bulkClearBtn">Clear</button>
+</div>
+
+<!-- Pagination -->
+{% if page_obj.has_other_pages %}
+<nav class="mt-3 d-flex justify-content-center">
+  <ul class="pagination pagination-soul mb-0">
+    {% if page_obj.has_previous %}
+    <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if filters.category %}&category={{ filters.category }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.date_from %}&date_from={{ filters.date_from }}{% endif %}{% if filters.date_to %}&date_to={{ filters.date_to }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}">Previous</a></li>
+    {% endif %}
+    <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+    {% if page_obj.has_next %}
+    <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if filters.category %}&category={{ filters.category }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.date_from %}&date_from={{ filters.date_from }}{% endif %}{% if filters.date_to %}&date_to={{ filters.date_to }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}">Next</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
+
+<!-- Accept Modal -->
+<div class="modal modal-soul fade" id="acceptModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirm Approval</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted">This ad will be marked as approved and the user will be notified via Telegram.</p>
+        <input type="hidden" id="acceptAdId" value="">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-action" id="acceptConfirmBtn">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal modal-soul fade" id="rejectModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger">Reject Ad</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">Provide a reason (required). The user will receive this via Telegram.</p>
+        <div class="mb-2">
+          <label class="form-label small">Quick-select reason</label>
+          <select id="rejectQuickReason" class="form-select form-select-sm">
+            <option value="">— Choose or type below —</option>
+            {% for val, label in rejection_reasons %}
+            <option value="{{ label }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label small">Rejection reason</label>
+          <textarea id="rejectReasonText" class="form-control" rows="3" placeholder="Required"></textarea>
+        </div>
+        <input type="hidden" id="rejectAdId" value="">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-hot" id="rejectConfirmBtn">Reject</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Reject Modal -->
+<div class="modal modal-soul fade" id="bulkRejectModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger">Reject selected ads</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">One reason will be sent to all selected users.</p>
+        <label class="form-label small">Rejection reason (required)</label>
+        <textarea id="bulkRejectReason" class="form-control" rows="3" placeholder="Required"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-hot" id="bulkRejectConfirm">Reject all</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Mini Status Bar */
+.mini-status-bar {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-surface);
+  border: 1px solid rgba(124, 77, 255, 0.1);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: var(--text-main);
+  transition: all 0.3s ease;
+}
+
+.status-pill:hover {
+  border-color: rgba(124, 77, 255, 0.2);
+  box-shadow: 0 0 12px rgba(124, 77, 255, 0.15);
+}
+
+.status-pill i {
+  color: var(--brand-vivid);
+}
+
+.status-pill strong {
+  color: var(--brand-vivid);
+  font-weight: 600;
+}
+
+.status-pill.flagged i {
+  color: var(--brand-gold);
+}
+
+.status-pill.flagged strong {
+  color: var(--brand-gold);
+}
+
+.status-pill.priority i {
+  color: var(--accent-hot);
+}
+
+.status-pill.priority strong {
+  color: var(--accent-hot);
+}
+
+/* Filter Bar — Glassmorphic */
+.filter-bar-glass {
+  background: rgba(21, 25, 35, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(124, 77, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.filter-select,
+.filter-date {
+  background: var(--bg-obsidian) !important;
+  border: 1px solid #30363d !important;
+  color: var(--text-main) !important;
+}
+
+.filter-select:focus,
+.filter-date:focus {
+  border-color: var(--brand-vivid) !important;
+  box-shadow: 0 0 10px rgba(124, 77, 255, 0.5) !important;
+}
+
+/* Filter Chips */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(124, 77, 255, 0.1);
+  border: 1px solid rgba(124, 77, 255, 0.2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text-main);
+}
+
+.chip-remove {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.chip-remove:hover {
+  color: var(--brand-vivid);
+}
+
+/* Table — Dark Background */
+.table-responsive {
+  background: transparent !important;
+}
+
+.table-responsive .table,
+.table-responsive table {
+  background: var(--bg-surface) !important;
+  color: var(--text-main) !important;
+}
+
+.table-soul {
+  background: var(--bg-surface) !important;
+}
+
+.table-soul tbody {
+  background: var(--bg-surface) !important;
+}
+
+.table-soul tbody tr {
+  background: transparent !important;
+}
+
+.table-soul tbody tr:hover {
+  background: rgba(124, 77, 255, 0.05) !important;
+}
+
+/* Empty State */
+.empty-state-cell {
+  padding: 4rem 2rem !important;
+  background: var(--bg-surface) !important;
+}
+
+.empty-state {
+  text-align: center;
+}
+
+.empty-state i {
+  filter: drop-shadow(0 0 20px rgba(124, 77, 255, 0.3));
+  margin-bottom: 1rem;
+}
+
+.empty-state-text {
+  font-size: 1.1rem;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.empty-state-subtext {
+  font-size: 0.9rem;
+}
+
+/* User Cell */
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--soul-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(124, 77, 255, 0.3);
+}
+
+.user-name {
+  font-size: 0.875rem;
+  color: var(--text-main);
+}
+
+/* Content Preview */
+.content-preview {
+  max-width: 360px;
+}
+
+.content-text {
+  color: var(--text-muted);
+  display: inline;
+}
+
+.view-more-link {
+  color: var(--brand-vivid);
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.view-more-link:hover {
+  color: var(--brand-gold);
+}
+
+/* Action Hub — Icon Buttons */
+.action-hub {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid rgba(124, 77, 255, 0.2);
+  background: rgba(124, 77, 255, 0.05);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  padding: 0;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  border-color: currentColor;
+}
+
+.action-approve:hover {
+  color: var(--action-cyan);
+  background: rgba(0, 229, 255, 0.1);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+}
+
+.action-reject:hover {
+  color: var(--accent-hot);
+  background: rgba(255, 61, 0, 0.1);
+  box-shadow: 0 0 12px rgba(255, 61, 0, 0.4);
+}
+
+.action-view:hover {
+  color: var(--brand-vivid);
+  background: rgba(124, 77, 255, 0.1);
+  box-shadow: 0 0 12px rgba(124, 77, 255, 0.4);
+}
+
+/* Row Hover — Lift Effect */
+.ad-main-row {
+  transition: all 0.3s ease;
+}
+
+.ad-main-row:hover {
+  transform: translateY(-2px);
+  background: rgba(124, 77, 255, 0.05) !important;
+  box-shadow: 0 4px 12px rgba(124, 77, 255, 0.15);
+}
+
+/* AI Flagged Row — Pulsing Border */
+.ad-main-row.ai-flagged {
+  border-left: 3px solid var(--brand-gold);
+  animation: pulseBorder 2s ease-in-out infinite;
+}
+
+@keyframes pulseBorder {
+  0%, 100% { border-left-color: var(--brand-gold); }
+  50% { border-left-color: rgba(255, 193, 7, 0.5); }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  lucide.createIcons();
+
+  const acceptModal = document.getElementById('acceptModal');
+  const rejectModal = document.getElementById('rejectModal');
+  const acceptAdId = document.getElementById('acceptAdId');
+  const rejectAdId = document.getElementById('rejectAdId');
+  const rejectReasonText = document.getElementById('rejectReasonText');
+  const rejectQuickReason = document.getElementById('rejectQuickReason');
+  const bulkBar = document.getElementById('bulkBar');
+  const bulkCountEl = document.getElementById('bulkCount');
+  const selectAll = document.getElementById('selectAll');
+  const bulkRejectModal = document.getElementById('bulkRejectModal');
+  const bulkRejectReason = document.getElementById('bulkRejectReason');
+
+  function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.ad-select:checked')).map(cb => cb.value);
+  }
+
+  function updateBulkBar() {
+    const ids = getSelectedIds();
+    bulkCountEl.textContent = ids.length;
+    if (ids.length > 0) {
+      bulkBar.classList.add('show');
+    } else {
+      bulkBar.classList.remove('show');
+    }
+    selectAll.checked = ids.length > 0 && document.querySelectorAll('.ad-select').length === ids.length;
+  }
+
+  document.querySelectorAll('.ad-select').forEach(cb => cb.addEventListener('change', updateBulkBar));
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      document.querySelectorAll('.ad-select').forEach(cb => { cb.checked = selectAll.checked; });
+      updateBulkBar();
+    });
+  }
+
+  // Action buttons
+  document.querySelectorAll('.action-approve').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      acceptAdId.value = this.getAttribute('data-ad-id');
+      new bootstrap.Modal(acceptModal).show();
+    });
+  });
+
+  document.getElementById('acceptConfirmBtn').addEventListener('click', function() {
+    const id = acceptAdId.value;
+    if (!id) return;
+    fetch('{% url "approve_ad" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_id: id })
+    })
+    .then(r => r.json())
+    .then(data => {
+      bootstrap.Modal.getInstance(acceptModal).hide();
+      if (data.status === 'success') {
+        const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
+        if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
+      } else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+
+  document.querySelectorAll('.action-reject').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      rejectAdId.value = this.getAttribute('data-ad-id');
+      rejectReasonText.value = this.getAttribute('data-ai-reason') || '';
+      rejectQuickReason.value = '';
+      new bootstrap.Modal(rejectModal).show();
+    });
+  });
+
+  rejectQuickReason.addEventListener('change', function() {
+    if (this.value) rejectReasonText.value = this.value;
+  });
+
+  document.getElementById('rejectConfirmBtn').addEventListener('click', function() {
+    const id = rejectAdId.value;
+    const reason = rejectReasonText.value.trim();
+    if (!id) return;
+    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    fetch('{% url "reject_ad" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_id: id, reason: reason })
+    })
+    .then(r => r.json())
+    .then(data => {
+      bootstrap.Modal.getInstance(rejectModal).hide();
+      if (data.status === 'success') {
+        const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
+        if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
+      } else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+
+  document.getElementById('bulkClearBtn').addEventListener('click', function() {
+    document.querySelectorAll('.ad-select:checked').forEach(cb => { cb.checked = false; });
+    if (selectAll) selectAll.checked = false;
+    updateBulkBar();
+  });
+
+  document.getElementById('bulkApproveBtn').addEventListener('click', function() {
+    const ids = getSelectedIds();
+    if (ids.length === 0) { alert('Select at least one ad.'); return; }
+    fetch('{% url "bulk_approve" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_ids: ids })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'success') {
+        ids.forEach(id => {
+          const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
+          if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
+        });
+        document.querySelectorAll('.ad-select:checked').forEach(cb => { cb.checked = false; });
+        if (selectAll) selectAll.checked = false;
+        updateBulkBar();
+        alert('Approved ' + data.approved_count + ' ad(s).');
+      } else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+
+  document.getElementById('bulkRejectBtn').addEventListener('click', function() {
+    if (getSelectedIds().length === 0) { alert('Select at least one ad.'); return; }
+    bulkRejectReason.value = '';
+    new bootstrap.Modal(bulkRejectModal).show();
+  });
+
+  document.getElementById('bulkRejectConfirm').addEventListener('click', function() {
+    const reason = bulkRejectReason.value.trim();
+    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    const ids = getSelectedIds();
+    fetch('{% url "bulk_reject" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ ad_ids: ids, reason: reason })
+    })
+    .then(r => r.json())
+    .then(data => {
+      bootstrap.Modal.getInstance(bulkRejectModal).hide();
+      if (data.status === 'success') {
+        ids.forEach(id => {
+          const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
+          if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
+        });
+        document.querySelectorAll('.ad-select:checked').forEach(cb => { cb.checked = false; });
+        if (selectAll) selectAll.checked = false;
+        updateBulkBar();
+        alert('Rejected ' + data.rejected_count + ' ad(s).');
+      } else alert(data.message || 'Error');
+    })
+    .catch(() => alert('Request failed'));
+  });
+})();
+</script>
+{% endblock %}
