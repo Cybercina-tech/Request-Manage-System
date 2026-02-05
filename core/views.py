@@ -2,7 +2,9 @@
 Iranio — Staff-only views. Request/response only; business logic in services.
 """
 
+import logging
 from datetime import timedelta
+
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -25,6 +27,8 @@ from .services import (
 from .services.dashboard import get_dashboard_context, get_pulse_data
 from .services.ad_actions import approve_one_ad, reject_one_ad
 from .view_utils import parse_request_json
+
+logger = logging.getLogger(__name__)
 
 
 def landing(request):
@@ -382,6 +386,15 @@ def bot_create(request):
         else:
             bot.status = TelegramBot.Status.ERROR
         bot.save()
+        # Register webhook with Telegram so updates are delivered
+        if bot.webhook_url:
+            set_ok, set_msg = set_webhook(
+                bot.get_decrypted_token(),
+                bot.webhook_url,
+                secret_token=bot.webhook_secret or None,
+            )
+            if not set_ok:
+                logger.warning("Bot create: set_webhook failed for bot_id=%s: %s", bot.pk, set_msg)
         return JsonResponse({'status': 'success', 'redirect': reverse('bot_edit', kwargs={'pk': bot.pk})})
     return render(request, 'core/bot_form.html', {'bot': None, 'is_create': True})
 
@@ -401,6 +414,17 @@ def bot_edit(request, pk):
         bot.webhook_url = (request.POST.get('webhook_url') or '').strip()
         bot.webhook_secret = (request.POST.get('webhook_secret') or '').strip()[:64]
         bot.save()
+        # Keep Telegram webhook in sync when URL or secret changes
+        if bot.webhook_url:
+            set_ok, set_msg = set_webhook(
+                bot.get_decrypted_token(),
+                bot.webhook_url,
+                secret_token=bot.webhook_secret or None,
+            )
+            if not set_ok:
+                logger.warning("Bot edit: set_webhook failed for bot_id=%s: %s", bot.pk, set_msg)
+        else:
+            delete_webhook(bot.get_decrypted_token())
         return JsonResponse({'status': 'success'})
     context = {'bot': bot, 'is_create': False}
     return render(request, 'core/bot_form.html', context)

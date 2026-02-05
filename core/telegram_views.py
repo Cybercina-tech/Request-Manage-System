@@ -1,6 +1,15 @@
 """
 Iranio — Telegram webhook endpoint. No business logic; delegates to conversation engine.
 Validates secret token; rate limits per user.
+
+How updates work (webhook mode):
+- Telegram sends POST to the URL you set via setWebhook (HTTPS required).
+- This view receives the update, parses message/edited_message/callback_query,
+  runs the conversation engine, and sends the reply via sendMessage.
+- No polling: the Django server must be running and the webhook URL must be
+  set in Telegram (Bots > Edit > Webhook URL, then save or Regenerate webhook).
+- Run: start Django (e.g. gunicorn or runserver with HTTPS). Ensure the
+  webhook URL is exactly: https://<your-domain>/telegram/webhook/<bot_id>/
 """
 
 import json
@@ -27,9 +36,11 @@ WEBHOOK_RATE_WINDOW = 60  # seconds
 def telegram_webhook(request, bot_id: int):
     """
     Telegram webhook: verify secret, parse update, route to conversation engine, send reply.
+    Always returns 200 on success or after handling errors so Telegram does not retry indefinitely.
     """
     bot = TelegramBot.objects.filter(pk=bot_id, is_active=True).first()
     if not bot:
+        logger.warning("Webhook: bot_id=%s not found or inactive", bot_id)
         return HttpResponse(status=404)
 
     # Verify secret token if configured
@@ -41,14 +52,21 @@ def telegram_webhook(request, bot_id: int):
 
     try:
         body = json.loads(request.body)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("Webhook invalid JSON bot_id=%s: %s", bot_id, e)
         return HttpResponse(status=400)
 
-    # Log raw update (optional)
-    logger.debug("Telegram update bot_id=%s: %s", bot_id, json.dumps(body)[:500])
+    update_id = body.get("update_id")
+    logger.info(
+        "Telegram update received bot_id=%s update_id=%s",
+        bot_id,
+        update_id,
+        extra={"update_keys": list(body.keys())},
+    )
 
     user_id = _get_telegram_user_id(body)
     if not user_id:
+        logger.debug("Webhook bot_id=%s update_id=%s: no user id (e.g. channel post), ack", bot_id, update_id)
         return HttpResponse(status=200)
 
     # Rate limit per user per bot
@@ -61,12 +79,25 @@ def telegram_webhook(request, bot_id: int):
 
     chat_id, text, callback_data = _parse_update(body)
     if chat_id is None:
-        return HttpResponse(status=200)  # Not a message we handle; ack anyway
+        logger.debug("Webhook bot_id=%s update_id=%s: no message/callback to handle, ack", bot_id, update_id)
+        return HttpResponse(status=200)
+
+    logger.info(
+        "Telegram message received bot_id=%s chat_id=%s user_id=%s text=%s callback=%s",
+        bot_id,
+        chat_id,
+        user_id,
+        (text or "")[:100] if text else None,
+        callback_data,
+    )
 
     # Create/update Telegram user before any conversation logic
-    get_or_create_user_from_update(body)
+    try:
+        get_or_create_user_from_update(body)
+    except Exception as e:
+        logger.exception("Webhook get_or_create_user_from_update failed bot_id=%s: %s", bot_id, e)
+        # Continue; we can still reply
 
-    # Log inbound (optional)
     try:
         inbound_text = text or (f"[callback:{callback_data}]" if callback_data else "")
         if inbound_text:
@@ -80,15 +111,28 @@ def telegram_webhook(request, bot_id: int):
     except Exception as e:
         logger.debug("Message log create failed: %s", e)
 
-    engine = ConversationEngine(bot)
-    session = engine.get_or_create_session(user_id)
-    response = engine.process_update(session, text=text, callback_data=callback_data)
+    try:
+        engine = ConversationEngine(bot)
+        session = engine.get_or_create_session(user_id)
+        response = engine.process_update(session, text=text, callback_data=callback_data)
+    except Exception as e:
+        logger.exception("Webhook conversation failed bot_id=%s user_id=%s: %s", bot_id, user_id, e)
+        return HttpResponse(status=200)
 
     text_out = response.get("text")
     reply_markup = response.get("reply_markup")
     if text_out:
-        send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
-        # Store message history (optional)
+        try:
+            sent = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            logger.info(
+                "Telegram reply sent bot_id=%s chat_id=%s sent=%s len=%s",
+                bot_id,
+                chat_id,
+                sent,
+                len(text_out),
+            )
+        except Exception as e:
+            logger.exception("Webhook send_telegram_message_via_bot failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
         try:
             TelegramMessageLog.objects.create(
                 bot=bot,
@@ -99,27 +143,44 @@ def telegram_webhook(request, bot_id: int):
             )
         except Exception as e:
             logger.debug("Message log create failed: %s", e)
+    else:
+        logger.debug("Webhook bot_id=%s: no text in response, nothing to send", bot_id)
 
     return HttpResponse(status=200)
 
 
 def _get_telegram_user_id(body: dict) -> int:
-    """Extract telegram user id from update."""
-    msg = body.get("message") or body.get("callback_query", {}).get("message") or {}
-    from_user = (body.get("message") or {}).get("from") or (body.get("callback_query") or {}).get("from") or {}
-    return int(from_user.get("id", 0))
+    """Extract telegram user id from update (message, edited_message, or callback_query)."""
+    from_user = (
+        (body.get("message") or {}).get("from")
+        or (body.get("edited_message") or {}).get("from")
+        or (body.get("callback_query") or {}).get("from")
+        or {}
+    )
+    try:
+        return int(from_user.get("id", 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _parse_update(body: dict) -> tuple:
     """
     Parse update. Returns (chat_id, text, callback_data).
-    chat_id None if no message/callback to process.
+    chat_id None if no message/edited_message/callback to process.
+    Supports: message, edited_message, callback_query.
     """
     # Message
     message = body.get("message")
     if message:
         chat_id = message.get("chat", {}).get("id")
         text = (message.get("text") or "").strip()
+        return (chat_id, text or None, None)
+
+    # Edited message (treat like message)
+    edited = body.get("edited_message")
+    if edited:
+        chat_id = edited.get("chat", {}).get("id")
+        text = (edited.get("text") or "").strip()
         return (chat_id, text or None, None)
 
     # Callback query

@@ -41,10 +41,11 @@
     </div>
   </div>
   <div class="mb-3">
-    <label class="form-label">Webhook URL (optional)</label>
+    <label class="form-label">Webhook URL (required for bot to receive messages)</label>
     <input type="url" class="form-control" name="webhook_url"
            value="{% if bot %}{{ bot.webhook_url }}{% endif %}"
-           placeholder="https://your-domain.com/telegram/webhook/1/">
+           placeholder="https://your-domain.com/telegram/webhook/{% if bot %}{{ bot.pk }}{% else %}1{% endif %}/">
+    <small class="text-muted">HTTPS only. Example: <code>https://your-domain.com/telegram/webhook/{% if bot %}{{ bot.pk }}{% else %}1{% endif %}/</code> — Save registers it with Telegram.</small>
   </div>
   <div class="mb-3">
     <label class="form-label">Webhook secret (optional, for verification)</label>

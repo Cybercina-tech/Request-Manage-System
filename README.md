@@ -312,8 +312,9 @@ Used by the dashboard for auto-refresh.
   - After **approve:** `send_telegram_message(chat_id, approval_message_template.format(ad_id=...), config)`.  
   - After **reject:** `send_telegram_rejection_with_button(chat_id, rejection_message_template.format(...), ad_uuid, config)` — adds inline button with `https://t.me/<username>?start=resubmit_<uuid>`.
 - **Testing:** Settings page can POST to `/settings/test-telegram/` with a token to run `getMe` (token is not saved by that request).
-
-The app does not implement the Telegram webhook handler itself; an external service (or bot process) should receive Telegram updates and call `/api/submit/` with the appropriate payload.
+- **Update handling:** **Webhook only** (no polling). Telegram sends POST to your server; no separate bot process.
+- **Endpoint:** `POST /telegram/webhook/<bot_id>/` — receives updates, runs conversation engine, sends replies.
+- **How to run the bot:** (1) Run Django with **HTTPS**. (2) In **Bots** → Create/Edit, set **Webhook URL** to `https://<your-domain>/telegram/webhook/<bot_id>/` and save — the app auto-calls `setWebhook`. (3) Send `/start` to the bot; you should get the language selection. If the bot does not respond, ensure the webhook URL is saved (so Telegram receives it), the server is reachable over HTTPS, and the bot is Active. Use `python manage.py check_telegram --bot-id 1` to test.
 
 ---
 
