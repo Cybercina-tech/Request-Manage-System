@@ -14,7 +14,15 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.core.paginator import Paginator
 
-from .models import AdRequest, SiteConfiguration, TelegramBot, REJECTION_REASONS
+from .models import (
+    AdRequest,
+    SiteConfiguration,
+    TelegramBot,
+    InstagramConfiguration,
+    ApiClient,
+    DeliveryLog,
+    REJECTION_REASONS,
+)
 from .services import (
     clean_ad_text,
     run_ai_moderation,
@@ -377,6 +385,9 @@ def bot_create(request):
         bot.set_token(token)
         bot.username = (request.POST.get('username') or '').strip().lstrip('@')[:64]
         bot.is_active = request.POST.get('is_active') == 'on'
+        bot.mode = (request.POST.get('mode') or TelegramBot.Mode.POLLING).strip() or TelegramBot.Mode.POLLING
+        if bot.mode not in dict(TelegramBot.Mode.choices):
+            bot.mode = TelegramBot.Mode.POLLING
         bot.webhook_url = (request.POST.get('webhook_url') or '').strip()
         bot.webhook_secret = (request.POST.get('webhook_secret') or '').strip()[:64]
         ok, msg = test_telegram_connection(bot.get_decrypted_token())
@@ -411,6 +422,9 @@ def bot_edit(request, pk):
             bot.set_token(new_token)
         bot.username = (request.POST.get('username') or '').strip().lstrip('@')[:64]
         bot.is_active = request.POST.get('is_active') == 'on'
+        mode = (request.POST.get('mode') or bot.mode or TelegramBot.Mode.POLLING).strip()
+        if mode in dict(TelegramBot.Mode.choices):
+            bot.mode = mode
         bot.webhook_url = (request.POST.get('webhook_url') or '').strip()
         bot.webhook_secret = (request.POST.get('webhook_secret') or '').strip()[:64]
         bot.save()
@@ -471,3 +485,170 @@ def bot_regenerate_webhook(request, pk):
         bot.webhook_url = url
         bot.save(update_fields=['webhook_url'])
     return JsonResponse({'success': ok, 'message': msg})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def bot_start(request, pk):
+    """Request start of polling worker. runbots process will apply it."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    if bot.mode != TelegramBot.Mode.POLLING:
+        return JsonResponse({'status': 'error', 'message': 'Only polling bots can be started'}, status=400)
+    bot.requested_action = TelegramBot.RequestedAction.START
+    bot.save(update_fields=['requested_action'])
+    return JsonResponse({'status': 'success', 'message': 'Start requested. Run python manage.py runbots if not running.'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def bot_stop(request, pk):
+    """Request stop of polling worker."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    if bot.mode != TelegramBot.Mode.POLLING:
+        return JsonResponse({'status': 'error', 'message': 'Only polling bots can be stopped'}, status=400)
+    bot.requested_action = TelegramBot.RequestedAction.STOP
+    bot.save(update_fields=['requested_action'])
+    return JsonResponse({'status': 'success', 'message': 'Stop requested.'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def bot_restart(request, pk):
+    """Request restart of polling worker."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    if bot.mode != TelegramBot.Mode.POLLING:
+        return JsonResponse({'status': 'error', 'message': 'Only polling bots can be restarted'}, status=400)
+    bot.requested_action = TelegramBot.RequestedAction.RESTART
+    bot.save(update_fields=['requested_action'])
+    return JsonResponse({'status': 'success', 'message': 'Restart requested.'})
+
+
+# ---------- Instagram settings ----------
+
+@staff_member_required
+@require_http_methods(['GET'])
+def settings_instagram(request):
+    """List Instagram configurations; link to add/edit."""
+    configs = InstagramConfiguration.objects.all().order_by('username')
+    return render(request, 'core/settings_instagram.html', {'configs': configs})
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def settings_instagram_edit(request, pk=None):
+    """Create or edit Instagram config. Token encrypted; test connection."""
+    from core.services.instagram import InstagramService
+
+    config = get_object_or_404(InstagramConfiguration, pk=pk) if pk else None
+    if request.method == 'POST':
+        username = (request.POST.get('username') or '').strip()
+        if not username:
+            return JsonResponse({'status': 'error', 'message': 'Username is required'}, status=400)
+        token = (request.POST.get('access_token') or '').strip()
+        if not config and not token:
+            return JsonResponse({'status': 'error', 'message': 'Access token is required for new config'}, status=400)
+        if not config:
+            config = InstagramConfiguration(username=username)
+        else:
+            config.username = username
+        if token and token != (getattr(config, '_masked', '') or '••••••••'):
+            config.set_access_token(token)
+        config.page_id = (request.POST.get('page_id') or '').strip()[:64]
+        config.ig_user_id = (request.POST.get('ig_user_id') or '').strip()[:64]
+        config.placeholder_image_url = (request.POST.get('placeholder_image_url') or '').strip()
+        config.is_active = request.POST.get('is_active') == 'on'
+        config.save()
+        return JsonResponse({'status': 'success', 'redirect': reverse('settings_instagram')})
+    return render(request, 'core/settings_instagram_form.html', {'config': config, 'is_create': config is None})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def settings_instagram_test(request, pk):
+    """Test Instagram credentials. Returns JSON { success, message }."""
+    from core.services.instagram import InstagramService
+
+    config = get_object_or_404(InstagramConfiguration, pk=pk)
+    ok, msg = InstagramService.validate_credentials(config)
+    return JsonResponse({'success': ok, 'message': msg})
+
+
+# ---------- API clients ----------
+
+@staff_member_required
+@require_http_methods(['GET'])
+def settings_api(request):
+    """List API clients; create, regenerate key, rate limit, revoke."""
+    clients = ApiClient.objects.all().order_by('name')
+    return render(request, 'core/settings_api.html', {'clients': clients})
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def settings_api_edit(request, pk=None):
+    """Create or edit API client. New key shown once on create."""
+    from core.encryption import hash_api_key
+    import secrets
+
+    client = get_object_or_404(ApiClient, pk=pk) if pk else None
+    new_key_plain = None
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        if not name:
+            return JsonResponse({'status': 'error', 'message': 'Name is required'}, status=400)
+        if not client:
+            new_key_plain = secrets.token_urlsafe(32)
+            client = ApiClient(name=name, api_key_hashed=hash_api_key(new_key_plain))
+        else:
+            client.name = name
+        client.rate_limit_per_min = max(1, min(1000, int(request.POST.get('rate_limit_per_min') or 60)))
+        client.is_active = request.POST.get('is_active') == 'on'
+        if request.POST.get('regenerate_key') == 'on' and client.pk:
+            new_key_plain = secrets.token_urlsafe(32)
+            client.api_key_hashed = hash_api_key(new_key_plain)
+        client.save()
+        if new_key_plain:
+            return JsonResponse({
+                'status': 'success',
+                'redirect': reverse('settings_api'),
+                'new_key': new_key_plain,
+                'message': 'Save successful. Copy the API key now; it will not be shown again.',
+            })
+        return JsonResponse({'status': 'success', 'redirect': reverse('settings_api')})
+    return render(request, 'core/settings_api_form.html', {'client': client, 'is_create': client is None})
+
+
+# ---------- Delivery log ----------
+
+@staff_member_required
+@require_http_methods(['GET'])
+def delivery_list(request):
+    """List delivery logs; filter by channel/status; retry failed."""
+    qs = DeliveryLog.objects.select_related('ad').order_by('-created_at')
+    channel = request.GET.get('channel', '').strip()
+    status = request.GET.get('status', '').strip()
+    if channel and channel in dict(DeliveryLog.Channel.choices):
+        qs = qs.filter(channel=channel)
+    if status and status in dict(DeliveryLog.DeliveryStatus.choices):
+        qs = qs.filter(status=status)
+    paginator = Paginator(qs, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'core/delivery_list.html', {
+        'page_obj': page_obj,
+        'channel_choices': DeliveryLog.Channel.choices,
+        'status_choices': DeliveryLog.DeliveryStatus.choices,
+        'filters': {'channel': channel, 'status': status},
+    })
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def delivery_retry(request, pk):
+    """Retry delivery for a failed log. Returns JSON."""
+    from core.services.delivery import DeliveryService
+
+    log = get_object_or_404(DeliveryLog, pk=pk)
+    if log.status != DeliveryLog.DeliveryStatus.FAILED:
+        return JsonResponse({'status': 'error', 'message': 'Only failed deliveries can be retried'}, status=400)
+    ok = DeliveryService.send(log.ad, log.channel)
+    return JsonResponse({'status': 'success', 'delivery_ok': ok})

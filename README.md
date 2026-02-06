@@ -316,6 +316,21 @@ Used by the dashboard for auto-refresh.
 - **Endpoint:** `POST /telegram/webhook/<bot_id>/` — receives updates, runs conversation engine, sends replies.
 - **How to run the bot:** (1) Run Django with **HTTPS**. (2) In **Bots** → Create/Edit, set **Webhook URL** to `https://<your-domain>/telegram/webhook/<bot_id>/` and save — the app auto-calls `setWebhook`. (3) Send `/start` to the bot; you should get the language selection. If the bot does not respond, ensure the webhook URL is saved (so Telegram receives it), the server is reachable over HTTPS, and the bot is Active. Use `python manage.py check_telegram --bot-id 1` to test.
 
+### Running Bots in Production (Polling)
+
+For **polling mode** (no HTTPS required for receiving updates), use the built-in bot runtime:
+
+1. **Create a bot** in **Bots** → Add bot; set **Mode** to **Polling**.
+2. **Start the supervisor** (keeps workers alive, restarts crashed bots):
+   ```bash
+   python manage.py runbots [--log-dir=logs]
+   ```
+3. Leave this process running. It starts one child process per active polling bot, each running a long-polling `getUpdates` loop. Logs go to `logs/bot_<id>.log` (rotated daily).
+4. From the **Bots** page you can **Start** / **Stop** / **Restart** workers (requests are applied on the next supervisor tick). Worker **PID** and **Uptime** are shown when running.
+5. **Webhook vs Polling:** Set **Mode** to **Webhook** to use the HTTP endpoint instead; then no worker is started for that bot and Telegram POSTs updates to your server.
+
+No external supervisors (pm2/systemd/docker) are required; use `runbots` as the main runtime for polling bots.
+
 ---
 
 ## Settings & Configuration

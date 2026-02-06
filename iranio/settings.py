@@ -33,6 +33,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.LoginRequiredMiddleware',
+    'core.middleware.ApiKeyAuthMiddleware',
 ]
 
 ROOT_URLCONF = 'iranio.urls'

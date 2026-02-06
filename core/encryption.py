@@ -59,3 +59,19 @@ def mask_token(token: str, visible: int = 4) -> str:
     if not token or len(token) <= visible:
         return '••••••••'
     return '••••••••' + token[-visible:]
+
+
+def hash_api_key(plain: str) -> str:
+    """One-way hash for API keys. Use verify_api_key for constant-time comparison."""
+    if not plain:
+        return ''
+    from django.contrib.auth.hashers import make_password
+    return make_password(plain, hasher='default')
+
+
+def verify_api_key(plain: str, hashed: str) -> bool:
+    """Constant-time verification of API key against stored hash."""
+    if not plain or not hashed:
+        return False
+    from django.contrib.auth.hashers import check_password
+    return check_password(plain, hashed)

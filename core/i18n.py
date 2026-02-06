@@ -83,6 +83,35 @@ MESSAGES = {
     "category_services": {"en": "Services", "fa": "خدمات"},
     "category_sale": {"en": "Sale", "fa": "فروش"},
     "category_other": {"en": "Other", "fa": "سایر"},
+    # Resubmit flow (Edit & Resubmit)
+    "resubmit_intro": {
+        "en": "Edit & Resubmit: Here is your rejected ad. Send your new text below.",
+        "fa": "ویرایش و ارسال مجدد: آگهی رد شده شما در زیر است. متن جدید خود را بفرستید.",
+    },
+    "resubmit_edit_prompt": {
+        "en": "Send your new ad text (you can copy and edit the text above).",
+        "fa": "متن جدید آگهی را بفرستید (می‌توانید متن بالا را کپی و ویرایش کنید).",
+    },
+    "resubmit_confirm": {
+        "en": "Submit this new version?",
+        "fa": "این نسخه جدید ارسال شود؟",
+    },
+    "resubmit_success": {
+        "en": "Your revised ad has been submitted. We will notify you when it is reviewed.",
+        "fa": "آگهی اصلاح شده شما ثبت شد. پس از بررسی به شما اطلاع می‌دهیم.",
+    },
+    "resubmit_error_not_found": {
+        "en": "This ad could not be found. Please start from the main menu.",
+        "fa": "این آگهی یافت نشد. لطفاً از منوی اصلی شروع کنید.",
+    },
+    "resubmit_error_not_rejected": {
+        "en": "This ad is not eligible for resubmission. Please create a new ad from the main menu.",
+        "fa": "این آگهی قابل ارسال مجدد نیست. لطفاً از منوی اصلی آگهی جدید ثبت کنید.",
+    },
+    "resubmit_error_not_yours": {
+        "en": "You can only resubmit your own ads. Please use the main menu.",
+        "fa": "فقط آگهی‌های خودتان قابل ارسال مجدد هستند. لطفاً از منوی اصلی استفاده کنید.",
+    },
 }
 
 

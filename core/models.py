@@ -195,6 +195,14 @@ class AdRequest(models.Model):
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
     approved_at = models.DateTimeField(null=True, blank=True)
+    submitted_via_api_client = models.ForeignKey(
+        'ApiClient',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='submitted_ads',
+        help_text='If set, ad was submitted via Partner API by this client',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -219,10 +227,25 @@ class TelegramBot(models.Model):
         OFFLINE = 'offline', 'Offline'
         ERROR = 'error', 'Error'
 
+    class Mode(models.TextChoices):
+        WEBHOOK = 'webhook', 'Webhook'
+        POLLING = 'polling', 'Polling'
+
+    class RequestedAction(models.TextChoices):
+        START = 'start', 'Start'
+        STOP = 'stop', 'Stop'
+        RESTART = 'restart', 'Restart'
+
     name = models.CharField(max_length=128, help_text='Human-readable name')
     bot_token_encrypted = models.TextField(blank=True)  # Encrypted at rest; never expose in templates
     username = models.CharField(max_length=64, blank=True, help_text='Bot username without @')
     is_active = models.BooleanField(default=True)
+    mode = models.CharField(
+        max_length=16,
+        choices=Mode.choices,
+        default=Mode.POLLING,
+        help_text='Webhook: updates via HTTP. Polling: runbots worker fetches getUpdates.',
+    )
     webhook_url = models.URLField(blank=True)
     webhook_secret = models.CharField(max_length=64, blank=True, help_text='Secret for webhook verification')
     last_heartbeat = models.DateTimeField(null=True, blank=True)
@@ -231,6 +254,15 @@ class TelegramBot(models.Model):
         choices=Status.choices,
         default=Status.OFFLINE,
         db_index=True
+    )
+    worker_pid = models.PositiveIntegerField(null=True, blank=True, help_text='PID of polling worker when running')
+    worker_started_at = models.DateTimeField(null=True, blank=True)
+    requested_action = models.CharField(
+        max_length=16,
+        choices=RequestedAction.choices,
+        blank=True,
+        null=True,
+        help_text='Start/Stop/Restart requested by admin; runbots applies it.',
     )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -269,6 +301,8 @@ class TelegramSession(models.Model):
         CONFIRM = 'CONFIRM', 'Confirm'
         SUBMITTED = 'SUBMITTED', 'Submitted'
         EDITING = 'EDITING', 'Editing'
+        RESUBMIT_EDIT = 'RESUBMIT_EDIT', 'Resubmit Edit'
+        RESUBMIT_CONFIRM = 'RESUBMIT_CONFIRM', 'Resubmit Confirm'
 
     telegram_user_id = models.BigIntegerField(db_index=True)
     bot = models.ForeignKey(TelegramBot, on_delete=models.CASCADE, related_name='sessions')
@@ -311,6 +345,94 @@ class TelegramMessageLog(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [models.Index(fields=['bot', 'telegram_user_id', 'created_at'])]
+
+
+class InstagramConfiguration(models.Model):
+    """Instagram (Meta Graph API) credentials. Token encrypted at rest."""
+
+    username = models.CharField(max_length=128, help_text='Instagram account username')
+    access_token_encrypted = models.TextField(blank=True)
+    page_id = models.CharField(max_length=64, blank=True, help_text='Facebook Page ID linked to Instagram')
+    ig_user_id = models.CharField(max_length=64, blank=True, help_text='Instagram Graph API user ID')
+    placeholder_image_url = models.URLField(blank=True, help_text='Default image for caption-only ads')
+    is_active = models.BooleanField(default=True)
+    last_test_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Instagram Configuration'
+        verbose_name_plural = 'Instagram Configurations'
+
+    def __str__(self):
+        return f'{self.username} (active={self.is_active})'
+
+    def get_decrypted_token(self):
+        return decrypt_token(self.access_token_encrypted)
+
+    def set_access_token(self, plain_token: str):
+        self.access_token_encrypted = encrypt_token((plain_token or '').strip())
+
+
+class ApiClient(models.Model):
+    """Partner API client. API key stored hashed (one-way)."""
+
+    name = models.CharField(max_length=128, help_text='Client identifier')
+    api_key_hashed = models.CharField(max_length=128)  # hashed via Django hashers
+    is_active = models.BooleanField(default=True)
+    rate_limit_per_min = models.PositiveIntegerField(default=60, help_text='Max requests per minute')
+    created_at = models.DateTimeField(default=timezone.now)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'API Client'
+        verbose_name_plural = 'API Clients'
+
+    def __str__(self):
+        return f'{self.name} (active={self.is_active})'
+
+
+class DeliveryLog(models.Model):
+    """Per-channel delivery result for an ad (approval notification / posting)."""
+
+    class DeliveryStatus(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        SUCCESS = 'success', 'Success'
+        FAILED = 'failed', 'Failed'
+
+    class Channel(models.TextChoices):
+        TELEGRAM = 'telegram', 'Telegram'
+        INSTAGRAM = 'instagram', 'Instagram'
+        API = 'api', 'API'
+
+    ad = models.ForeignKey(
+        AdRequest,
+        on_delete=models.CASCADE,
+        related_name='delivery_logs',
+    )
+    channel = models.CharField(max_length=24, choices=Channel.choices, db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.PENDING,
+        db_index=True,
+    )
+    response_payload = models.JSONField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['ad', 'channel']),
+            models.Index(fields=['status']),
+        ]
+        verbose_name = 'Delivery Log'
+        verbose_name_plural = 'Delivery Logs'
+
+    def __str__(self):
+        return f'{self.ad_id} {self.channel} {self.status}'
 
 
 # Common rejection reasons for quick-select in UI

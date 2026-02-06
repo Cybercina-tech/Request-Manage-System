@@ -133,6 +133,101 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345).count(), 0)
 
+    def test_start_resubmit_invalid_uuid_shows_error(self):
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.language = "en"
+        session.save(update_fields=["language"])
+        out = self.engine.process_update(session, text="/start resubmit_not-a-uuid")
+        self.assertIn("text", out)
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+
+    def test_start_resubmit_valid_rejected_ad_enters_resubmit_edit(self):
+        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        ad = AdRequest.objects.create(
+            content="Old rejected ad text",
+            category="other",
+            status=AdRequest.Status.REJECTED,
+            telegram_user_id=12345,
+            bot=self.bot,
+            user=user,
+        )
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.language = "en"
+        session.save(update_fields=["language"])
+        out = self.engine.process_update(session, text=f"/start resubmit_{ad.uuid}")
+        self.assertIn("text", out)
+        self.assertIn("Old rejected ad text", out["text"])
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.RESUBMIT_EDIT)
+        self.assertEqual(session.context.get("mode"), "resubmit")
+        self.assertEqual(session.context.get("original_ad_id"), str(ad.uuid))
+
+    def test_resubmit_ad_not_rejected_shows_error(self):
+        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        ad = AdRequest.objects.create(
+            content="Approved ad",
+            category="other",
+            status=AdRequest.Status.APPROVED,
+            telegram_user_id=12345,
+            bot=self.bot,
+            user=user,
+        )
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.language = "en"
+        session.save(update_fields=["language"])
+        out = self.engine.process_update(session, text=f"/start resubmit_{ad.uuid}")
+        self.assertIn("text", out)
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+
+    def test_resubmit_user_mismatch_shows_error(self):
+        other_user_id = 99999
+        TelegramUser.objects.create(telegram_user_id=other_user_id, username="other")
+        ad = AdRequest.objects.create(
+            content="Other user ad",
+            category="other",
+            status=AdRequest.Status.REJECTED,
+            telegram_user_id=other_user_id,
+            bot=self.bot,
+        )
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.language = "en"
+        session.save(update_fields=["language"])
+        out = self.engine.process_update(session, text=f"/start resubmit_{ad.uuid}")
+        self.assertIn("text", out)
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+
+    def test_resubmit_full_flow_creates_new_ad_and_marks_original_solved(self):
+        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        original = AdRequest.objects.create(
+            content="Rejected content",
+            category="rent",
+            status=AdRequest.Status.REJECTED,
+            telegram_user_id=12345,
+            bot=self.bot,
+            user=user,
+        )
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.language = "en"
+        session.save(update_fields=["language"])
+        self.engine.process_update(session, text=f"/start resubmit_{original.uuid}")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.RESUBMIT_EDIT)
+        self.engine.process_update(session, text="New revised ad text")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.RESUBMIT_CONFIRM)
+        self.engine.process_update(session, callback_data="confirm_yes")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
+        original.refresh_from_db()
+        self.assertEqual(original.status, AdRequest.Status.SOLVED)
+        new_ads = AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).exclude(uuid=original.uuid)
+        self.assertEqual(new_ads.count(), 1)
+        self.assertEqual(new_ads.get().content, "New revised ad text")
+        self.assertEqual(new_ads.get().category, "rent")
+
 
 class SubmitAdServiceTests(TestCase):
     """Internal submit_ad creates AdRequest and runs AI if enabled."""

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if is_create %}Add Instagram{% else %}Edit {{ config.username }}{% endif %}{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  {% if is_create %}Add Instagram{% else %}Edit {{ config.username }}{% endif %}
+</h1>
+
+<form id="igForm" class="form-soul card-soul" style="max-width: 560px;" action="{% if is_create %}{% url 'settings_instagram_create' %}{% else %}{% url 'settings_instagram_edit' config.pk %}{% endif %}" method="post">
+  {% csrf_token %}
+  <div class="mb-3">
+    <label class="form-label">Username</label>
+    <input type="text" class="form-control" name="username" required
+           value="{% if config %}{{ config.username }}{% endif %}" placeholder="instagram_username">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Access token (encrypted at rest)</label>
+    <input type="password" class="form-control" name="access_token"
+           placeholder="{% if config %}Leave blank to keep current{% else %}Meta Graph API token{% endif %}"
+           {% if is_create %}required{% endif %}>
+    <small class="text-muted">From Meta Developer / Facebook Login. Never stored in plain text.</small>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Page ID (optional)</label>
+    <input type="text" class="form-control" name="page_id" value="{% if config %}{{ config.page_id }}{% endif %}" placeholder="Facebook Page ID">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Instagram user ID (optional, auto-filled on test)</label>
+    <input type="text" class="form-control" name="ig_user_id" value="{% if config %}{{ config.ig_user_id }}{% endif %}" placeholder="IG Graph API user ID">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Placeholder image URL (for caption-only ads)</label>
+    <input type="url" class="form-control" name="placeholder_image_url" value="{% if config %}{{ config.placeholder_image_url }}{% endif %}" placeholder="https://...">
+  </div>
+  <div class="mb-3">
+    <div class="form-check form-switch">
+      <input class="form-check-input" type="checkbox" name="is_active" {% if not config or config.is_active %}checked{% endif %}>
+      <label class="form-check-label">Active (post approved ads to this account)</label>
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-soul">{% if is_create %}Create{% else %}Save{% endif %}</button>
+    <a href="{% url 'settings_instagram' %}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+<div id="formResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('igForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var resultEl = document.getElementById('formResult');
+  resultEl.textContent = '';
+  var formData = new FormData(this);
+  if (formData.get('access_token') === '') formData.delete('access_token');
+  fetch(this.action, { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'success') { resultEl.className = 'mt-2 small text-success'; resultEl.textContent = 'Saved.'; if (d.redirect) window.location.href = d.redirect; }
+      else { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = d.message || 'Error'; }
+    })
+    .catch(function() { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = 'Request failed'; });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}API Clients{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  API Clients
+</h1>
+<p class="text-muted mb-4">Partner API access. Create clients; use X-API-KEY header for /api/v1/ endpoints. Keys are hashed and cannot be retrieved.</p>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <span class="text-muted">{{ clients|length }} client(s)</span>
+  <a href="{% url 'settings_api_create' %}" class="btn btn-soul">
+    <i data-lucide="plus" class="me-1" style="width:18px;height:18px;vertical-align:middle"></i>
+    Add client
+  </a>
+</div>
+
+<div class="card-soul">
+  <div class="table-responsive">
+    <table class="table table-dark table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Active</th>
+          <th>Rate limit/min</th>
+          <th>Last used</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in clients %}
+        <tr>
+          <td><strong>{{ c.name }}</strong></td>
+          <td>{% if c.is_active %}<span class="badge bg-info">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
+          <td>{{ c.rate_limit_per_min }}</td>
+          <td>{{ c.last_used_at|timesince|default:"Never" }} ago</td>
+          <td><a href="{% url 'settings_api_edit' c.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">No API clients. Add one to allow partner access to /api/v1/.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

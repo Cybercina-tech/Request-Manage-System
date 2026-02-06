@@ -1,9 +1,11 @@
 """
 Iranio — Centralized conversation state machine (FA/EN).
 All logic here; views only parse update and call this.
+Handles /start, /start resubmit_<uuid>, and Edit & Resubmit flow.
 """
 
 import logging
+import uuid as uuid_module
 from django.utils import timezone
 
 from core.i18n import get_message
@@ -12,6 +14,9 @@ from core.services.submit_ad_service import SubmitAdService
 from core.services.users import update_contact_info
 
 logger = logging.getLogger(__name__)
+
+# Deep link prefix for Edit & Resubmit (matches t.me/bot?start=resubmit_<uuid>)
+RESUBMIT_START_PREFIX = "resubmit_"
 
 # Valid categories for keyboard
 CATEGORY_KEYS = [
@@ -49,12 +54,19 @@ class ConversationEngine:
         session.last_activity = timezone.now()
         lang = session.language or "en"
 
-        # /start resets to language selection
-        if text and text.strip().lower() == "/start":
-            session.state = TelegramSession.State.SELECT_LANGUAGE
-            session.context = {}
-            session.save(update_fields=["state", "context", "last_activity"])
-            return self._reply_select_language(session)
+        # /start: plain reset or deep link resubmit_<uuid>
+        if text and text.strip().lower().startswith("/start"):
+            stripped = text.strip()
+            if stripped.lower() == "/start":
+                session.state = TelegramSession.State.SELECT_LANGUAGE
+                session.context = {}
+                session.save(update_fields=["state", "context", "last_activity"])
+                return self._reply_select_language(session)
+            # /start resubmit_<uuid> (e.g. from t.me/bot?start=resubmit_<uuid>)
+            parts = stripped.split(None, 1)
+            if len(parts) >= 2 and parts[1].startswith(RESUBMIT_START_PREFIX):
+                uuid_str = parts[1][len(RESUBMIT_START_PREFIX) :].strip()
+                return self._handle_resubmit_start(session, uuid_str)
 
         if session.state == TelegramSession.State.START:
             session.state = TelegramSession.State.SELECT_LANGUAGE
@@ -165,6 +177,32 @@ class ConversationEngine:
                 return self._reply_main_menu(session)
             return self._reply_confirm(session)
 
+        if session.state == TelegramSession.State.RESUBMIT_EDIT:
+            if text and text.strip():
+                session.context["content"] = text.strip()[:4000]
+                session.state = TelegramSession.State.RESUBMIT_CONFIRM
+                session.save(update_fields=["state", "context", "last_activity"])
+                return self._reply_resubmit_confirm(session)
+            old_content = (session.context or {}).get("original_content", "")
+            return self._reply_resubmit_edit(session, old_content=old_content)
+
+        if session.state == TelegramSession.State.RESUBMIT_CONFIRM:
+            if callback_data == "confirm_yes":
+                ad, error_response = self._do_resubmit(session)
+                if error_response is not None:
+                    return error_response
+                if ad:
+                    session.state = TelegramSession.State.SUBMITTED
+                    session.context = {}
+                    session.save(update_fields=["state", "context", "last_activity"])
+                    return self._reply_resubmit_success(session)
+            if callback_data == "confirm_no":
+                session.state = TelegramSession.State.MAIN_MENU
+                session.context = {}
+                session.save(update_fields=["state", "context", "last_activity"])
+                return self._reply_main_menu(session)
+            return self._reply_resubmit_confirm(session)
+
         # SUBMITTED, EDITING, or unknown: show main menu
         session.state = TelegramSession.State.MAIN_MENU
         session.context = {}
@@ -195,6 +233,95 @@ class ConversationEngine:
             user=telegram_user,
             contact_snapshot=contact_snapshot,
         )
+
+    def _validate_resubmit_ad(self, uuid_str: str, telegram_user_id: int) -> tuple[AdRequest | None, str | None]:
+        """
+        Validate that the ad exists, is rejected, and belongs to this Telegram user.
+        Returns (ad, None) if valid, or (None, error_key) for i18n message.
+        """
+        try:
+            ad_uuid = uuid_module.UUID(uuid_str)
+        except (ValueError, TypeError):
+            logger.info("Resubmit invalid uuid: %s", uuid_str[:50] if uuid_str else "")
+            return None, "resubmit_error_not_found"
+
+        ad = AdRequest.objects.filter(uuid=ad_uuid).first()
+        if not ad:
+            logger.info("Resubmit ad not found: %s", ad_uuid)
+            return None, "resubmit_error_not_found"
+        if ad.status != AdRequest.Status.REJECTED:
+            logger.info("Resubmit ad not rejected: uuid=%s status=%s", ad_uuid, ad.status)
+            return None, "resubmit_error_not_rejected"
+        if ad.telegram_user_id != telegram_user_id:
+            logger.warning("Resubmit user mismatch: uuid=%s ad_user=%s session_user=%s", ad_uuid, ad.telegram_user_id, telegram_user_id)
+            return None, "resubmit_error_not_yours"
+        return ad, None
+
+    def _handle_resubmit_start(self, session: TelegramSession, uuid_str: str) -> dict | None:
+        """
+        Handle /start resubmit_<uuid>. Validate ad, set context and state RESUBMIT_EDIT, return reply.
+        On validation failure: set session to MAIN_MENU and return error reply (so next message gets main menu).
+        """
+        ad, error_key = self._validate_resubmit_ad(uuid_str, session.telegram_user_id)
+        if error_key is not None:
+            session.context = {}
+            session.state = TelegramSession.State.MAIN_MENU
+            session.save(update_fields=["state", "context", "last_activity"])
+            return self._reply_resubmit_error(session, error_key)
+
+        session.context = {
+            "mode": "resubmit",
+            "original_ad_id": str(ad.uuid),
+            "original_category": ad.category,
+            "original_content": ad.content or "",
+        }
+        session.state = TelegramSession.State.RESUBMIT_EDIT
+        session.save(update_fields=["state", "context", "last_activity"])
+        return self._reply_resubmit_edit(session, old_content=ad.content)
+
+    def _do_resubmit(self, session: TelegramSession) -> tuple[AdRequest | None, dict | None]:
+        """
+        Submit new ad from resubmit flow; mark original as solved.
+        Returns (new_ad, None) on success, or (None, error_response_dict) to send to user.
+        """
+        ctx = session.context or {}
+        original_ad_id = ctx.get("original_ad_id")
+        content = (ctx.get("content") or "").strip()
+        category = ctx.get("original_category") or AdRequest.Category.OTHER
+
+        if not original_ad_id or not content:
+            lang = session.language or "en"
+            return None, {"text": get_message("resubmit_error_not_found", lang)}
+
+        ad, error_key = self._validate_resubmit_ad(original_ad_id, session.telegram_user_id)
+        if error_key is not None:
+            return None, self._reply_resubmit_error(session, error_key)
+
+        telegram_user = TelegramUser.objects.filter(telegram_user_id=session.telegram_user_id).first()
+        contact_snapshot = {}
+        if telegram_user:
+            contact_snapshot = {
+                "phone": telegram_user.phone_number or "",
+                "email": telegram_user.email or "",
+                "verified_phone": telegram_user.phone_verified,
+                "verified_email": telegram_user.email_verified,
+            }
+
+        new_ad = SubmitAdService.submit(
+            content=content,
+            category=category,
+            telegram_user_id=session.telegram_user_id,
+            telegram_username=getattr(telegram_user, "username", None) if telegram_user else None,
+            bot=session.bot,
+            raw_telegram_json=None,
+            user=telegram_user,
+            contact_snapshot=contact_snapshot,
+        )
+        if new_ad:
+            ad.status = AdRequest.Status.SOLVED
+            ad.save(update_fields=["status"])
+            logger.info("Resubmit: original uuid=%s marked solved; new uuid=%s", ad.uuid, new_ad.uuid)
+        return new_ad, None
 
     def _reply_select_language(self, session: TelegramSession) -> dict:
         lang = session.language or "en"
@@ -293,4 +420,39 @@ class ConversationEngine:
     def _reply_submitted(self, session: TelegramSession) -> dict:
         lang = session.language or "en"
         text = get_message("submitted", lang)
+        return {"text": text}
+
+    def _reply_resubmit_edit(self, session: TelegramSession, old_content: str = "") -> dict:
+        """Show rejected ad content and ask user to send new text."""
+        lang = session.language or "en"
+        intro = get_message("resubmit_intro", lang)
+        prompt = get_message("resubmit_edit_prompt", lang)
+        if old_content:
+            text = f"{intro}\n\n———\n{old_content[:2000]}\n———\n\n{prompt}"
+        else:
+            text = f"{intro}\n\n{prompt}"
+        return {"text": text}
+
+    def _reply_resubmit_confirm(self, session: TelegramSession) -> dict:
+        """Confirm submission of the new version."""
+        lang = session.language or "en"
+        text = get_message("resubmit_confirm", lang)
+        yes_label = "Yes" if lang == "en" else "بله"
+        no_label = get_message("cancel", lang)
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": yes_label, "callback_data": "confirm_yes"}, {"text": no_label, "callback_data": "confirm_no"}]
+            ]
+        }
+        return {"text": text, "reply_markup": reply_markup}
+
+    def _reply_resubmit_success(self, session: TelegramSession) -> dict:
+        lang = session.language or "en"
+        text = get_message("resubmit_success", lang)
+        return {"text": text}
+
+    def _reply_resubmit_error(self, session: TelegramSession, error_key: str) -> dict:
+        """Send localized error and suggest main menu."""
+        lang = session.language or "en"
+        text = get_message(error_key, lang)
         return {"text": text}

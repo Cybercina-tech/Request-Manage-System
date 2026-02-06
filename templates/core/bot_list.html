@@ -7,7 +7,7 @@
 <h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
   Bots
 </h1>
-<p class="text-muted mb-4">Manage Telegram bots. Only active bots send and receive messages.</p>
+<p class="text-muted mb-4">Manage Telegram bots. Use <strong>Polling</strong> + <code>python manage.py runbots</code> for a long-running worker, or <strong>Webhook</strong> with HTTPS.</p>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <span class="text-muted">{{ bots|length }} bot(s)</span>
@@ -24,17 +24,34 @@
         <tr>
           <th>Name</th>
           <th>Username</th>
+          <th>Mode</th>
+          <th>Worker</th>
+          <th>PID</th>
+          <th>Uptime</th>
           <th>Status</th>
-          <th>Last heartbeat</th>
           <th>Active</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
         {% for bot in bots %}
-        <tr>
+        <tr data-bot-id="{{ bot.pk }}" data-mode="{{ bot.mode }}">
           <td><strong>{{ bot.name }}</strong></td>
           <td>{% if bot.username %}@{{ bot.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td><span class="badge {% if bot.mode == 'polling' %}bg-primary{% else %}bg-secondary{% endif %}">{{ bot.get_mode_display }}</span></td>
+          <td>
+            {% if bot.mode == 'polling' %}
+              {% if bot.worker_pid %}
+                <span class="badge bg-success">running</span>
+              {% else %}
+                <span class="badge bg-secondary">stopped</span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>{% if bot.worker_pid %}{{ bot.worker_pid }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td>{% if bot.worker_started_at %}{{ bot.worker_started_at|timesince }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>
             {% if bot.status == 'online' %}
               <span class="badge bg-success">Online</span>
@@ -45,13 +62,6 @@
             {% endif %}
           </td>
           <td>
-            {% if bot.last_heartbeat %}
-              {{ bot.last_heartbeat|timesince }} ago
-            {% else %}
-              <span class="text-muted">Never</span>
-            {% endif %}
-          </td>
-          <td>
             {% if bot.is_active %}
               <span class="badge bg-info">Yes</span>
             {% else %}
@@ -59,6 +69,17 @@
             {% endif %}
           </td>
           <td class="text-end">
+            {% if bot.mode == 'polling' %}
+              <button type="button" class="btn btn-sm btn-outline-success me-1 bot-start-btn" data-url="{% url 'bot_start' bot.pk %}" {% if bot.worker_pid %}disabled title="Already running"{% endif %} title="Start">
+                <i data-lucide="play" style="width:14px;height:14px"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-warning me-1 bot-stop-btn" data-url="{% url 'bot_stop' bot.pk %}" {% if not bot.worker_pid %}disabled title="Not running"{% endif %} title="Stop">
+                <i data-lucide="square" style="width:14px;height:14px"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-info me-1 bot-restart-btn" data-url="{% url 'bot_restart' bot.pk %}" title="Restart">
+                <i data-lucide="rotate-cw" style="width:14px;height:14px"></i>
+              </button>
+            {% endif %}
             <button type="button" class="btn btn-sm btn-outline-primary me-1 bot-test-btn" data-test-url="{% url 'bot_test' bot.pk %}" title="Test connection">
               <i data-lucide="wifi" style="width:16px;height:16px"></i>
             </button>
@@ -68,7 +89,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
+          <td colspan="9" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -82,27 +103,43 @@
 {% block extra_js %}
 <script>
 (function() {
+  var resultEl = document.getElementById('botTestResult');
+  function postAction(url, done) {
+    resultEl.textContent = '…';
+    resultEl.className = 'mt-2 small text-muted';
+    fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrfToken } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        resultEl.textContent = data.message || (data.status === 'success' ? 'OK' : (data.status === 'error' ? data.message : 'Done'));
+        resultEl.className = 'mt-2 small ' + (data.status === 'success' || data.success ? 'text-success' : 'text-danger');
+        if (done) done(data);
+      })
+      .catch(function() { resultEl.textContent = 'Request failed'; resultEl.className = 'mt-2 small text-danger'; });
+  }
+  document.querySelectorAll('.bot-start-btn').forEach(function(btn) {
+    if (btn.disabled) return;
+    btn.addEventListener('click', function() { postAction(this.getAttribute('data-url'), function() { setTimeout(function() { window.location.reload(); }, 1200); }); });
+  });
+  document.querySelectorAll('.bot-stop-btn').forEach(function(btn) {
+    if (btn.disabled) return;
+    btn.addEventListener('click', function() { postAction(this.getAttribute('data-url'), function() { setTimeout(function() { window.location.reload(); }, 1200); }); });
+  });
+  document.querySelectorAll('.bot-restart-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { postAction(this.getAttribute('data-url'), function() { setTimeout(function() { window.location.reload(); }, 1200); }); });
+  });
   document.querySelectorAll('.bot-test-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var url = this.getAttribute('data-test-url');
-      var resultEl = document.getElementById('botTestResult');
       resultEl.textContent = 'Testing…';
       resultEl.className = 'mt-2 small text-muted';
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrfToken },
-        body: 'csrfmiddlewaretoken=' + encodeURIComponent(csrfToken)
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        resultEl.textContent = data.message || (data.success ? 'OK' : 'Failed');
-        resultEl.className = 'mt-2 small ' + (data.success ? 'text-success' : 'text-danger');
-        if (data.success) window.location.reload();
-      })
-      .catch(function() {
-        resultEl.textContent = 'Request failed';
-        resultEl.className = 'mt-2 small text-danger';
-      });
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': csrfToken }, body: 'csrfmiddlewaretoken=' + encodeURIComponent(csrfToken) })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          resultEl.textContent = data.message || (data.success ? 'OK' : 'Failed');
+          resultEl.className = 'mt-2 small ' + (data.success ? 'text-success' : 'text-danger');
+          if (data.success) window.location.reload();
+        })
+        .catch(function() { resultEl.textContent = 'Request failed'; resultEl.className = 'mt-2 small text-danger'; });
     });
   });
   if (typeof lucide !== 'undefined') lucide.createIcons();

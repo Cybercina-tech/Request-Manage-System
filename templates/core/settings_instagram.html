@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Instagram{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Instagram
+</h1>
+<p class="text-muted mb-4">Manage Instagram (Meta Graph API) credentials for posting approved ads.</p>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <span class="text-muted">{{ configs|length }} config(s)</span>
+  <a href="{% url 'settings_instagram_create' %}" class="btn btn-soul">
+    <i data-lucide="plus" class="me-1" style="width:18px;height:18px;vertical-align:middle"></i>
+    Add Instagram
+  </a>
+</div>
+
+<div class="card-soul">
+  <div class="table-responsive">
+    <table class="table table-dark table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Page ID</th>
+          <th>Active</th>
+          <th>Last test</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in configs %}
+        <tr>
+          <td><strong>{{ c.username }}</strong></td>
+          <td>{{ c.page_id|default:"—" }}</td>
+          <td>
+            {% if c.is_active %}<span class="badge bg-info">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}
+          </td>
+          <td>{{ c.last_test_at|timesince|default:"Never" }} ago</td>
+          <td>
+            <a href="{% url 'settings_instagram_edit' c.pk %}" class="btn btn-sm btn-outline-primary me-1">Edit</a>
+            <button type="button" class="btn btn-sm btn-outline-secondary test-instagram-btn" data-pk="{{ c.pk }}" data-url="{% url 'settings_instagram_test' c.pk %}">Test</button>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">No Instagram configs. Add one to post approved ads to Instagram.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div id="testResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll('.test-instagram-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var resultEl = document.getElementById('testResult');
+    resultEl.textContent = 'Testing…';
+    resultEl.className = 'mt-2 small text-muted';
+    fetch(this.getAttribute('data-url'), { method: 'POST', headers: { 'X-CSRFToken': csrfToken } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        resultEl.className = d.success ? 'mt-2 small text-success' : 'mt-2 small text-danger';
+        resultEl.textContent = d.message || (d.success ? 'OK' : 'Failed');
+      })
+      .catch(function() { document.getElementById('testResult').className = 'mt-2 small text-danger'; document.getElementById('testResult').textContent = 'Request failed'; });
+  });
+});
+if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>
+{% endblock %}

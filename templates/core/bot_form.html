@@ -41,7 +41,15 @@
     </div>
   </div>
   <div class="mb-3">
-    <label class="form-label">Webhook URL (required for bot to receive messages)</label>
+    <label class="form-label">Mode</label>
+    <select class="form-select" name="mode">
+      <option value="polling" {% if bot and bot.mode == 'polling' %}selected{% elif not bot %}selected{% endif %}>Polling (run <code>python manage.py runbots</code>)</option>
+      <option value="webhook" {% if bot and bot.mode == 'webhook' %}selected{% endif %}>Webhook (HTTPS endpoint)</option>
+    </select>
+    <small class="text-muted">Polling: worker process gets updates. Webhook: Telegram POSTs to your URL.</small>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Webhook URL (for webhook mode only)</label>
     <input type="url" class="form-control" name="webhook_url"
            value="{% if bot %}{{ bot.webhook_url }}{% endif %}"
            placeholder="https://your-domain.com/telegram/webhook/{% if bot %}{{ bot.pk }}{% else %}1{% endif %}/">

@@ -15,6 +15,9 @@ from .models import (
     TelegramMessageLog,
     TelegramUser,
     VerificationCode,
+    InstagramConfiguration,
+    ApiClient,
+    DeliveryLog,
 )
 
 
@@ -139,4 +142,30 @@ class TelegramMessageLogAdmin(admin.ModelAdmin):
     list_display = ['bot', 'telegram_user_id', 'direction', 'created_at']
     list_filter = ['direction', 'bot']
     search_fields = ['text', 'telegram_user_id']
+    readonly_fields = ['created_at']
+
+
+@admin.register(InstagramConfiguration)
+class InstagramConfigurationAdmin(admin.ModelAdmin):
+    list_display = ['username', 'page_id', 'is_active', 'last_test_at', 'updated_at']
+    list_filter = ['is_active']
+    search_fields = ['username']
+    readonly_fields = ['created_at', 'updated_at', 'last_test_at']
+    exclude = ['access_token_encrypted']
+
+
+@admin.register(ApiClient)
+class ApiClientAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'rate_limit_per_min', 'last_used_at', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'last_used_at']
+    exclude = ['api_key_hashed']
+
+
+@admin.register(DeliveryLog)
+class DeliveryLogAdmin(admin.ModelAdmin):
+    list_display = ['ad', 'channel', 'status', 'created_at']
+    list_filter = ['channel', 'status']
+    search_fields = ['ad__uuid', 'error_message']
     readonly_fields = ['created_at']

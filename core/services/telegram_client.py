@@ -349,6 +349,45 @@ def delete_webhook(token: str) -> Tuple[bool, Optional[str]]:
     return False, error or "Unknown error"
 
 
+def get_updates(
+    token: str,
+    offset: Optional[int] = None,
+    timeout: int = 25,
+    limit: int = 100,
+) -> Tuple[bool, Optional[list], Optional[str]]:
+    """
+    Long-polling getUpdates. Use for polling mode; respects Telegram limits.
+    
+    Args:
+        token: Bot token
+        offset: Update id offset (return updates with update_id > offset)
+        timeout: Long-poll timeout in seconds (1-50)
+        limit: Max updates per request (1-100)
+    
+    Returns:
+        (success: bool, list of update dicts or None, error_message: str or None)
+    """
+    if not token:
+        return False, None, "No token"
+    timeout = max(1, min(50, timeout))
+    limit = max(1, min(100, limit))
+    params = {"timeout": timeout, "limit": limit}
+    if offset is not None:
+        params["offset"] = offset
+    session = _create_session()
+    success, result, error = _make_request(
+        session,
+        "GET",
+        "getUpdates",
+        token,
+        params=params,
+        timeout=(DEFAULT_CONNECT_TIMEOUT, timeout + 10),
+    )
+    if success and result is not None:
+        return True, result if isinstance(result, list) else [], None
+    return False, None, error or "Unknown error"
+
+
 def check_telegram_health(token: str) -> Tuple[TelegramStatus, Optional[str], Optional[Dict[str, Any]]]:
     """
     Health check: call getMe and return structured status.

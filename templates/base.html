@@ -36,9 +36,21 @@
             <i data-lucide="bot" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
             Bots
           </a>
-          <a href="{% url 'settings' %}" class="{% if 'settings' in request.resolver_match.url_name %}active{% endif %}">
+          <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
             <i data-lucide="settings" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
             Settings
+          </a>
+          <a href="{% url 'settings_instagram' %}" class="{% if 'instagram' in request.resolver_match.url_name %}active{% endif %}">
+            <i data-lucide="camera" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            Instagram
+          </a>
+          <a href="{% url 'settings_api' %}" class="{% if 'settings_api' in request.resolver_match.url_name %}active{% endif %}">
+            <i data-lucide="key" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            API
+          </a>
+          <a href="{% url 'delivery_list' %}" class="{% if 'delivery' in request.resolver_match.url_name %}active{% endif %}">
+            <i data-lucide="send" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            Deliveries
           </a>
         </div>
       </nav>
