@@ -1,4 +1,4 @@
-# Generated for Iranio — Message history
+# Generated for Iraniu — Message history
 
 from django.db import migrations, models
 import django.db.models.deletion

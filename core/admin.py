@@ -1,5 +1,5 @@
 """
-Iranio — Django admin registration.
+Iraniu — Django admin registration.
 Privacy: mask email/phone in list; full data only in detail. Never log contact info.
 """
 
@@ -122,11 +122,24 @@ class AdRequestAdmin(admin.ModelAdmin):
 
 @admin.register(TelegramBot)
 class TelegramBotAdmin(admin.ModelAdmin):
-    list_display = ['name', 'username', 'is_active', 'status', 'last_heartbeat', 'updated_at']
-    list_filter = ['is_active', 'status']
+    list_display = [
+        'name', 'username', 'is_active', 'status', 'worker_pid',
+        'last_heartbeat', 'last_error_short', 'updated_at',
+    ]
+    list_filter = ['is_active', 'status', 'mode']
     search_fields = ['name', 'username']
-    readonly_fields = ['created_at', 'updated_at', 'last_heartbeat']
+    readonly_fields = [
+        'created_at', 'updated_at', 'last_heartbeat', 'worker_pid',
+        'worker_started_at', 'last_error', 'status',
+    ]
     exclude = ['bot_token_encrypted']  # Never show in admin; use set_token in code only
+
+    def last_error_short(self, obj):
+        if not obj.last_error:
+            return "—"
+        s = obj.last_error[:80] + "…" if len(obj.last_error) > 80 else obj.last_error
+        return s
+    last_error_short.short_description = "Last Error"
 
 
 @admin.register(TelegramSession)

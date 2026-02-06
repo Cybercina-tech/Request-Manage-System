@@ -1,5 +1,5 @@
 """
-Iranio — Require authentication for all internal URLs.
+Iraniu — Require authentication for all internal URLs.
 Only these are public: /, /login/, /logout/, /api/submit/, /telegram/webhook/*
 """
 

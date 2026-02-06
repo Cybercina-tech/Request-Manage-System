@@ -1,5 +1,5 @@
 """
-Iranio — Unified delivery layer. Routes approved ads to Telegram, Instagram, API.
+Iraniu — Unified delivery layer. Routes approved ads to Telegram, Instagram, API.
 Centralized error handling and DeliveryLog. Business logic only; no request objects.
 """
 

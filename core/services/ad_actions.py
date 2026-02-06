@@ -1,5 +1,5 @@
 """
-Iranio — Approve/reject ad actions. Single place for status update + delivery.
+Iraniu — Approve/reject ad actions. Single place for status update + delivery.
 Approval delivery (Telegram, Instagram, API) is delegated to DeliveryService.
 """
 

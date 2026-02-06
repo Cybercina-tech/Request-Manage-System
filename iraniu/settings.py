@@ -1,5 +1,5 @@
 """
-Iranio
+Iraniu
 Django settings.
 """
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-iranio')
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-iraniu')
 
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
@@ -36,7 +36,7 @@ MIDDLEWARE = [
     'core.middleware.ApiKeyAuthMiddleware',
 ]
 
-ROOT_URLCONF = 'iranio.urls'
+ROOT_URLCONF = 'iraniu.urls'
 
 TEMPLATES = [
     {
@@ -50,12 +50,13 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.site_config',
+                'core.context_processors.static_version',
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'iranio.wsgi.application'
+WSGI_APPLICATION = 'iraniu.wsgi.application'
 
 DATABASES = {
     'default': {
@@ -76,15 +77,23 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Cache busting for static assets (icons, CSS)
+STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
+
+# Telegram Bot Runner
+# polling: long-poll getUpdates (dev, no HTTPS). webhook: validate + health only (prod with HTTPS).
+TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
+if TELEGRAM_MODE not in ('polling', 'webhook'):
+    TELEGRAM_MODE = 'polling'
 
 # Security headers (only when not debugging)
 if not DEBUG:

@@ -1,5 +1,5 @@
 """
-Iranio — services package. Business logic lives here; views only handle request/response.
+Iraniu — services package. Business logic lives here; views only handle request/response.
 
 Re-exports for backward compatibility:
   from core.services import clean_ad_text, run_ai_moderation, send_telegram_message_via_bot, ...

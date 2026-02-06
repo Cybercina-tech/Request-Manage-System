@@ -1,5 +1,5 @@
 """
-Iranio — Feature flags and config.
+Iraniu — Feature flags and config.
 OTP logic is wrapped behind ENABLE_OTP; do not activate until ready.
 """
 

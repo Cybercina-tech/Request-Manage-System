@@ -1,5 +1,5 @@
 """
-Iranio — AI moderation and text cleaning. OpenAI integration; safe defaults on failure.
+Iraniu — AI moderation and text cleaning. OpenAI integration; safe defaults on failure.
 """
 
 import re
@@ -32,7 +32,7 @@ def run_ai_moderation(content, config):
 
         client = OpenAI(api_key=config.openai_api_key)
         system = config.ai_system_prompt or (
-            'You are a moderator for Iranio. Check if this ad follows community rules. '
+            'You are a moderator for Iraniu. Check if this ad follows community rules. '
             'Reply with JSON only: {"approved": true or false, "reason": "optional reason"}'
         )
         response = client.chat.completions.create(

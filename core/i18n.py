@@ -1,11 +1,11 @@
 """
-Iranio — Bilingual (FA/EN) message registry.
+Iraniu — Bilingual (FA/EN) message registry.
 Never hardcode text in handlers; always use get_message(key, lang).
 """
 
 MESSAGES = {
     "start": {
-        "en": "Welcome to Iranio. Please choose your language.",
+        "en": "Welcome to Iraniu. Please choose your language.",
         "fa": "به ایرانيو خوش آمدید. لطفاً زبان خود را انتخاب کنید.",
     },
     "select_language": {

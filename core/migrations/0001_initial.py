@@ -1,4 +1,4 @@
-# Generated manually for Iranio
+# Generated manually for Iraniu
 
 import uuid
 from django.db import migrations, models
@@ -19,11 +19,11 @@ class Migration(migrations.Migration):
                 ('is_ai_enabled', models.BooleanField(default=False)),
                 ('openai_api_key', models.CharField(blank=True, max_length=255)),
                 ('openai_model', models.CharField(default='gpt-3.5-turbo', help_text='e.g. gpt-4o, gpt-3.5-turbo', max_length=64)),
-                ('ai_system_prompt', models.TextField(blank=True, default='You are a moderator for Iranio. Check if this ad follows community rules. Reply with JSON: {"approved": true/false, "reason": "optional reason"}')),
+                ('ai_system_prompt', models.TextField(blank=True, default='You are a moderator for Iraniu. Check if this ad follows community rules. Reply with JSON: {"approved": true/false, "reason": "optional reason"}')),
                 ('telegram_bot_token', models.CharField(blank=True, max_length=255)),
                 ('telegram_webhook_url', models.URLField(blank=True)),
                 ('use_webhook', models.BooleanField(default=False)),
-                ('approval_message_template', models.TextField(default='Your ad has been approved. Ad ID: {ad_id}. Thank you for using Iranio.')),
+                ('approval_message_template', models.TextField(default='Your ad has been approved. Ad ID: {ad_id}. Thank you for using Iraniu.')),
                 ('rejection_message_template', models.TextField(default='Your ad was not approved. Reason: {reason}. Ad ID: {ad_id}.')),
                 ('updated_at', models.DateTimeField(auto_now=True)),
             ],

@@ -1,5 +1,5 @@
 """
-Iranio — Instagram (Meta Graph API) service. Post approved ads; tokens encrypted at rest.
+Iraniu — Instagram (Meta Graph API) service. Post approved ads; tokens encrypted at rest.
 No hardcoded secrets; config from InstagramConfiguration.
 """
 

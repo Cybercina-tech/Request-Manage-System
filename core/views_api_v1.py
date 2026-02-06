@@ -1,5 +1,5 @@
 """
-Iranio — Partner API v1. Submit, status, list. Auth via X-API-KEY (middleware).
+Iraniu — Partner API v1. Submit, status, list. Auth via X-API-KEY (middleware).
 All views assume request.api_client is set (middleware returns 401 otherwise).
 """
 

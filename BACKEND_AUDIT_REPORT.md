@@ -1,6 +1,6 @@
-# Iranio Backend Audit Report
+# Iraniu Backend Audit Report
 
-Full audit of the Iranio backend: structure, models, views, services, APIs, admin, security, logging, tests, and migrations. Refactors applied are limited to **cleaning, restructuring, and modularization** — no new features.
+Full audit of the Iraniu backend: structure, models, views, services, APIs, admin, security, logging, tests, and migrations. Refactors applied are limited to **cleaning, restructuring, and modularization** — no new features.
 
 ---
 
@@ -10,9 +10,9 @@ Full audit of the Iranio backend: structure, models, views, services, APIs, admi
 
 | Item | Status | Notes |
 |------|--------|--------|
-| Apps (iranio, core) | OK | Single Django app `core`; project `iranio` holds settings/urls. |
+| Apps (iraniu, core) | OK | Single Django app `core`; project `iraniu` holds settings/urls. |
 | manage.py, settings, urls | OK | Standard. LOGIN_URL, LOGIN_REDIRECT_URL, LOGOUT_REDIRECT_URL set. Security headers when `DEBUG=False`. |
-| Templates / static | OK | `templates/` (base, core/*, registration/*), `static/css/iranio.css`. |
+| Templates / static | OK | `templates/` (base, core/*, registration/*), `static/css/iraniu.css`. |
 | Duplicated logic | Addressed | Pulse/dashboard logic was duplicated in `dashboard` and `api_pulse` → moved to `core/services/dashboard.py`. Approve/reject logic duplicated in single + bulk → moved to `core/services/ad_actions.py`. |
 | Business logic in views | Addressed | Dashboard/pulse now use `get_dashboard_context()` and `get_pulse_data()`. Approve/reject use `approve_one_ad()` and `reject_one_ad()`. JSON body parsing centralized in `view_utils.parse_request_json()`. |
 | Modularization | OK | Single package `core/services/`: dashboard, ad_actions, ai_moderation, telegram, conversation, submit_ad_service, users, otp. |

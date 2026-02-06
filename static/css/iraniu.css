@@ -1,10 +1,10 @@
 /**
- * Iranio — Midnight Obsidian & Electric Soul
- * Custom dark theme for Iranio
+ * Iraniu — Midnight Obsidian & Electric Soul
+ * Custom dark theme for Iraniu
  */
 
 :root {
-  /* Iranio Soulful Color Palette */
+  /* Iraniu Soulful Color Palette */
   --bg-obsidian: #0B0E14;
   --bg-surface: #151923;
   --brand-deep: #4A148C;
@@ -28,6 +28,18 @@
   --glow-hot: 0 0 15px rgba(255, 61, 0, 0.3);
   --font-heading: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
   --font-body: 'Inter', -apple-system, sans-serif;
+}
+
+/* Icon system (Font Awesome — self-hosted) */
+.icon {
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+}
+
+.btn i,
+.btn .icon {
+  margin-right: 6px;
 }
 
 * {
@@ -323,7 +335,7 @@ li {
   border-left: 3px solid transparent;
 }
 
-.sidebar-nav a i[data-lucide] {
+.sidebar-nav a i.icon {
   flex-shrink: 0;
 }
 
@@ -342,7 +354,7 @@ li {
   box-shadow: inset 0 0 20px rgba(124, 77, 255, 0.1), 0 0 15px rgba(124, 77, 255, 0.15);
 }
 
-.sidebar-nav a.active i[data-lucide] {
+.sidebar-nav a.active i.icon {
   color: var(--brand-gold);
 }
 
@@ -351,7 +363,7 @@ li {
   font-size: 0.9rem;
 }
 
-.sidebar-nav a.nav-external i[data-lucide="send"] {
+.sidebar-nav a.nav-external i.fa-paper-plane {
   color: var(--action-cyan);
 }
 
@@ -360,18 +372,18 @@ li {
   border-left-color: rgba(0, 229, 255, 0.3);
 }
 
-.sidebar-nav a.nav-external:hover i[data-lucide="send"] {
+.sidebar-nav a.nav-external:hover i.fa-paper-plane {
   color: var(--action-cyan);
   filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.5));
 }
 
-.sidebar-nav a.nav-external i[data-lucide="external-link"] {
+.sidebar-nav a.nav-external i.fa-arrow-up-right-from-square {
   margin-left: auto;
   opacity: 0.5;
   transition: opacity 0.3s ease;
 }
 
-.sidebar-nav a.nav-external:hover i[data-lucide="external-link"] {
+.sidebar-nav a.nav-external:hover i.fa-arrow-up-right-from-square {
   opacity: 1;
 }
 

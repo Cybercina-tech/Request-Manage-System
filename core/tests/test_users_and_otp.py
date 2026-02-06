@@ -1,5 +1,5 @@
 """
-Iranio — Tests for user creation, update, contact saving, OTP generation, expiry.
+Iraniu — Tests for user creation, update, contact saving, OTP generation, expiry.
 OTP sending is not implemented; generation/verify are tested.
 """
 

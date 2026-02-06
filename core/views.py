@@ -1,5 +1,5 @@
 """
-Iranio — Staff-only views. Request/response only; business logic in services.
+Iraniu — Staff-only views. Request/response only; business logic in services.
 """
 
 import logging
@@ -465,7 +465,8 @@ def bot_test(request, pk):
     if ok:
         bot.status = TelegramBot.Status.ONLINE
         bot.last_heartbeat = timezone.now()
-        bot.save(update_fields=['status', 'last_heartbeat'])
+        bot.last_error = ''
+        bot.save(update_fields=['status', 'last_heartbeat', 'last_error'])
     return JsonResponse({'success': ok, 'message': msg})
 
 

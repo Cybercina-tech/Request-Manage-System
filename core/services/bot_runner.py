@@ -1,37 +1,115 @@
 """
-Iranio — Bot runner manager: start/stop/restart polling workers (multiprocessing.Process).
-Supervisor loop: check workers, apply requested_action, restart dead. Persists PID to DB.
+Iraniu — Bot runner manager: start/stop/restart polling workers.
+Supports polling (getUpdates) and webhook (health checker only) modes.
 """
 
 import logging
 import multiprocessing
 import os
 import time
-from pathlib import Path
 
+from django.conf import settings
 from django.utils import timezone
 
 from core.models import TelegramBot
 from core.services.bot_worker import run_bot
+from core.services.telegram_client import get_webhook_info, set_webhook, get_me
 
 logger = logging.getLogger(__name__)
 
 SUPERVISOR_INTERVAL = 10
+HEARTBEAT_CHECK_INTERVAL = 30
+OFFLINE_THRESHOLD_SEC = 90
 DEFAULT_LOG_DIR = "logs"
+
+
+def _mark_stale_offline():
+    """Mark bots offline if last_heartbeat > OFFLINE_THRESHOLD_SEC."""
+    try:
+        threshold = timezone.now() - timezone.timedelta(seconds=OFFLINE_THRESHOLD_SEC)
+        count = TelegramBot.objects.filter(
+            is_active=True,
+            status=TelegramBot.Status.ONLINE,
+            last_heartbeat__lt=threshold,
+        ).update(status=TelegramBot.Status.OFFLINE, worker_pid=None, worker_started_at=None)
+        if count:
+            logger.info("Marked %s stale bots offline", count)
+    except Exception as e:
+        logger.exception("mark_stale_offline: %s", e)
+
+
+def _validate_webhook_bot(bot: TelegramBot) -> bool:
+    """Verify webhook is set and HTTPS. Returns True if valid."""
+    token = bot.get_decrypted_token()
+    if not token:
+        return False
+    success, info, err = get_webhook_info(token)
+    if not success:
+        logger.warning("getWebhookInfo failed bot_id=%s: %s", bot.pk, err)
+        return False
+    url = (info or {}).get("url", "")
+    if not url:
+        logger.warning("Webhook not set for bot_id=%s", bot.pk)
+        return False
+    if not url.startswith("https://"):
+        logger.warning("Webhook must be HTTPS bot_id=%s url=%s", bot.pk, url[:50])
+        return False
+    return True
+
+
+def _run_webhook_health_check(bot: TelegramBot) -> None:
+    """Validate token and webhook; update status."""
+    try:
+        token = bot.get_decrypted_token()
+        if not token:
+            TelegramBot.objects.filter(pk=bot.pk).update(
+                status=TelegramBot.Status.ERROR,
+                last_error="No token configured",
+            )
+            return
+        success, _, err = get_me(token)
+        if not success:
+            TelegramBot.objects.filter(pk=bot.pk).update(
+                status=TelegramBot.Status.ERROR,
+                last_error=(err or "Invalid token")[:2048],
+            )
+            return
+        if not _validate_webhook_bot(bot):
+            TelegramBot.objects.filter(pk=bot.pk).update(
+                status=TelegramBot.Status.ERROR,
+                last_error="Webhook not set or not HTTPS",
+            )
+            return
+        TelegramBot.objects.filter(pk=bot.pk).update(
+            status=TelegramBot.Status.ONLINE,
+            last_heartbeat=timezone.now(),
+            last_error="",
+        )
+    except Exception as e:
+        logger.exception("webhook_health_check bot_id=%s: %s", bot.pk, e)
+        TelegramBot.objects.filter(pk=bot.pk).update(
+            status=TelegramBot.Status.ERROR,
+            last_error=str(e)[:2048],
+        )
 
 
 class BotRunnerManager:
     """
-    Manages one or more bot worker processes. Each bot runs in isolated Process.
-    Start/stop/restart update DB (worker_pid, worker_started_at, requested_action).
+    Manages bot workers: polling (child processes) or webhook (health checker).
+    Respects TELEGRAM_MODE and bot.mode.
     """
 
     def __init__(self, log_dir: str = None):
         self.log_dir = (log_dir or DEFAULT_LOG_DIR).strip() or DEFAULT_LOG_DIR
-        self._processes = {}  # bot_id -> Process
+        self._processes = {}
         self._shutdown = False
+        self._telegram_mode = getattr(
+            settings, "TELEGRAM_MODE", "polling"
+        ).lower()
+        if self._telegram_mode not in ("polling", "webhook"):
+            self._telegram_mode = "polling"
 
-    def start_bot(self, bot_id: int) -> bool:
+    def start_bot(self, bot_id: int, debug: bool = False) -> bool:
         """Start polling worker for bot_id. Returns True if started."""
         if bot_id in self._processes and self._processes[bot_id].is_alive():
             return True
@@ -42,12 +120,19 @@ class BotRunnerManager:
             logger.warning("start_bot: bot_id=%s not found", bot_id)
             return False
         if bot.mode != TelegramBot.Mode.POLLING:
-            logger.info("start_bot: bot_id=%s mode=%s, skip polling", bot_id, bot.mode)
+            logger.info(
+                "start_bot: bot_id=%s mode=%s, skip polling", bot_id, bot.mode
+            )
             return False
         if not bot.is_active:
             logger.info("start_bot: bot_id=%s inactive", bot_id)
             return False
-        p = multiprocessing.Process(target=run_bot, args=(bot_id, self.log_dir), daemon=False)
+        p = multiprocessing.Process(
+            target=run_bot,
+            args=(bot_id, self.log_dir),
+            kwargs={"debug": debug},
+            daemon=False,
+        )
         p.start()
         self._processes[bot_id] = p
         try:
@@ -55,6 +140,7 @@ class BotRunnerManager:
                 worker_pid=p.pid,
                 worker_started_at=timezone.now(),
                 requested_action=None,
+                last_error="",
             )
         except Exception as e:
             logger.exception("start_bot: failed to save worker_pid: %s", e)
@@ -80,25 +166,27 @@ class BotRunnerManager:
             logger.debug("_stop_bot_process update: %s", e)
 
     def stop_bot(self, bot_id: int) -> bool:
-        """Stop polling worker. Returns True if stopped or was not running."""
+        """Stop polling worker."""
         self._stop_bot_process(bot_id)
         try:
-            TelegramBot.objects.filter(pk=bot_id).update(status=TelegramBot.Status.OFFLINE)
+            TelegramBot.objects.filter(pk=bot_id).update(
+                status=TelegramBot.Status.OFFLINE
+            )
         except Exception:
             pass
         return True
 
-    def restart_bot(self, bot_id: int) -> bool:
+    def restart_bot(self, bot_id: int, debug: bool = False) -> bool:
         """Stop then start. Returns True if start succeeded."""
         self._stop_bot_process(bot_id)
         time.sleep(1)
-        return self.start_bot(bot_id)
+        return self.start_bot(bot_id, debug=debug)
 
-    def supervisor_tick(self) -> None:
+    def supervisor_tick(self, debug: bool = False) -> None:
         """
-        Check all workers; apply requested_action; restart dead; stop disabled.
-        Call every SUPERVISOR_INTERVAL seconds from runbots command.
+        Check workers; apply requested_action; restart dead; mark stale offline.
         """
+        _mark_stale_offline()
         try:
             bots = list(
                 TelegramBot.objects.filter(
@@ -117,14 +205,16 @@ class BotRunnerManager:
                 self._stop_bot_process(bot_id)
                 continue
             if requested_action == TelegramBot.RequestedAction.RESTART:
-                self.restart_bot(bot_id)
+                self.restart_bot(bot_id, debug=debug)
                 continue
             if requested_action == TelegramBot.RequestedAction.START:
                 if not proc or not proc.is_alive():
-                    self.start_bot(bot_id)
+                    self.start_bot(bot_id, debug=debug)
                 else:
                     try:
-                        TelegramBot.objects.filter(pk=bot_id).update(requested_action=None)
+                        TelegramBot.objects.filter(pk=bot_id).update(
+                            requested_action=None
+                        )
                     except Exception:
                         pass
                 continue
@@ -138,7 +228,7 @@ class BotRunnerManager:
                     )
                 except Exception:
                     pass
-                self.start_bot(bot_id)
+                self.start_bot(bot_id, debug=debug)
         for bot_id in list(self._processes.keys()):
             if self._shutdown:
                 return
@@ -149,19 +239,81 @@ class BotRunnerManager:
             except Exception:
                 self._stop_bot_process(bot_id)
 
-    def run_supervisor_loop(self) -> None:
-        """Blocking loop: supervisor tick every SUPERVISOR_INTERVAL; start bots that should run."""
-        logger.info("Supervisor starting, log_dir=%s", self.log_dir)
+    def run_supervisor_loop(self, bot_ids: list = None, debug: bool = False) -> None:
+        """
+        Blocking loop: start polling workers, tick supervisor.
+        If bot_ids provided, only run those bots.
+        """
+        logger.info(
+            "Supervisor starting mode=%s log_dir=%s",
+            self._telegram_mode,
+            self.log_dir,
+        )
+        if self._telegram_mode == "webhook":
+            self._run_webhook_loop(bot_ids)
+            return
         try:
-            for bot in TelegramBot.objects.filter(is_active=True, mode=TelegramBot.Mode.POLLING):
+            qs = TelegramBot.objects.filter(
+                is_active=True, mode=TelegramBot.Mode.POLLING
+            )
+            if bot_ids is not None:
+                qs = qs.filter(pk__in=bot_ids)
+            for bot in qs:
                 if self._shutdown:
                     break
-                self.start_bot(bot.pk)
+                self.start_bot(bot.pk, debug=debug)
         except Exception as e:
             logger.exception("Supervisor initial start: %s", e)
         while not self._shutdown:
             time.sleep(SUPERVISOR_INTERVAL)
-            self.supervisor_tick()
+            self.supervisor_tick(debug=debug)
+
+    def _run_webhook_loop(self, bot_ids: list = None) -> None:
+        """Webhook mode: health check only, no polling workers."""
+        qs = TelegramBot.objects.filter(
+            is_active=True, mode=TelegramBot.Mode.WEBHOOK
+        )
+        if bot_ids is not None:
+            qs = qs.filter(pk__in=bot_ids)
+        bots = list(qs)
+        if not bots:
+            logger.info("No webhook bots to monitor")
+            return
+        last_check = 0
+        while not self._shutdown:
+            now = time.time()
+            if now - last_check >= HEARTBEAT_CHECK_INTERVAL:
+                last_check = now
+                for bot in bots:
+                    if self._shutdown:
+                        break
+                    _run_webhook_health_check(bot)
+            time.sleep(SUPERVISOR_INTERVAL)
+
+    def run_once(self, bot_ids: list = None, debug: bool = False) -> None:
+        """Single tick: start workers if needed, apply actions, then exit."""
+        logger.info("Supervisor run_once mode=%s", self._telegram_mode)
+        if self._telegram_mode == "webhook":
+            qs = TelegramBot.objects.filter(
+                is_active=True, mode=TelegramBot.Mode.WEBHOOK
+            )
+            if bot_ids is not None:
+                qs = qs.filter(pk__in=bot_ids)
+            for bot in qs:
+                _run_webhook_health_check(bot)
+            return
+        _mark_stale_offline()
+        try:
+            qs = TelegramBot.objects.filter(
+                is_active=True, mode=TelegramBot.Mode.POLLING
+            )
+            if bot_ids is not None:
+                qs = qs.filter(pk__in=bot_ids)
+            for bot in qs:
+                self.start_bot(bot.pk, debug=debug)
+        except Exception as e:
+            logger.exception("run_once start: %s", e)
+        self.supervisor_tick(debug=debug)
 
     def shutdown(self) -> None:
         """Stop all workers and exit."""
@@ -169,3 +321,21 @@ class BotRunnerManager:
         for bot_id in list(self._processes.keys()):
             self._stop_bot_process(bot_id)
         logger.info("Supervisor shutdown complete")
+
+
+def register_webhook_for_bot(bot: TelegramBot):
+    """
+    Register webhook for a bot. Call when webhook_url is set.
+    Returns (success, message).
+    """
+    if not bot.webhook_url or not bot.webhook_url.startswith("https://"):
+        return False, "Webhook URL must be HTTPS"
+    token = bot.get_decrypted_token()
+    if not token:
+        return False, "No token"
+    success, err = set_webhook(
+        token,
+        bot.webhook_url,
+        secret_token=bot.webhook_secret or None,
+    )
+    return success, err or "OK"

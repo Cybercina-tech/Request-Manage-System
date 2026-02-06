@@ -1,5 +1,5 @@
 """
-Iranio — Tests for conversation engine (state machine, i18n, submit flow).
+Iraniu — Tests for conversation engine (state machine, i18n, submit flow).
 """
 
 from django.test import TestCase, override_settings
@@ -15,7 +15,7 @@ class GetMessageTests(TestCase):
     """Never hardcode text; always use get_message."""
 
     def test_get_message_en(self):
-        self.assertEqual(get_message("start", "en"), "Welcome to Iranio. Please choose your language.")
+        self.assertEqual(get_message("start", "en"), "Welcome to Iraniu. Please choose your language.")
         self.assertEqual(get_message("create_new_ad", "en"), "Create new ad")
 
     def test_get_message_fa(self):
@@ -23,7 +23,7 @@ class GetMessageTests(TestCase):
         self.assertEqual(get_message("create_new_ad", "fa"), "ثبت آگهی جدید")
 
     def test_get_message_fallback(self):
-        self.assertEqual(get_message("start", None), "Welcome to Iranio. Please choose your language.")
+        self.assertEqual(get_message("start", None), "Welcome to Iraniu. Please choose your language.")
         self.assertEqual(get_message("unknown_key", "en"), "unknown_key")
 
 

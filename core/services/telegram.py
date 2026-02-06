@@ -1,5 +1,5 @@
 """
-Iranio — Telegram Bot API. Send messages, webhooks, resubmit links.
+Iraniu — Telegram Bot API. Send messages, webhooks, resubmit links.
 Thin wrapper around telegram_client for backward compatibility.
 """
 

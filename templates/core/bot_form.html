@@ -22,7 +22,7 @@
       <input type="password" class="form-control" name="bot_token" id="bot_token"
              placeholder="{% if bot %}Leave blank to keep current{% else %}123456:ABC...{% endif %}"
              {% if is_create %}required{% endif %}>
-      <span class="input-group-text toggle-password" id="toggleToken" style="cursor:pointer" title="Show/hide"><i data-lucide="eye" style="width:18px;height:18px"></i></span>
+      <span class="input-group-text toggle-password" id="toggleToken" style="cursor:pointer" title="Show/hide" role="button" aria-label="Toggle password visibility"><i class="fa-regular fa-eye icon" aria-hidden="true"></i></span>
     </div>
     {% if bot and not is_create %}
     <small class="text-muted">Current: {{ bot.get_masked_token }}</small>
@@ -87,7 +87,7 @@
     var isPass = tokenInput.type === 'password';
     tokenInput.type = isPass ? 'text' : 'password';
     var icon = this.querySelector('i');
-    if (icon) { icon.setAttribute('data-lucide', isPass ? 'eye-off' : 'eye'); if (typeof lucide !== 'undefined') lucide.createIcons(); }
+    if (icon) { icon.className = (isPass ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye') + ' icon'; }
   };
 
   form.addEventListener('submit', function(e) {
@@ -137,7 +137,6 @@
       .catch(function() { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = 'Request failed'; });
     });
   }
-  if (typeof lucide !== 'undefined') lucide.createIcons();
 })();
 </script>
 {% endblock %}

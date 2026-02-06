@@ -1,5 +1,5 @@
 """
-Iranio — Management command: check bot health (getMe, webhook, status).
+Iraniu — Management command: check bot health (getMe, webhook, status).
 Run: python manage.py check_bots
 """
 

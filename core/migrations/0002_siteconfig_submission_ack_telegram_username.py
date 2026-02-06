@@ -1,4 +1,4 @@
-# Generated for Iranio
+# Generated for Iraniu
 
 from django.db import migrations, models
 

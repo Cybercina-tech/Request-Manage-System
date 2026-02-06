@@ -1,5 +1,5 @@
 """
-Iranio — Telegram webhook endpoint. No business logic; delegates to conversation engine.
+Iraniu — Telegram webhook endpoint. No business logic; delegates to conversation engine.
 Validates secret token; rate limits per user.
 
 How updates work (webhook mode):

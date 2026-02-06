@@ -1,4 +1,4 @@
-# Iranio — Request Management System
+# Iraniu — Request Management System
 
 Human-in-the-loop ad request management: AI pre-scan, admin review, and Telegram notifications.
 
@@ -18,12 +18,13 @@ Human-in-the-loop ad request management: AI pre-scan, admin review, and Telegram
 10. [Telegram Integration](#telegram-integration)
 11. [Settings & Configuration](#settings--configuration)
 12. [Security](#security)
+13. [Icons & UI Assets](#icons--ui-assets)
 
 ---
 
 ## Overview
 
-**Iranio** is a Django web application that:
+**Iraniu** is a Django web application that:
 
 - Accepts **ad submissions** (e.g. from a Telegram bot or any HTTP client).
 - Optionally runs **OpenAI-based moderation** on each submission and suggests approve/reject + reason.
@@ -40,7 +41,7 @@ All sensitive configuration (API keys, bot token, message templates) is stored i
 |-------------|--------------------------------------|
 | Backend     | Django 5.0.1 (Python 3.11+)         |
 | Database    | SQLite (default)                     |
-| Frontend    | Bootstrap 5, Lucide Icons, Vanilla JS / AJAX |
+| Frontend    | Bootstrap 5, Font Awesome (self-hosted), Vanilla JS / AJAX |
 | Theme       | Midnight Obsidian & Electric Soul (dark)    |
 | Integrations| OpenAI API (moderation), Telegram Bot API   |
 
@@ -59,7 +60,7 @@ Request-Manage-System/
 ├── manage.py                 # Django CLI entry
 ├── requirements.txt          # Python dependencies
 ├── README.md                 # This file
-├── iranio/                   # Django project package
+├── iraniu/                   # Django project package
 │   ├── __init__.py
 │   ├── settings.py           # App list, DB, static, auth, etc.
 │   ├── urls.py               # Root URLconf (admin, login, core)
@@ -84,8 +85,10 @@ Request-Manage-System/
 │       ├── ad_detail.html   # Single ad, approve/reject, edit content
 │       └── settings.html    # AI, Telegram, Messages tabs
 └── static/
-    └── css/
-        └── iranio.css       # Custom dark theme
+    ├── css/
+    │   └── iraniu.css       # Custom dark theme
+    └── vendor/
+        └── fontawesome/     # Self-hosted Font Awesome (css, webfonts, svgs)
 ```
 
 ---
@@ -316,20 +319,94 @@ Used by the dashboard for auto-refresh.
 - **Endpoint:** `POST /telegram/webhook/<bot_id>/` — receives updates, runs conversation engine, sends replies.
 - **How to run the bot:** (1) Run Django with **HTTPS**. (2) In **Bots** → Create/Edit, set **Webhook URL** to `https://<your-domain>/telegram/webhook/<bot_id>/` and save — the app auto-calls `setWebhook`. (3) Send `/start` to the bot; you should get the language selection. If the bot does not respond, ensure the webhook URL is saved (so Telegram receives it), the server is reachable over HTTPS, and the bot is Active. Use `python manage.py check_telegram --bot-id 1` to test.
 
-### Running Bots in Production (Polling)
+### Telegram Bot Runner
 
-For **polling mode** (no HTTPS required for receiving updates), use the built-in bot runtime:
+The `runbots` management command provides a managed, production-safe way to run all active Telegram bots.
 
-1. **Create a bot** in **Bots** → Add bot; set **Mode** to **Polling**.
-2. **Start the supervisor** (keeps workers alive, restarts crashed bots):
-   ```bash
-   python manage.py runbots [--log-dir=logs]
-   ```
-3. Leave this process running. It starts one child process per active polling bot, each running a long-polling `getUpdates` loop. Logs go to `logs/bot_<id>.log` (rotated daily).
-4. From the **Bots** page you can **Start** / **Stop** / **Restart** workers (requests are applied on the next supervisor tick). Worker **PID** and **Uptime** are shown when running.
-5. **Webhook vs Polling:** Set **Mode** to **Webhook** to use the HTTP endpoint instead; then no worker is started for that bot and Telegram POSTs updates to your server.
+#### How to start
 
-No external supervisors (pm2/systemd/docker) are required; use `runbots` as the main runtime for polling bots.
+```bash
+python manage.py runbots [--log-dir=logs]
+```
+
+This starts the supervisor, which:
+
+- Loads all active bots (`is_active=True`)
+- Starts one worker process per polling bot
+- Monitors workers and auto-restarts crashed ones
+- Updates `last_heartbeat`, `status`, and `worker_pid` in the DB
+- Handles SIGTERM/SIGINT for graceful shutdown
+
+#### Command options
+
+| Option | Description |
+|--------|-------------|
+| `--log-dir=DIR` | Directory for `bot_<id>.log` files (default: `logs/`) |
+| `--once` | Run a single supervisor tick and exit |
+| `--bot-id=N` | Run only bot ID N (can repeat: `--bot-id=1 --bot-id=2`) |
+| `--debug` | Enable debug logging |
+
+#### Dev vs Prod
+
+- **Dev:** Use **Polling** mode (`TELEGRAM_MODE=polling`, default). No HTTPS required. `runbots` starts workers that long-poll `getUpdates`.
+- **Prod:** Use **Webhook** mode (`TELEGRAM_MODE=webhook`) when you have HTTPS. `runbots` only validates webhook + runs health checker; no polling workers. Telegram POSTs updates to your server.
+
+#### Polling vs Webhook
+
+| Mode | Behavior |
+|------|----------|
+| **Polling** | Workers fetch updates via `getUpdates`; logs to `logs/bot_<id>.log` |
+| **Webhook** | No workers; validate HTTPS webhook, run health checks every 30s |
+
+#### Settings
+
+```python
+# iraniu/settings.py (or env TELEGRAM_MODE)
+TELEGRAM_MODE = "polling"  # or "webhook"
+```
+
+#### Systemd example
+
+```ini
+[Unit]
+Description=Iraniu Telegram bot runner
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/project
+ExecStart=/path/to/venv/bin/python manage.py runbots --log-dir=/var/log/iraniu
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Supervisor example
+
+```ini
+[program:iraniu-runbots]
+command=/path/to/venv/bin/python manage.py runbots --log-dir=/var/log/iraniu
+directory=/path/to/project
+user=www-data
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/iraniu/runbots.log
+stderr_logfile=/var/log/iraniu/runbots.err
+```
+
+#### Bots page
+
+From **Bots** you can:
+
+- **Status** — online, offline, or error
+- **PID** — worker process ID when running
+- **Last heartbeat** — last update timestamp (stale > 90s → offline)
+- **Last error** — last error message (cleared on success)
+- **Start** / **Stop** / **Restart** — request actions (applied on next supervisor tick)
+- **Test token** — verify bot connection
 
 ---
 
@@ -351,7 +428,21 @@ Templates support placeholders: `{ad_id}`, `{reason}`. Export/Import are JSON (n
 - **CSRF:** All form and AJAX requests from the site use CSRF token. Submit API is `@csrf_exempt` for external/Telegram callers; in production, protect by firewall or additional auth if needed.
 - **Secrets:** Stored in DB (SiteConfiguration). Do not commit real keys; use environment variables or secret management in production.
 - **DEBUG / ALLOWED_HOSTS:** Controlled via env: `DEBUG`, `ALLOWED_HOSTS`. `SECRET_KEY` via `DJANGO_SECRET_KEY`.
+- **Project settings:** Set `DJANGO_SETTINGS_MODULE=iraniu.settings` in `.env` or your environment when using runserver, WSGI, or management commands (e.g. in production or CI).
 
 ---
 
-This README describes the full Iranio request management program: data models, flow, URLs, APIs, AI moderation, Telegram usage, and configuration in one place.
+## Icons & UI Assets
+
+Icons are **bundled locally** using [Font Awesome](https://fontawesome.com/) (free) — **no CDN required**. This avoids blocked fonts on Safari/macOS and keeps the app working offline.
+
+- **Location:** `static/vendor/fontawesome/` (css, webfonts, svgs). Included in the repo and served via Django `staticfiles`.
+- **Usage:** In templates use Font Awesome v6 classes, e.g. `<i class="fa-solid fa-inbox icon" aria-hidden="true"></i>`. The base layout loads `vendor/fontawesome/css/all.min.css` before custom CSS.
+- **Cache busting:** Static assets use `?v={{ STATIC_VERSION }}` (set via `STATIC_VERSION` env or default `1`). Run `collectstatic` for production.
+- **Optional SVG:** For inline SVG icons (e.g. in dashboards), place SVGs under `templates/icons/` and use `{% include "icons/play.svg" %}`. Font Awesome webfonts remain the primary icon set.
+
+Verify icon rendering in Safari, Chrome, and Firefox; self-hosted fonts avoid CSP and third-party blocking issues.
+
+---
+
+This README describes the full Iraniu request management program: data models, flow, URLs, APIs, AI moderation, Telegram usage, and configuration in one place.

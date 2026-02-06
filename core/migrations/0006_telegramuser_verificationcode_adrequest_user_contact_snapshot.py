@@ -1,4 +1,4 @@
-# Generated for Iranio — User profile, OTP, AdRequest user + contact_snapshot
+# Generated for Iraniu — User profile, OTP, AdRequest user + contact_snapshot
 
 from django.db import migrations, models
 import django.db.models.deletion

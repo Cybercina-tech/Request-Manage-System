@@ -1,5 +1,5 @@
 """
-Iranio — Management command: test Telegram connectivity.
+Iraniu — Management command: test Telegram connectivity.
 Run: python manage.py check_telegram [--token TOKEN] [--bot-id BOT_ID]
 """
 

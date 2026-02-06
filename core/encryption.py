@@ -1,5 +1,5 @@
 """
-Iranio — Token encryption at rest using Fernet (SECRET_KEY-derived).
+Iraniu — Token encryption at rest using Fernet (SECRET_KEY-derived).
 Tokens are never exposed in templates; use get_decrypted_token() only in server-side code.
 """
 

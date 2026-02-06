@@ -1,5 +1,5 @@
 """
-Iranio — Centralized conversation state machine (FA/EN).
+Iraniu — Centralized conversation state machine (FA/EN).
 All logic here; views only parse update and call this.
 Handles /start, /start resubmit_<uuid>, and Edit & Resubmit flow.
 """

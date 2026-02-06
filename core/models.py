@@ -1,5 +1,5 @@
 """
-Iranio — Core models.
+Iraniu — Core models.
 
 - SiteConfiguration: singleton (pk=1) for AI, messaging, legacy Telegram config.
 - TelegramUser: one per Telegram user; contact and verification state.
@@ -32,7 +32,7 @@ class SiteConfiguration(models.Model):
     )
     ai_system_prompt = models.TextField(
         blank=True,
-        default='You are a moderator for Iranio. Check if this ad follows community rules. '
+        default='You are a moderator for Iraniu. Check if this ad follows community rules. '
                 'Reply with JSON: {"approved": true/false, "reason": "optional reason"}'
     )
     # Telegram
@@ -42,7 +42,7 @@ class SiteConfiguration(models.Model):
     use_webhook = models.BooleanField(default=False)
     # Messaging
     approval_message_template = models.TextField(
-        default='Your ad has been approved. Ad ID: {ad_id}. Thank you for using Iranio.'
+        default='Your ad has been approved. Ad ID: {ad_id}. Thank you for using Iraniu.'
     )
     rejection_message_template = models.TextField(
         default='Your ad was not approved. Reason: {reason}. Ad ID: {ad_id}.'
@@ -257,6 +257,7 @@ class TelegramBot(models.Model):
     )
     worker_pid = models.PositiveIntegerField(null=True, blank=True, help_text='PID of polling worker when running')
     worker_started_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, help_text='Last error message; cleared on success')
     requested_action = models.CharField(
         max_length=16,
         choices=RequestedAction.choices,

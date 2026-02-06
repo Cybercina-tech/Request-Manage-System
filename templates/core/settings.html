@@ -31,7 +31,7 @@
           <label class="form-label">OpenAI API Key</label>
           <div class="input-group">
             <input type="password" class="form-control" name="openai_api_key" id="openai_api_key" value="{{ config.openai_api_key }}" placeholder="sk-...">
-            <span class="input-group-text toggle-password" id="toggleOpenAI" style="cursor:pointer" title="Show/hide"><i data-lucide="eye" style="width:18px;height:18px"></i></span>
+            <span class="input-group-text toggle-password" id="toggleOpenAI" style="cursor:pointer" title="Show/hide" role="button" aria-label="Toggle visibility"><i class="fa-regular fa-eye icon" aria-hidden="true"></i></span>
           </div>
         </div>
         <div class="mb-3">
@@ -45,7 +45,7 @@
         <div class="d-flex align-items-center gap-3 flex-wrap">
           <button type="button" class="btn btn-action test-connection-btn" id="testOpenAI">
             <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-            <i data-lucide="check" class="checkmark" style="width:18px;height:18px"></i>
+            <i class="fa-solid fa-check checkmark icon" aria-hidden="true"></i>
             <span class="btn-text">Test OpenAI connection</span>
           </button>
           <span id="testOpenAIResult" class="small text-muted"></span>
@@ -109,7 +109,7 @@
     const isPass = input.type === 'password';
     input.type = isPass ? 'text' : 'password';
     const icon = wrapEl.querySelector('i');
-    if (icon) { icon.setAttribute('data-lucide', isPass ? 'eye-off' : 'eye'); lucide.createIcons(); }
+    if (icon) { icon.className = (isPass ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye') + ' icon'; }
     wrapEl.classList.toggle('active', isPass);
   }
   document.getElementById('toggleOpenAI').onclick = function() { togglePassword('openai_api_key', this); };
@@ -152,7 +152,6 @@
         resultEl.className = 'small text-danger';
         resultEl.textContent = data.message || 'Failed';
       }
-      lucide.createIcons();
     })
     .catch(() => {
       btn.classList.remove('loading');

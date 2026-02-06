@@ -1,5 +1,5 @@
 """
-Iranio — Dashboard and pulse data. Single source of truth for KPIs and health.
+Iraniu — Dashboard and pulse data. Single source of truth for KPIs and health.
 """
 
 import json

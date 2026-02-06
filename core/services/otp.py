@@ -1,5 +1,5 @@
 """
-Iranio — OTP generation and verification (hashed codes).
+Iraniu — OTP generation and verification (hashed codes).
 Active only when ENABLE_OTP is True. No sending logic.
 """
 

@@ -1,5 +1,5 @@
 """
-Iranio — Telegram user profile: get_or_create from update, update contact info.
+Iraniu — Telegram user profile: get_or_create from update, update contact info.
 No logic in views; all here.
 """
 

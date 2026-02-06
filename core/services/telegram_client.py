@@ -1,5 +1,5 @@
 """
-Iranio — Telegram Bot API client. Production-ready HTTP client with SSL, retries, error handling.
+Iraniu — Telegram Bot API client. Production-ready HTTP client with SSL, retries, error handling.
 
 Features:
 - requests.Session with explicit certifi certificate bundle

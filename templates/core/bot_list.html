@@ -12,7 +12,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <span class="text-muted">{{ bots|length }} bot(s)</span>
   <a href="{% url 'bot_create' %}" class="btn btn-soul">
-    <i data-lucide="plus" class="me-1" style="width:18px;height:18px;vertical-align:middle"></i>
+    <i class="fa-solid fa-plus icon me-1" aria-hidden="true"></i>
     Add bot
   </a>
 </div>
@@ -28,7 +28,9 @@
           <th>Worker</th>
           <th>PID</th>
           <th>Uptime</th>
+          <th>Last heartbeat</th>
           <th>Status</th>
+          <th>Last error</th>
           <th>Active</th>
           <th></th>
         </tr>
@@ -52,6 +54,7 @@
           </td>
           <td>{% if bot.worker_pid %}{{ bot.worker_pid }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>{% if bot.worker_started_at %}{{ bot.worker_started_at|timesince }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td>{% if bot.last_heartbeat %}{{ bot.last_heartbeat|timesince }} ago{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>
             {% if bot.status == 'online' %}
               <span class="badge bg-success">Online</span>
@@ -59,6 +62,13 @@
               <span class="badge bg-danger">Error</span>
             {% else %}
               <span class="badge bg-secondary">Offline</span>
+            {% endif %}
+          </td>
+          <td title="{{ bot.last_error|default:'' }}">
+            {% if bot.last_error %}
+              <span class="text-danger small">{{ bot.last_error|truncatechars:40 }}</span>
+            {% else %}
+              <span class="text-muted">—</span>
             {% endif %}
           </td>
           <td>
@@ -70,18 +80,18 @@
           </td>
           <td class="text-end">
             {% if bot.mode == 'polling' %}
-              <button type="button" class="btn btn-sm btn-outline-success me-1 bot-start-btn" data-url="{% url 'bot_start' bot.pk %}" {% if bot.worker_pid %}disabled title="Already running"{% endif %} title="Start">
-                <i data-lucide="play" style="width:14px;height:14px"></i>
+              <button type="button" class="btn btn-sm btn-outline-success me-1 bot-start-btn" data-url="{% url 'bot_start' bot.pk %}" {% if bot.worker_pid %}disabled title="Already running"{% endif %} title="Start" aria-label="Start">
+                <i class="fa-solid fa-play icon" aria-hidden="true"></i>
               </button>
-              <button type="button" class="btn btn-sm btn-outline-warning me-1 bot-stop-btn" data-url="{% url 'bot_stop' bot.pk %}" {% if not bot.worker_pid %}disabled title="Not running"{% endif %} title="Stop">
-                <i data-lucide="square" style="width:14px;height:14px"></i>
+              <button type="button" class="btn btn-sm btn-outline-warning me-1 bot-stop-btn" data-url="{% url 'bot_stop' bot.pk %}" {% if not bot.worker_pid %}disabled title="Not running"{% endif %} title="Stop" aria-label="Stop">
+                <i class="fa-solid fa-stop icon" aria-hidden="true"></i>
               </button>
-              <button type="button" class="btn btn-sm btn-outline-info me-1 bot-restart-btn" data-url="{% url 'bot_restart' bot.pk %}" title="Restart">
-                <i data-lucide="rotate-cw" style="width:14px;height:14px"></i>
+              <button type="button" class="btn btn-sm btn-outline-info me-1 bot-restart-btn" data-url="{% url 'bot_restart' bot.pk %}" title="Restart" aria-label="Restart">
+                <i class="fa-solid fa-rotate icon" aria-hidden="true"></i>
               </button>
             {% endif %}
-            <button type="button" class="btn btn-sm btn-outline-primary me-1 bot-test-btn" data-test-url="{% url 'bot_test' bot.pk %}" title="Test connection">
-              <i data-lucide="wifi" style="width:16px;height:16px"></i>
+            <button type="button" class="btn btn-sm btn-outline-primary me-1 bot-test-btn" data-test-url="{% url 'bot_test' bot.pk %}" title="Test connection" aria-label="Test connection">
+              <i class="fa-solid fa-wifi icon" aria-hidden="true"></i>
             </button>
             <a href="{% url 'bot_edit' bot.pk %}" class="btn btn-sm btn-outline-secondary me-1">Edit</a>
             <a href="{% url 'bot_delete' bot.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
@@ -89,7 +99,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="9" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
+          <td colspan="11" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -142,7 +152,6 @@
         .catch(function() { resultEl.textContent = 'Request failed'; resultEl.className = 'mt-2 small text-danger'; });
     });
   });
-  if (typeof lucide !== 'undefined') lucide.createIcons();
 })();
 </script>
 {% endblock %}

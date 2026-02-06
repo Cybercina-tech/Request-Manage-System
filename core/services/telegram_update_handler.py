@@ -1,5 +1,5 @@
 """
-Iranio — Process one Telegram update (shared by webhook and polling worker).
+Iraniu — Process one Telegram update (shared by webhook and polling worker).
 Takes bot and update dict; runs conversation engine and sends reply.
 No rate limit here (webhook applies its own; worker runs single-threaded).
 """

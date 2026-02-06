@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Iranio{% endblock %}</title>
+  <title>{% block title %}Iraniu{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.294.0/lucide.min.css">
-  <link rel="stylesheet" href="{% static 'css/iranio.css' %}">
+  <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}?v={{ STATIC_VERSION }}">
+  <link rel="stylesheet" href="{% static 'css/iraniu.css' %}?v={{ STATIC_VERSION }}">
   {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -18,38 +18,38 @@
     {% if user.is_authenticated %}
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <h1>Iranio</h1>
+        <h1>Iraniu</h1>
         <small class="text-muted">Management Platform</small>
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">
           <div class="nav-section-label">Main</div>
           <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-            <i data-lucide="layout-dashboard" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-chart-line icon me-2" aria-hidden="true"></i>
             Dashboard
           </a>
           <a href="{% url 'ad_list' %}" class="{% if request.resolver_match.url_name == 'ad_list' %}active{% endif %}">
-            <i data-lucide="inbox" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-inbox icon me-2" aria-hidden="true"></i>
             Requests
           </a>
           <a href="{% url 'bot_list' %}" class="{% if 'bot_' in request.resolver_match.url_name or request.resolver_match.url_name == 'bot_list' %}active{% endif %}">
-            <i data-lucide="bot" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-robot icon me-2" aria-hidden="true"></i>
             Bots
           </a>
           <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
-            <i data-lucide="settings" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-gear icon me-2" aria-hidden="true"></i>
             Settings
           </a>
           <a href="{% url 'settings_instagram' %}" class="{% if 'instagram' in request.resolver_match.url_name %}active{% endif %}">
-            <i data-lucide="camera" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-camera icon me-2" aria-hidden="true"></i>
             Instagram
           </a>
           <a href="{% url 'settings_api' %}" class="{% if 'settings_api' in request.resolver_match.url_name %}active{% endif %}">
-            <i data-lucide="key" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-key icon me-2" aria-hidden="true"></i>
             API
           </a>
           <a href="{% url 'delivery_list' %}" class="{% if 'delivery' in request.resolver_match.url_name %}active{% endif %}">
-            <i data-lucide="send" class="me-2" style="width:18px;height:18px;vertical-align:middle"></i>
+            <i class="fa-solid fa-paper-plane icon me-2" aria-hidden="true"></i>
             Deliveries
           </a>
         </div>
@@ -59,15 +59,11 @@
     <main class="main-content">
       {% block content %}{% endblock %}
       <footer class="footer-signature">
-        Powered by <strong>Siavash</strong> — Iranio
+        Powered by <strong>Siavash</strong> — Iraniu
       </footer>
     </main>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.294.0/lucide.min.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() { lucide.createIcons(); });
-  </script>
   <script>
     function getCookie(name) {
       let v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');

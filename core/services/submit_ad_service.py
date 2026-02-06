@@ -1,5 +1,5 @@
 """
-Iranio — Internal submit_ad service. Creates AdRequest directly (no HTTP).
+Iraniu — Internal submit_ad service. Creates AdRequest directly (no HTTP).
 Used by conversation engine when state reaches SUBMITTED.
 Maintains audit trail; reuses Django logic (AI moderation, etc.).
 """

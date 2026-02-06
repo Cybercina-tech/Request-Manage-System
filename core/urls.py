@@ -1,5 +1,5 @@
 """
-Iranio — Core URL routes.
+Iraniu — Core URL routes.
 """
 
 from django.urls import path

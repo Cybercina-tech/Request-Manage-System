@@ -11,15 +11,15 @@
 <!-- Mini Status Bar -->
 <div class="mini-status-bar mb-3">
   <span class="status-pill">
-    <i data-lucide="inbox" style="width:14px;height:14px"></i>
+    <i class="fa-solid fa-inbox icon" aria-hidden="true"></i>
     <strong>{{ quick_stats.pending }}</strong> Pending
   </span>
   <span class="status-pill flagged">
-    <i data-lucide="alert-triangle" style="width:14px;height:14px"></i>
+    <i class="fa-solid fa-triangle-exclamation icon" aria-hidden="true"></i>
     <strong>{{ quick_stats.flagged_by_ai }}</strong> Flagged by AI
   </span>
   <span class="status-pill priority">
-    <i data-lucide="clock" style="width:14px;height:14px"></i>
+    <i class="fa-solid fa-clock icon" aria-hidden="true"></i>
     <strong>{{ quick_stats.high_priority }}</strong> High Priority
   </span>
 </div>
@@ -34,7 +34,7 @@
         <label class="form-label d-block small text-muted mb-1">Search</label>
         <div class="input-group input-group-sm" style="min-width: 200px;">
           <span class="input-group-text" style="background: var(--bg-obsidian); border: 1px solid #30363d; border-right: none; color: var(--text-muted);">
-            <i data-lucide="search" style="width:16px;height:16px"></i>
+            <i class="fa-solid fa-magnifying-glass icon" aria-hidden="true"></i>
           </span>
           <input type="text" name="search" value="{{ filters.search }}" class="form-control" placeholder="Content keywords..." style="border-left: none;">
         </div>
@@ -67,7 +67,7 @@
       </div>
       <div class="col-auto">
         <button type="submit" class="btn btn-gold btn-sm">
-          <i data-lucide="filter" style="width:16px;height:16px;vertical-align:middle"></i>
+          <i class="fa-solid fa-filter icon" aria-hidden="true"></i>
           Filter
         </button>
       </div>
@@ -81,7 +81,7 @@
     <span class="filter-chip">
       Search: "{{ filters.search }}"
       <a href="?{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
-        <i data-lucide="x" style="width:12px;height:12px"></i>
+        <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
       </a>
     </span>
     {% endif %}
@@ -89,7 +89,7 @@
     <span class="filter-chip">
       Category: {{ filters.category|title }}
       <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
-        <i data-lucide="x" style="width:12px;height:12px"></i>
+        <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
       </a>
     </span>
     {% endif %}
@@ -97,7 +97,7 @@
     <span class="filter-chip">
       Status: {{ filters.status|title }}
       <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
-        <i data-lucide="x" style="width:12px;height:12px"></i>
+        <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
       </a>
     </span>
     {% endif %}
@@ -105,7 +105,7 @@
     <span class="filter-chip">
       From: {{ filters.date_from }}
       <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_to %}date_to={{ filters.date_to }}{% endif %}" class="chip-remove">
-        <i data-lucide="x" style="width:12px;height:12px"></i>
+        <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
       </a>
     </span>
     {% endif %}
@@ -113,7 +113,7 @@
     <span class="filter-chip">
       To: {{ filters.date_to }}
       <a href="?{% if filters.search %}search={{ filters.search }}&{% endif %}{% if filters.category %}category={{ filters.category }}&{% endif %}{% if filters.status %}status={{ filters.status }}&{% endif %}{% if filters.date_from %}date_from={{ filters.date_from }}{% endif %}" class="chip-remove">
-        <i data-lucide="x" style="width:12px;height:12px"></i>
+        <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
       </a>
     </span>
     {% endif %}
@@ -172,14 +172,14 @@
           <div class="action-hub">
             {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
             <button type="button" class="action-btn action-approve" data-ad-id="{{ ad.uuid }}" title="Approve">
-              <i data-lucide="check" style="width:18px;height:18px"></i>
+              <i class="fa-solid fa-check icon" aria-hidden="true"></i>
             </button>
             <button type="button" class="action-btn action-reject" data-ad-id="{{ ad.uuid }}" data-ai-reason="{{ ad.ai_suggested_reason|escapejs }}" title="Reject">
-              <i data-lucide="x" style="width:18px;height:18px"></i>
+              <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
             </button>
             {% endif %}
             <a href="{% url 'ad_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
-              <i data-lucide="external-link" style="width:18px;height:18px"></i>
+              <i class="fa-solid fa-arrow-up-right-from-square icon" aria-hidden="true"></i>
             </a>
           </div>
         </td>
@@ -188,7 +188,7 @@
       <tr>
         <td colspan="6" class="empty-state-cell">
           <div class="empty-state">
-            <i data-lucide="search-x" style="width:64px;height:64px;color:var(--brand-vivid);opacity:0.5;margin-bottom:1rem"></i>
+            <i class="fa-solid fa-magnifying-glass icon" style="font-size: 3rem; color: var(--brand-vivid); opacity: 0.5; margin-bottom: 1rem;" aria-hidden="true"></i>
             <p class="empty-state-text">The queue is empty. You're all caught up!</p>
             <p class="empty-state-subtext text-muted">No requests match your filters.</p>
           </div>
@@ -220,11 +220,11 @@
 <div class="bulk-actions-bar" id="bulkBar">
   <span class="count"><strong id="bulkCount">0</strong> selected</span>
   <button type="button" class="btn btn-action" id="bulkApproveBtn">
-    <i data-lucide="check" style="width:16px;height:16px;vertical-align:middle"></i>
+    <i class="fa-solid fa-check icon" aria-hidden="true"></i>
     Approve selected
   </button>
   <button type="button" class="btn btn-hot" id="bulkRejectBtn">
-    <i data-lucide="x" style="width:16px;height:16px;vertical-align:middle"></i>
+    <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
     Reject selected
   </button>
   <button type="button" class="btn btn-secondary btn-sm" id="bulkClearBtn">Clear</button>
@@ -600,8 +600,6 @@
 {% block extra_js %}
 <script>
 (function() {
-  lucide.createIcons();
-
   const acceptModal = document.getElementById('acceptModal');
   const rejectModal = document.getElementById('rejectModal');
   const acceptAdId = document.getElementById('acceptAdId');

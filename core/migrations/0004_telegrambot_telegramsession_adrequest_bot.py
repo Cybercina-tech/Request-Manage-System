@@ -1,4 +1,4 @@
-# Generated for Iranio — Telegram Bot Management
+# Generated for Iraniu — Telegram Bot Management
 
 from django.db import migrations, models
 import django.db.models.deletion

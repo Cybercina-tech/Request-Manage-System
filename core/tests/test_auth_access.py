@@ -1,5 +1,5 @@
 """
-Iranio — Auth lockdown: anonymous cannot access internal pages; staff can.
+Iraniu — Auth lockdown: anonymous cannot access internal pages; staff can.
 """
 
 from django.test import TestCase, Client
