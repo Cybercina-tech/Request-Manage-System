@@ -18,10 +18,12 @@ from .models import (
     AdRequest,
     SiteConfiguration,
     TelegramBot,
+    TelegramUser,
     InstagramConfiguration,
     ApiClient,
     DeliveryLog,
     REJECTION_REASONS,
+    REJECTION_REASONS_DETAIL,
 )
 from .services import (
     clean_ad_text,
@@ -123,9 +125,25 @@ def ad_list(request):
 
 @staff_member_required
 def ad_detail(request, uuid):
-    """Detail view: full content, audit trail, edit-before-approve."""
+    """
+    Request Detail: ad content (read-only display), client info (read-only),
+    predefined rejection dropdown, approve with confirmation / reject with reason.
+    Passes client (TelegramUser), rejection reasons list, and AI suggested reason for template.
+    """
     ad = get_object_or_404(AdRequest, uuid=uuid)
-    context = {'ad': ad, 'rejection_reasons': REJECTION_REASONS}
+    # Client: linked TelegramUser (ad.user) or lookup by telegram_user_id for read-only display
+    client = None
+    if getattr(ad, 'user_id', None) and ad.user_id:
+        client = ad.user
+    elif ad.telegram_user_id:
+        client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
+    context = {
+        'ad': ad,
+        'client': client,
+        'rejection_reasons': REJECTION_REASONS,
+        'rejection_reasons_detail': REJECTION_REASONS_DETAIL,
+        'ai_suggested_reason': ad.ai_suggested_reason or '',
+    }
     return render(request, 'core/ad_detail.html', context)
 
 
@@ -187,7 +205,7 @@ def approve_ad(request):
         ad = get_object_or_404(AdRequest, uuid=ad_id)
         if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
             return JsonResponse({'status': 'error', 'message': 'Ad not in pending state'}, status=400)
-        approve_one_ad(ad, edited_content=edited_content)
+        approve_one_ad(ad, edited_content=edited_content, approved_by=request.user)
         return JsonResponse({'status': 'success'})
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -196,19 +214,33 @@ def approve_ad(request):
 @staff_member_required
 @require_http_methods(['POST'])
 def reject_ad(request):
-    """Reject ad: delegate to ad_actions.reject_one_ad, return JSON."""
+    """
+    Reject ad: selected reason (required) and optional comment for "Other".
+    Stored in rejection_reason; admin action logged. Validation ensures reason is chosen.
+    """
     try:
         body = parse_request_json(request) or request.POST.dict()
         ad_id = body.get('ad_id') or request.POST.get('ad_id')
         reason = (body.get('reason') or request.POST.get('reason', '')).strip()
+        comment = (body.get('comment') or request.POST.get('comment', '')).strip()
         if not ad_id:
             return JsonResponse({'status': 'error', 'message': 'Missing ad_id'}, status=400)
         if not reason:
             return JsonResponse({'status': 'error', 'message': 'Rejection reason is required'}, status=400)
+        # Map dropdown value (key or label) to stored reason; "Other" allows optional comment
+        labels_by_key = dict(REJECTION_REASONS_DETAIL)
+        keys = list(labels_by_key.keys())
+        if reason in keys:
+            reason_key = reason
+        else:
+            reason_key = next((k for k, v in REJECTION_REASONS_DETAIL if v == reason), reason)
+        stored_reason = labels_by_key.get(reason_key, reason)
+        if reason_key == 'other' and comment:
+            stored_reason = f"Other: {comment}"
         ad = get_object_or_404(AdRequest, uuid=ad_id)
         if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
             return JsonResponse({'status': 'error', 'message': 'Ad not in pending state'}, status=400)
-        reject_one_ad(ad, reason)
+        reject_one_ad(ad, stored_reason, rejected_by=request.user)
         return JsonResponse({'status': 'success'})
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -229,7 +261,7 @@ def bulk_approve(request):
                 ad = AdRequest.objects.get(uuid=ad_id)
                 if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
                     continue
-                approve_one_ad(ad)
+                approve_one_ad(ad, approved_by=request.user)
                 approved_count += 1
             except AdRequest.DoesNotExist:
                 pass
@@ -256,7 +288,7 @@ def bulk_reject(request):
                 ad = AdRequest.objects.get(uuid=ad_id)
                 if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
                     continue
-                reject_one_ad(ad, reason)
+                reject_one_ad(ad, reason, rejected_by=request.user)
                 rejected_count += 1
             except AdRequest.DoesNotExist:
                 pass

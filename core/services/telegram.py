@@ -7,6 +7,8 @@ import logging
 
 from .telegram_client import (
     send_message as _send_message,
+    edit_message_text as _edit_message_text,
+    answer_callback_query as _answer_callback_query,
     get_me as _get_me,
     get_webhook_info as _get_webhook_info,
     set_webhook as _set_webhook,
@@ -21,17 +23,52 @@ def send_telegram_message(chat_id, text, config, reply_markup=None):
     token = (config.telegram_bot_token or '').strip()
     if not token or not chat_id:
         return False
-    return _send_message(token, chat_id, text, reply_markup=reply_markup)
+    ok, _ = _send_message(token, chat_id, text, reply_markup=reply_markup)
+    return ok
 
 
 def send_telegram_message_via_bot(chat_id, text, bot, reply_markup=None):
-    """Send a message using a TelegramBot instance. Retries on failure. Returns success bool."""
+    """
+    Send a message using a TelegramBot instance. Retries on failure.
+    Returns message_id (int) on success so caller can store in session.context['last_bot_message_id'];
+    returns None on failure.
+    """
+    if not bot or not bot.is_active:
+        return None
+    token = bot.get_decrypted_token()
+    if not token or not chat_id:
+        return None
+    ok, message_id = _send_message(token, chat_id, text, reply_markup=reply_markup)
+    return message_id if ok else None
+
+
+def edit_message_text_via_bot(chat_id, message_id, text, bot, reply_markup=None):
+    """
+    Edit a message using a TelegramBot instance (only bot messages can be edited).
+    Use for inline button callbacks. Returns True if edited, False if edit failed
+    (e.g. message deleted, too old, or not from bot). Caller should fallback to
+    send_telegram_message_via_bot with the same text/reply_markup when this returns False.
+    """
     if not bot or not bot.is_active:
         return False
     token = bot.get_decrypted_token()
-    if not token or not chat_id:
+    if not token or not chat_id or not message_id:
         return False
-    return _send_message(token, chat_id, text, reply_markup=reply_markup)
+    try:
+        return _edit_message_text(token, chat_id, message_id, text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.warning("edit_message_text_via_bot exception: %s", e)
+        return False
+
+
+def answer_callback_query_via_bot(callback_query_id, bot, text=None, show_alert=False):
+    """Answer callback query to remove loading state. Returns success bool."""
+    if not bot or not bot.is_active or not callback_query_id:
+        return False
+    token = bot.get_decrypted_token()
+    if not token:
+        return False
+    return _answer_callback_query(token, callback_query_id, text=text, show_alert=show_alert)
 
 
 def send_telegram_rejection_with_button(chat_id, text, ad_uuid, config):

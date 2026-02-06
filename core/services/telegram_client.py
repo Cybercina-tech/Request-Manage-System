@@ -200,41 +200,44 @@ def send_message(
     text: str,
     reply_markup: Optional[Dict[str, Any]] = None,
     max_retries: int = MAX_RETRIES,
-) -> bool:
+) -> Tuple[bool, Optional[int]]:
     """
     Send a message via Telegram Bot API.
-    
+
     Args:
         token: Bot token
         chat_id: Telegram chat ID
         text: Message text
-        reply_markup: Optional inline keyboard (dict)
+        reply_markup: Optional inline keyboard or reply keyboard (dict)
         max_retries: Maximum retry attempts (default: 3)
-    
+
     Returns:
-        True if sent successfully, False otherwise
+        (success: bool, message_id: int or None). message_id is set when success is True
+        so the caller can store it in session context for edit fallback tracking.
     """
     if not token or not chat_id:
         logger.warning("send_message: missing token or chat_id")
-        return False
-    
+        return False, None
+
     session = _create_session()
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    
+
     for attempt in range(max_retries + 1):
-        success, _, error = _make_request(
+        success, result, error = _make_request(
             session,
             "POST",
             "sendMessage",
             token,
             json_data=payload,
         )
-        
-        if success:
-            return True
-        
+
+        if success and result is not None:
+            # Telegram returns the sent Message object; extract message_id for tracking.
+            message_id = result.get("message_id") if isinstance(result, dict) else None
+            return True, message_id
+
         if attempt < max_retries:
             wait_time = BACKOFF_FACTOR * (2 ** attempt)
             logger.debug(
@@ -245,9 +248,81 @@ def send_message(
                 error,
             )
             time.sleep(wait_time)
-    
+
     logger.warning("send_message failed after %s attempts: %s", max_retries + 1, error)
+    return False, None
+
+
+def edit_message_text(
+    token: str,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    reply_markup: Optional[Dict[str, Any]] = None,
+    max_retries: int = MAX_RETRIES,
+) -> bool:
+    """
+    Edit a message's text and optional reply_markup (e.g. inline keyboard).
+    Only messages sent by the bot can be edited. If the message was deleted, is too old,
+    or is not from the bot, Telegram returns 400 "message can't be edited" — we do not
+    retry in that case. Caller should fallback to send_message when this returns False.
+    """
+    if not token or not chat_id or not message_id:
+        logger.warning("edit_message_text: missing token, chat_id, or message_id")
+        return False
+    session = _create_session()
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    for attempt in range(max_retries + 1):
+        success, _, error = _make_request(
+            session, "POST", "editMessageText", token, json_data=payload
+        )
+        if success:
+            return True
+        # Fallback mechanism: do not retry when edit is impossible (user message, deleted, or too old).
+        error_str = (error or "").lower()
+        if (
+            "can't be edited" in error_str
+            or "message to edit not found" in error_str
+            or "400" in str(error)
+            or "bad request" in error_str
+        ):
+            logger.warning(
+                "edit_message_text failed (message not editable): chat_id=%s message_id=%s error=%s",
+                chat_id, message_id, error,
+            )
+            return False
+        if attempt < max_retries:
+            wait_time = BACKOFF_FACTOR * (2 ** attempt)
+            logger.debug(
+                "edit_message_text retry %s/%s after %s seconds: %s",
+                attempt + 1, max_retries, wait_time, error,
+            )
+            time.sleep(wait_time)
+    logger.warning("edit_message_text failed after %s attempts: %s", max_retries + 1, error)
     return False
+
+
+def answer_callback_query(
+    token: str,
+    callback_query_id: str,
+    text: Optional[str] = None,
+    show_alert: bool = False,
+) -> bool:
+    """
+    Answer a callback_query to remove loading state and optionally show a toast.
+    """
+    if not token or not callback_query_id:
+        return False
+    session = _create_session()
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text[:200]
+    if show_alert:
+        payload["show_alert"] = True
+    success, _, _ = _make_request(session, "POST", "answerCallbackQuery", token, json_data=payload)
+    return success
 
 
 def get_me(token: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:

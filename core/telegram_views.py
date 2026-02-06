@@ -21,7 +21,11 @@ from django.core.cache import cache
 
 from core.models import TelegramBot, TelegramMessageLog
 from core.services.conversation import ConversationEngine
-from core.services import send_telegram_message_via_bot
+from core.services import (
+    send_telegram_message_via_bot,
+    edit_message_text_via_bot,
+    answer_callback_query_via_bot,
+)
 from core.services.users import get_or_create_user_from_update
 
 logger = logging.getLogger(__name__)
@@ -77,18 +81,19 @@ def telegram_webhook(request, bot_id: int):
         logger.warning("Rate limit exceeded bot_id=%s user_id=%s", bot_id, user_id)
         return HttpResponse(status=429)
 
-    chat_id, text, callback_data = _parse_update(body)
+    chat_id, text, callback_data, message_id, callback_query_id, contact_phone = _parse_update(body)
     if chat_id is None:
         logger.debug("Webhook bot_id=%s update_id=%s: no message/callback to handle, ack", bot_id, update_id)
         return HttpResponse(status=200)
 
     logger.info(
-        "Telegram message received bot_id=%s chat_id=%s user_id=%s text=%s callback=%s",
+        "Telegram message received bot_id=%s chat_id=%s user_id=%s text=%s callback=%s contact=%s",
         bot_id,
         chat_id,
         user_id,
         (text or "")[:100] if text else None,
         callback_data,
+        bool(contact_phone),
     )
 
     # Create/update Telegram user before any conversation logic
@@ -99,7 +104,7 @@ def telegram_webhook(request, bot_id: int):
         # Continue; we can still reply
 
     try:
-        inbound_text = text or (f"[callback:{callback_data}]" if callback_data else "")
+        inbound_text = text or (f"[callback:{callback_data}]" if callback_data else "") or (f"[contact:{contact_phone}]" if contact_phone else "")
         if inbound_text:
             TelegramMessageLog.objects.create(
                 bot=bot,
@@ -114,32 +119,77 @@ def telegram_webhook(request, bot_id: int):
     try:
         engine = ConversationEngine(bot)
         session = engine.get_or_create_session(user_id)
-        response = engine.process_update(session, text=text, callback_data=callback_data)
+        response = engine.process_update(
+            session,
+            text=text,
+            callback_data=callback_data,
+            message_id=message_id,
+            contact_phone=contact_phone,
+        )
     except Exception as e:
         logger.exception("Webhook conversation failed bot_id=%s user_id=%s: %s", bot_id, user_id, e)
+        if callback_query_id:
+            try:
+                answer_callback_query_via_bot(callback_query_id, bot, text="Error")
+            except Exception:
+                pass
         return HttpResponse(status=200)
 
     text_out = response.get("text")
     reply_markup = response.get("reply_markup")
+    edit_previous = response.get("edit_previous") and response.get("message_id") is not None
+
+    if callback_query_id:
+        try:
+            answer_callback_query_via_bot(callback_query_id, bot)
+        except Exception as e:
+            logger.debug("Webhook answer_callback_query: %s", e)
+
     if text_out:
         try:
-            sent = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            used_edit = False
+            sent_message_id = None
+            if edit_previous:
+                # Only bot messages can be edited. Fallback: if edit fails, send new message (same text/reply_markup).
+                ok = edit_message_text_via_bot(
+                    chat_id,
+                    response["message_id"],
+                    text_out,
+                    bot,
+                    reply_markup=reply_markup,
+                )
+                if ok:
+                    used_edit = True
+                    sent_message_id = response["message_id"]
+                else:
+                    logger.warning(
+                        "Webhook edit failed (message deleted/invalid/too old), sending new message bot_id=%s chat_id=%s",
+                        bot_id, chat_id,
+                    )
+                    sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            if not used_edit:
+                sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            if sent_message_id is not None:
+                ctx = session.context or {}
+                ctx["last_bot_message_id"] = sent_message_id
+                session.context = ctx
+                session.save(update_fields=["context"])
             logger.info(
-                "Telegram reply sent bot_id=%s chat_id=%s sent=%s len=%s",
+                "Telegram reply sent bot_id=%s chat_id=%s edit=%s len=%s",
                 bot_id,
                 chat_id,
-                sent,
+                used_edit,
                 len(text_out),
             )
         except Exception as e:
-            logger.exception("Webhook send_telegram_message_via_bot failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
+            logger.exception("Webhook send/edit failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
         try:
             TelegramMessageLog.objects.create(
                 bot=bot,
                 telegram_user_id=user_id,
                 direction="out",
                 text=text_out[:4096],
-                raw_payload={"reply_markup": reply_markup} if reply_markup else None,
+                raw_payload={"reply_markup": reply_markup, "edit": edit_previous} if reply_markup or edit_previous else None,
             )
         except Exception as e:
             logger.debug("Message log create failed: %s", e)
@@ -165,29 +215,34 @@ def _get_telegram_user_id(body: dict) -> int:
 
 def _parse_update(body: dict) -> tuple:
     """
-    Parse update. Returns (chat_id, text, callback_data).
+    Parse update. Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone).
     chat_id None if no message/edited_message/callback to process.
-    Supports: message, edited_message, callback_query.
     """
-    # Message
     message = body.get("message")
     if message:
         chat_id = message.get("chat", {}).get("id")
         text = (message.get("text") or "").strip()
-        return (chat_id, text or None, None)
+        contact = message.get("contact")
+        contact_phone = None
+        if contact and contact.get("phone_number"):
+            contact_phone = (contact.get("phone_number") or "").strip()
+            if contact_phone and not contact_phone.startswith("+"):
+                contact_phone = "+" + contact_phone
+        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None)
 
-    # Edited message (treat like message)
     edited = body.get("edited_message")
     if edited:
         chat_id = edited.get("chat", {}).get("id")
         text = (edited.get("text") or "").strip()
-        return (chat_id, text or None, None)
+        return (chat_id, text or None, None, edited.get("message_id"), None, None)
 
-    # Callback query
     callback = body.get("callback_query")
     if callback:
         chat_id = callback.get("message", {}).get("chat", {}).get("id")
+        msg = callback.get("message") or {}
+        message_id = msg.get("message_id")
         data = (callback.get("data") or "").strip()
-        return (chat_id, None, data or None)
+        callback_query_id = callback.get("id")
+        return (chat_id, None, data or None, message_id, callback_query_id, None)
 
-    return (None, None, None)
+    return (None, None, None, None, None, None)

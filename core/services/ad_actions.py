@@ -19,11 +19,12 @@ from core.services.delivery import DeliveryService
 logger = logging.getLogger(__name__)
 
 
-def approve_one_ad(ad: AdRequest, edited_content: str | None = None) -> None:
+def approve_one_ad(ad: AdRequest, edited_content: str | None = None, approved_by=None) -> None:
     """
     Set ad to approved, optionally update content, then send to all delivery channels.
     Caller must have already validated ad is in PENDING_AI or PENDING_MANUAL.
     Delivery (Telegram, Instagram, API) and DeliveryLog are handled by DeliveryService.
+    approved_by: optional User instance for audit logging (who approved and when).
     """
     config = SiteConfiguration.get_config()
     if edited_content is not None:
@@ -33,6 +34,14 @@ def approve_one_ad(ad: AdRequest, edited_content: str | None = None) -> None:
     ad.rejection_reason = ""
     ad.save()
 
+    if approved_by is not None:
+        logger.info(
+            "Ad approved: uuid=%s by=%s at=%s",
+            ad.uuid,
+            getattr(approved_by, 'username', None) or getattr(approved_by, 'id', None),
+            ad.approved_at,
+        )
+
     for channel in DeliveryService.SUPPORTED_CHANNELS:
         try:
             DeliveryService.send(ad, channel)
@@ -40,15 +49,25 @@ def approve_one_ad(ad: AdRequest, edited_content: str | None = None) -> None:
             logger.exception("approve_one_ad delivery channel=%s ad=%s: %s", channel, ad.uuid, e)
 
 
-def reject_one_ad(ad: AdRequest, reason: str) -> None:
+def reject_one_ad(ad: AdRequest, reason: str, rejected_by=None) -> None:
     """
     Set ad to rejected, store reason, send rejection notification with Edit & Resubmit.
     Caller must have already validated ad is in PENDING_AI or PENDING_MANUAL.
+    rejected_by: optional User instance for audit logging (who rejected and when).
     """
     config = SiteConfiguration.get_config()
     ad.status = AdRequest.Status.REJECTED
     ad.rejection_reason = reason[:1000]
     ad.save()
+
+    if rejected_by is not None:
+        logger.info(
+            "Ad rejected: uuid=%s reason=%s by=%s at=%s",
+            ad.uuid,
+            reason[:100],
+            getattr(rejected_by, 'username', None) or getattr(rejected_by, 'id', None),
+            timezone.now(),
+        )
 
     msg = (
         config.rejection_message_template

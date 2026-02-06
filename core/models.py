@@ -436,7 +436,7 @@ class DeliveryLog(models.Model):
         return f'{self.ad_id} {self.channel} {self.status}'
 
 
-# Common rejection reasons for quick-select in UI
+# Common rejection reasons for quick-select in UI (list and detail)
 REJECTION_REASONS = [
     ('Spam', 'Spam'),
     ('Invalid or missing phone number', 'Invalid or missing phone number'),
@@ -445,4 +445,13 @@ REJECTION_REASONS = [
     ('Low quality or incomplete', 'Low quality or incomplete'),
     ('Violates community guidelines', 'Violates community guidelines'),
     ('Other', 'Other'),
+]
+
+# Predefined rejection reasons for Request Detail page (dropdown); expandable.
+REJECTION_REASONS_DETAIL = [
+    ('spam', 'Spam / Advertising not allowed'),
+    ('offensive', 'Offensive content'),
+    ('incomplete', 'Incomplete content / missing info'),
+    ('duplicate', 'Duplicate request'),
+    ('other', 'Other (manual comment optional)'),
 ]

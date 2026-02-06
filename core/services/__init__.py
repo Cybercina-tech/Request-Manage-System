@@ -15,6 +15,8 @@ Submodules:
 from .ai_moderation import clean_ad_text, run_ai_moderation, test_openai_connection
 from .telegram import (
     delete_webhook,
+    edit_message_text_via_bot,
+    answer_callback_query_via_bot,
     get_webhook_info,
     send_telegram_message,
     send_telegram_message_via_bot,
@@ -30,6 +32,8 @@ __all__ = [
     'test_openai_connection',
     'send_telegram_message',
     'send_telegram_message_via_bot',
+    'edit_message_text_via_bot',
+    'answer_callback_query_via_bot',
     'send_telegram_rejection_with_button',
     'send_telegram_rejection_with_button_via_bot',
     'test_telegram_connection',

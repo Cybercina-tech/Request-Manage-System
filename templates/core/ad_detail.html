@@ -1,74 +1,141 @@
 {% extends "base.html" %}
 {% load static %}
+{# Request Detail: ad info, client info (read-only), approve with confirmation / reject with dropdown reason. #}
 
 {% block title %}Request {{ ad.uuid }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
     Request Detail
   </h1>
-  <a href="{% url 'ad_list' %}" class="btn btn-action">Back to List</a>
+  <a href="{% url 'ad_list' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back to List</a>
 </div>
 
-<div class="card-soul mb-4">
-  <div class="d-flex flex-wrap gap-2 mb-3">
+{# —— Status & timestamps bar —— #}
+<div class="card-soul mb-3">
+  <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
     <span class="badge badge-cat {{ ad.category }}">{{ ad.get_category_display }}</span>
-    <span class="badge-glow {{ ad.status }}">{{ ad.get_status_display }}</span>
-    <span class="text-muted small">Submitted {{ ad.created_at|date:"M d, Y H:i" }}</span>
+    <span class="badge-glow {{ ad.status }}">
+      {% if ad.status == 'approved' %}<i class="fa-solid fa-check icon" aria-hidden="true"></i>
+      {% elif ad.status == 'rejected' %}<i class="fa-solid fa-times icon" aria-hidden="true"></i>
+      {% else %}<i class="fa-solid fa-clock icon" aria-hidden="true"></i>{% endif %}
+      {{ ad.get_status_display }}
+    </span>
+    <span class="text-muted small"><i class="fa-solid fa-calendar-plus icon" aria-hidden="true"></i> Submitted {{ ad.created_at|date:"M d, Y H:i" }}</span>
+    <span class="text-muted small"><i class="fa-solid fa-pen icon" aria-hidden="true"></i> Last update {{ ad.updated_at|date:"M d, Y H:i" }}</span>
   </div>
-  <h6 class="text-muted mb-2">Content</h6>
-  <form method="post" id="editForm" action="{% url 'approve_ad' %}">
-    {% csrf_token %}
-    <input type="hidden" name="ad_id" value="{{ ad.uuid }}">
-    <textarea name="content" id="adContent" class="form-control form-soul mb-3" rows="8">{{ ad.content }}</textarea>
-  </form>
-  {% if ad.ai_suggested_reason %}
-  <div class="alert alert-warning border border-warning mb-3">
-    <strong>AI suggested rejection:</strong> {{ ad.ai_suggested_reason }}
-  </div>
-  {% endif %}
-  {% if ad.rejection_reason %}
-  <p class="text-muted mb-0"><strong>Rejection reason:</strong> {{ ad.rejection_reason }}</p>
-  {% endif %}
 </div>
 
-<div class="card-soul mb-4">
+<div class="row g-4">
+  {# —— Ad content (read-only, scrollable) —— #}
+  <div class="col-lg-7">
+    <div class="card-soul h-100">
+      <h5 class="text-muted mb-3"><i class="fa-solid fa-file-lines icon" aria-hidden="true"></i> Ad content</h5>
+      <div class="ad-content-box bg-dark border border-secondary rounded p-3" style="max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{ ad.content }}</div>
+      {% if ad.ai_suggested_reason %}
+      <div class="alert alert-warning border border-warning mt-3 mb-0">
+        <strong><i class="fa-solid fa-robot icon" aria-hidden="true"></i> AI suggested rejection:</strong>
+        <span class="d-block mt-1">{{ ad.ai_suggested_reason }}</span>
+      </div>
+      {% endif %}
+      {% if ad.rejection_reason %}
+      <p class="text-muted mt-3 mb-0 small"><strong>Rejection reason:</strong> {{ ad.rejection_reason }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# —— Client details (read-only) —— #}
+  <div class="col-lg-5">
+    <div class="card-soul h-100">
+      <h5 class="text-muted mb-3"><i class="fa-solid fa-user icon" aria-hidden="true"></i> Client details</h5>
+      {% if client %}
+      <ul class="list-unstyled mb-0 small">
+        <li class="mb-2"><span class="text-muted">Telegram User ID</span><br><code>{{ client.telegram_user_id }}</code></li>
+        <li class="mb-2"><span class="text-muted">Username</span><br>{% if client.username %}@{{ client.username }}{% else %}—{% endif %}</li>
+        <li class="mb-2"><span class="text-muted">Full name</span><br>{% if client.first_name or client.last_name %}{{ client.first_name|default:"" }} {{ client.last_name|default:"" }}{% else %}—{% endif %}</li>
+        <li class="mb-2"><span class="text-muted">Phone</span><br>{{ client.phone_number|default:"—" }}{% if client.phone_verified %} <span class="text-success">(verified)</span>{% endif %}</li>
+        <li class="mb-2"><span class="text-muted">Email</span><br>{{ client.email|default:"—" }}{% if client.email_verified %} <span class="text-success">(verified)</span>{% endif %}</li>
+        <li class="mb-2"><span class="text-muted">Language</span><br>{{ client.language_code|default:"—" }}</li>
+        <li class="mb-2"><span class="text-muted">Registered</span><br>{{ client.created_at|date:"M d, Y"|default:"—" }}</li>
+        <li class="mb-0"><span class="text-muted">Last activity</span><br>{{ client.last_seen|date:"M d, Y H:i"|default:"—" }}</li>
+      </ul>
+      {% else %}
+      <p class="text-muted mb-0">No linked Telegram user (e.g. submitted via API).</p>
+      <ul class="list-unstyled mt-2 small text-muted">
+        <li>Telegram User ID: {{ ad.telegram_user_id|default:"—" }}</li>
+        <li>Telegram Username: {{ ad.telegram_username|default:"—" }}</li>
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# —— Metadata (UUID) —— #}
+<div class="card-soul mt-3">
   <h6 class="text-muted mb-2">Metadata</h6>
   <ul class="list-unstyled mb-0 small text-muted">
     <li>UUID: <code>{{ ad.uuid }}</code></li>
-    <li>Telegram User ID: {{ ad.telegram_user_id|default:"—" }}</li>
-    <li>Telegram Username: {{ ad.telegram_username|default:"—" }}</li>
   </ul>
 </div>
 
+{# —— Approval actions (only when pending) —— #}
 {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
-<div class="d-flex gap-2">
-  <button type="button" class="btn btn-action" id="approveDetailBtn">Approve (with edits above)</button>
-  <button type="button" class="btn btn-hot" data-bs-toggle="modal" data-bs-target="#rejectDetailModal">Reject</button>
+<div class="card-soul mt-4">
+  <h5 class="text-muted mb-3">Actions</h5>
+  <div class="d-flex flex-wrap gap-2">
+    <button type="button" class="btn btn-success px-3" id="approveDetailBtn" title="Approve this ad">
+      <i class="fa-solid fa-check icon" aria-hidden="true"></i> Approve
+    </button>
+    <button type="button" class="btn btn-hot px-3" data-bs-toggle="modal" data-bs-target="#rejectDetailModal" title="Reject with reason">
+      <i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject
+    </button>
+  </div>
 </div>
 
-<!-- Reject Modal (Detail page) -->
-<div class="modal modal-soul fade" id="rejectDetailModal" tabindex="-1">
-  <div class="modal-dialog">
+{# Approve confirmation modal — prevents accidental approval #}
+<div class="modal modal-soul fade" id="approveConfirmModal" tabindex="-1" aria-labelledby="approveConfirmModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title text-danger">Reject Ad</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title text-success" id="approveConfirmModalLabel"><i class="fa-solid fa-check icon" aria-hidden="true"></i> Confirm approval</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label">Rejection reason (required)</label>
-        <select id="detailRejectQuick" class="form-select form-select-sm mb-2">
-          <option value="">— Choose or type below —</option>
-          {% for val, label in rejection_reasons %}
-          <option value="{{ label }}">{{ label }}</option>
+        <p class="mb-0">Are you sure you want to approve this ad? The submitter will be notified.</p>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="approveConfirmSubmit"><i class="fa-solid fa-check icon" aria-hidden="true"></i> Yes, approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Reject modal — dropdown of predefined reasons; optional comment for "Other" #}
+<div class="modal modal-soul fade" id="rejectDetailModal" tabindex="-1" aria-labelledby="rejectDetailModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title text-danger" id="rejectDetailModalLabel"><i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject ad</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Rejection reason <span class="text-danger">*</span></label>
+        <select id="detailRejectReason" class="form-select form-select-sm mb-3" required>
+          <option value="">— Choose a reason —</option>
+          {% for value, label in rejection_reasons_detail %}
+          <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
-        <textarea id="detailRejectReason" class="form-control" rows="3" placeholder="Required"></textarea>
+        <div id="detailRejectOtherWrap" class="d-none">
+          <label class="form-label small text-muted">Optional comment for "Other"</label>
+          <textarea id="detailRejectComment" class="form-control form-control-sm" rows="2" placeholder="Optional details…" maxlength="500"></textarea>
+        </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer border-secondary">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-hot" id="detailRejectConfirm">Reject</button>
+        <button type="button" class="btn btn-hot" id="detailRejectConfirm"><i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject</button>
       </div>
     </div>
   </div>
@@ -81,15 +148,22 @@
 <script>
 (function() {
   const adId = '{{ ad.uuid }}';
+
+  // Approve: show confirmation modal first, then submit
   const approveBtn = document.getElementById('approveDetailBtn');
-  const contentEl = document.getElementById('adContent');
+  const approveModal = document.getElementById('approveConfirmModal');
+  const approveConfirmSubmit = document.getElementById('approveConfirmSubmit');
 
   approveBtn.addEventListener('click', function() {
-    const content = contentEl.value.trim();
+    const modal = new bootstrap.Modal(approveModal);
+    modal.show();
+  });
+
+  approveConfirmSubmit.addEventListener('click', function() {
     fetch('{% url "approve_ad" %}', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_id: adId, content: content })
+      body: JSON.stringify({ ad_id: adId })
     })
     .then(r => r.json())
     .then(data => {
@@ -97,19 +171,37 @@
       else alert(data.message || 'Error');
     })
     .catch(() => alert('Request failed'));
+    bootstrap.Modal.getInstance(approveModal).hide();
   });
 
-  document.getElementById('detailRejectQuick').addEventListener('change', function() {
-    if (this.value) document.getElementById('detailRejectReason').value = this.value;
+  // Reject: dropdown required; show optional comment only when "Other" selected
+  const reasonSelect = document.getElementById('detailRejectReason');
+  const otherWrap = document.getElementById('detailRejectOtherWrap');
+  const commentEl = document.getElementById('detailRejectComment');
+
+  reasonSelect.addEventListener('change', function() {
+    if (this.value === 'other') {
+      otherWrap.classList.remove('d-none');
+    } else {
+      otherWrap.classList.add('d-none');
+      commentEl.value = '';
+    }
   });
 
   document.getElementById('detailRejectConfirm').addEventListener('click', function() {
-    const reason = document.getElementById('detailRejectReason').value.trim();
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    const reason = reasonSelect.value.trim();
+    if (!reason) {
+      alert('Please choose a rejection reason.');
+      return;
+    }
+    const comment = commentEl.value.trim();
+    const body = { ad_id: adId, reason: reason };
+    if (reason === 'other' && comment) body.comment = comment;
+
     fetch('{% url "reject_ad" %}', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_id: adId, reason: reason })
+      body: JSON.stringify(body)
     })
     .then(r => r.json())
     .then(data => {

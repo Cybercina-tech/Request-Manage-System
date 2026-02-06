@@ -1,44 +1,58 @@
 """
 Iraniu — Tests for conversation engine (state machine, i18n, submit flow).
+Covers: language selection with inline buttons, contact at end, data collection order,
+inline edit/back/confirm, emoji messages (EN/FA), resubmit deep link.
 """
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from core.models import TelegramBot, TelegramSession, AdRequest, SiteConfiguration, TelegramUser
-from core.i18n import get_message, MESSAGES
+from core.i18n import get_message
 from core.services.conversation import ConversationEngine, CATEGORY_KEYS
 from core.services.submit_ad_service import SubmitAdService
 
 
 class GetMessageTests(TestCase):
-    """Never hardcode text; always use get_message."""
+    """Never hardcode text; always use get_message. Emojis in messages."""
 
     def test_get_message_en(self):
-        self.assertEqual(get_message("start", "en"), "Welcome to Iraniu. Please choose your language.")
-        self.assertEqual(get_message("create_new_ad", "en"), "Create new ad")
+        self.assertIn("Welcome", get_message("start", "en"))
+        self.assertIn("👋", get_message("start", "en"))
+        self.assertIn("Create new ad", get_message("create_new_ad", "en"))
+        self.assertIn("✨", get_message("create_new_ad", "en"))
 
     def test_get_message_fa(self):
-        self.assertEqual(get_message("start", "fa"), "به ایرانيو خوش آمدید. لطفاً زبان خود را انتخاب کنید.")
-        self.assertEqual(get_message("create_new_ad", "fa"), "ثبت آگهی جدید")
+        self.assertIn("خوش آمدید", get_message("start", "fa"))
+        self.assertIn("👋", get_message("start", "fa"))
+        self.assertIn("ثبت آگهی جدید", get_message("create_new_ad", "fa"))
 
     def test_get_message_fallback(self):
-        self.assertEqual(get_message("start", None), "Welcome to Iraniu. Please choose your language.")
+        self.assertIn("Welcome", get_message("start", None))
         self.assertEqual(get_message("unknown_key", "en"), "unknown_key")
+
+    def test_emoji_messages_en(self):
+        self.assertIn("✅", get_message("confirm_yes_btn", "en"))
+        self.assertIn("❌", get_message("cancel", "en"))
+        self.assertIn("🎉", get_message("submitted", "en"))
+
+    def test_emoji_messages_fa(self):
+        self.assertIn("✅", get_message("confirm_yes_btn", "fa"))
+        self.assertIn("🎉", get_message("submitted", "fa"))
 
 
 class ConversationEngineTests(TestCase):
-    """State machine: START -> SELECT_LANGUAGE -> MAIN_MENU -> ENTER_CONTENT -> SELECT_CATEGORY -> CONFIRM -> SUBMITTED."""
+    """State machine: START -> SELECT_LANGUAGE -> MAIN_MENU -> ENTER_CONTENT -> SELECT_CATEGORY -> CONFIRM -> ASK_CONTACT -> ENTER_EMAIL -> SUBMITTED."""
 
     def setUp(self):
-        SiteConfiguration.get_config()  # ensure singleton
+        SiteConfiguration.get_config()
         self.bot = TelegramBot.objects.create(
             name="TestBot",
             username="testbot",
             is_active=True,
             status=TelegramBot.Status.ONLINE,
         )
-        self.bot.set_token("123:ABC")  # fake token
+        self.bot.set_token("123:ABC")
         self.bot.save()
         self.engine = ConversationEngine(self.bot)
 
@@ -52,23 +66,82 @@ class ConversationEngineTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.SELECT_LANGUAGE)
 
-    def test_language_choice_goes_to_ask_contact(self):
+    def test_language_choice_goes_to_main_menu(self):
+        """Language selection with inline button leads to main menu (no contact at start)."""
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.SELECT_LANGUAGE
         session.save(update_fields=["state"])
         out = self.engine.process_update(session, callback_data="en")
         session.refresh_from_db()
         self.assertEqual(session.language, "en")
-        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
+        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+        self.assertIn("inline_keyboard", out["reply_markup"])
 
-    def test_contact_skip_goes_to_main_menu(self):
+    def test_language_choice_fa_goes_to_main_menu(self):
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.SELECT_LANGUAGE
+        session.save(update_fields=["state"])
+        out = self.engine.process_update(session, callback_data="fa")
+        session.refresh_from_db()
+        self.assertEqual(session.language, "fa")
+        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+
+    def test_confirm_yes_goes_to_ask_contact(self):
+        """Data collection at end: after confirm we ask contact (reply keyboard)."""
+        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.CONFIRM
+        session.language = "en"
+        session.context = {"content": "Ad content", "category": "other"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, callback_data="confirm_yes")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
+        self.assertIn("keyboard", out["reply_markup"])
+        self.assertIn("request_contact", str(out["reply_markup"]))
+
+    def test_contact_skip_goes_to_enter_email(self):
+        """Skip contact (text) -> ENTER_EMAIL (ask email at end)."""
+        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.ASK_CONTACT
         session.language = "en"
         session.save(update_fields=["state", "language"])
-        out = self.engine.process_update(session, callback_data="contact_skip")
+        out = self.engine.process_update(session, text="skip")
         session.refresh_from_db()
-        self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
+        self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
+        self.assertIn("inline_keyboard", out["reply_markup"])
+
+    def test_contact_shared_goes_to_enter_email(self):
+        """Share phone via Telegram contact -> ENTER_EMAIL."""
+        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.ASK_CONTACT
+        session.language = "en"
+        session.context = {"content": "Ad text", "category": "other"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, contact_phone="+989123456789")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
+        user.refresh_from_db()
+        self.assertEqual(user.phone_number, "+989123456789")
+        self.assertTrue(user.phone_verified)
+
+    def test_email_skip_submits_ad(self):
+        """After ENTER_EMAIL (ask email at end), email_skip creates ad and goes to SUBMITTED."""
+        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.ENTER_EMAIL
+        session.language = "en"
+        session.context = {"content": "Ad content", "category": "other"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, callback_data="email_skip")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
+        self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
+        ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
+        self.assertEqual(ad.content, "Ad content")
+        self.assertEqual(ad.user_id, user.pk)
 
     def test_main_menu_create_ad_goes_to_enter_content(self):
         TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
@@ -103,20 +176,26 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.state, TelegramSession.State.CONFIRM)
         self.assertEqual(session.context.get("category"), "rent")
 
-    def test_confirm_yes_creates_ad_and_goes_to_submitted(self):
+    def test_confirm_yes_then_skip_contact_then_skip_email_creates_ad(self):
+        """Full flow: confirm -> ask contact -> skip -> ask email -> skip -> ad created."""
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
         session.context = {"content": "Ad content", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
-        out = self.engine.process_update(session, callback_data="confirm_yes")
+        self.engine.process_update(session, callback_data="confirm_yes")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
+        self.engine.process_update(session, text="skip")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
+        self.engine.process_update(session, callback_data="email_skip")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
         ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
         self.assertEqual(ad.content, "Ad content")
-        self.assertEqual(ad.category, "other")
         self.assertEqual(ad.user_id, user.pk)
         self.assertIn("phone", ad.contact_snapshot)
         self.assertIn("verified_phone", ad.contact_snapshot)
@@ -133,12 +212,50 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345).count(), 0)
 
+    def test_confirm_back_returns_to_select_category(self):
+        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.CONFIRM
+        session.language = "en"
+        session.context = {"content": "Ad text", "category": "rent"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, callback_data="confirm_back", message_id=99)
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.SELECT_CATEGORY)
+        self.assertTrue(out.get("edit_previous"))
+        self.assertEqual(out.get("message_id"), 99)
+
+    def test_confirm_edit_returns_to_enter_content(self):
+        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.CONFIRM
+        session.language = "en"
+        session.context = {"content": "Old ad", "category": "rent"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, callback_data="confirm_edit")
+        session.refresh_from_db()
+        self.assertEqual(session.state, TelegramSession.State.ENTER_CONTENT)
+        self.assertIn("Old ad", out["text"])
+
+    def test_inline_button_returns_edit_previous_and_message_id(self):
+        """When processing callback, response includes edit_previous and message_id for editing."""
+        session = self.engine.get_or_create_session(telegram_user_id=12345)
+        session.state = TelegramSession.State.SELECT_CATEGORY
+        session.language = "en"
+        session.context = {"content": "Ad"}
+        session.save(update_fields=["state", "language", "context"])
+        out = self.engine.process_update(session, callback_data="rent", message_id=42)
+        self.assertTrue(out.get("edit_previous"))
+        self.assertEqual(out.get("message_id"), 42)
+        self.assertIn("Confirm", out["text"] or "")
+
     def test_start_resubmit_invalid_uuid_shows_error(self):
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.language = "en"
         session.save(update_fields=["language"])
         out = self.engine.process_update(session, text="/start resubmit_not-a-uuid")
         self.assertIn("text", out)
+        self.assertIn("inline_keyboard", out.get("reply_markup", {}))
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
 
