@@ -6,7 +6,8 @@ Approval delivery (Telegram, Instagram, API) is delegated to DeliveryService.
 import logging
 from django.utils import timezone
 
-from core.models import AdRequest, SiteConfiguration
+from core.models import AdRequest, SiteConfiguration, TelegramSession
+from core.i18n import get_message, get_category_display_name
 from core.services import (
     clean_ad_text,
     send_telegram_message,
@@ -69,10 +70,17 @@ def reject_one_ad(ad: AdRequest, reason: str, rejected_by=None) -> None:
             timezone.now(),
         )
 
-    msg = (
-        config.rejection_message_template
-        or "Your ad was not approved. Reason: {reason}. Ad ID: {ad_id}."
-    ).format(reason=reason, ad_id=str(ad.uuid))
+    lang = "en"
+    if ad.telegram_user_id and ad.bot_id:
+        session = TelegramSession.objects.filter(
+            telegram_user_id=ad.telegram_user_id, bot_id=ad.bot_id
+        ).first()
+        if session and session.language:
+            lang = session.language
+    category_name = get_category_display_name(ad.category or "other", lang)
+    msg = get_message("notification_rejected", lang).format(
+        category=category_name, reason=reason
+    )
     if ad.telegram_user_id:
         if ad.bot and ad.bot.is_active:
             send_telegram_rejection_with_button_via_bot(

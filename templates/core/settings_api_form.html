@@ -65,9 +65,10 @@ document.getElementById('apiForm').addEventListener('submit', function(e) {
     .then(function(d) {
       if (d.status === 'success') {
         if (d.new_key) {
+          var modalEl = document.getElementById('newKeyModal');
           document.getElementById('newKeyValue').value = d.new_key;
-          new bootstrap.Modal(document.getElementById('newKeyModal')).show();
-          document.getElementById('newKeyModal').addEventListener('hidden.bs.modal', function() { window.location.href = d.redirect; }, { once: true });
+          bootstrap.Modal.getOrCreateInstance(modalEl).show();
+          modalEl.addEventListener('hidden.bs.modal', function() { window.location.href = d.redirect; }, { once: true });
         } else {
           resultEl.className = 'mt-2 small text-success'; resultEl.textContent = 'Saved.';
           if (d.redirect) window.location.href = d.redirect;

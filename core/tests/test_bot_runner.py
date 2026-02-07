@@ -2,6 +2,7 @@
 Iraniu — Tests for bot runner and worker. Mock Telegram API and Process where needed.
 """
 
+import threading
 from unittest.mock import patch, MagicMock
 
 from django.test import TestCase, Client
@@ -14,6 +15,8 @@ from core.services.bot_runner import (
     BotRunnerManager,
     _mark_stale_offline,
     _run_webhook_health_check,
+    _should_skip_auto_bots,
+    start_auto_bot_runner,
 )
 from core.services.bot_worker import BotWorker
 
@@ -248,6 +251,21 @@ class WebhookHealthCheckTests(TestCase):
         bot.refresh_from_db()
         self.assertEqual(bot.status, TelegramBot.Status.ERROR)
         self.assertIn("Invalid token", bot.last_error or "")
+
+
+class AutoBotRunnerTests(TestCase):
+    """Auto-start runner skips when ENABLE_AUTO_BOTS is false or when running management commands."""
+
+    def test_should_skip_when_test_in_argv(self):
+        """During test run, _should_skip_auto_bots is True (test is in argv)."""
+        self.assertTrue(_should_skip_auto_bots())
+
+    @patch("core.services.bot_runner._should_skip_auto_bots", return_value=True)
+    def test_start_auto_bot_runner_does_not_start_thread_when_skipped(self, mock_skip):
+        """When skip is True, no background thread is started."""
+        start_auto_bot_runner()
+        auto_threads = [t for t in threading.enumerate() if t.name == "iraniu-auto-bots"]
+        self.assertEqual(len(auto_threads), 0, "No auto-bot thread when skipped")
 
 
 class BotControlEndpointsTests(TestCase):

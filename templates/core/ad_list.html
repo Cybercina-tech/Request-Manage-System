@@ -171,12 +171,12 @@
         <td class="align-middle">
           <div class="action-hub">
             {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
-            <button type="button" class="action-btn action-approve" data-ad-id="{{ ad.uuid }}" title="Approve">
+            <a href="{% url 'confirm_approve' ad.uuid %}" class="action-btn action-approve" title="Approve">
               <i class="fa-solid fa-check icon" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="action-btn action-reject" data-ad-id="{{ ad.uuid }}" data-ai-reason="{{ ad.ai_suggested_reason|escapejs }}" title="Reject">
+            </a>
+            <a href="{% url 'confirm_reject' ad.uuid %}" class="action-btn action-reject" title="Reject">
               <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
-            </button>
+            </a>
             {% endif %}
             <a href="{% url 'ad_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
               <i class="fa-solid fa-arrow-up-right-from-square icon" aria-hidden="true"></i>
@@ -244,59 +244,6 @@
   </ul>
 </nav>
 {% endif %}
-
-<!-- Accept Modal -->
-<div class="modal modal-soul fade" id="acceptModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Confirm Approval</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted">This ad will be marked as approved and the user will be notified via Telegram.</p>
-        <input type="hidden" id="acceptAdId" value="">
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-action" id="acceptConfirmBtn">Approve</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Reject Modal -->
-<div class="modal modal-soul fade" id="rejectModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title text-danger">Reject Ad</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted mb-3">Provide a reason (required). The user will receive this via Telegram.</p>
-        <div class="mb-2">
-          <label class="form-label small">Quick-select reason</label>
-          <select id="rejectQuickReason" class="form-select form-select-sm">
-            <option value="">— Choose or type below —</option>
-            {% for val, label in rejection_reasons %}
-            <option value="{{ label }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label class="form-label small">Rejection reason</label>
-          <textarea id="rejectReasonText" class="form-control" rows="3" placeholder="Required"></textarea>
-        </div>
-        <input type="hidden" id="rejectAdId" value="">
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-hot" id="rejectConfirmBtn">Reject</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Bulk Reject Modal -->
 <div class="modal modal-soul fade" id="bulkRejectModal" tabindex="-1">
@@ -600,17 +547,18 @@
 {% block extra_js %}
 <script>
 (function() {
-  const acceptModal = document.getElementById('acceptModal');
-  const rejectModal = document.getElementById('rejectModal');
-  const acceptAdId = document.getElementById('acceptAdId');
-  const rejectAdId = document.getElementById('rejectAdId');
-  const rejectReasonText = document.getElementById('rejectReasonText');
-  const rejectQuickReason = document.getElementById('rejectQuickReason');
   const bulkBar = document.getElementById('bulkBar');
   const bulkCountEl = document.getElementById('bulkCount');
   const selectAll = document.getElementById('selectAll');
   const bulkRejectModal = document.getElementById('bulkRejectModal');
   const bulkRejectReason = document.getElementById('bulkRejectReason');
+
+  function safeHideModal(el) {
+    try {
+      var inst = bootstrap.Modal.getInstance(el);
+      if (inst) inst.hide();
+    } catch (e) { /* noop */ }
+  }
 
   function getSelectedIds() {
     return Array.from(document.querySelectorAll('.ad-select:checked')).map(cb => cb.value);
@@ -634,67 +582,6 @@
       updateBulkBar();
     });
   }
-
-  // Action buttons
-  document.querySelectorAll('.action-approve').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      acceptAdId.value = this.getAttribute('data-ad-id');
-      new bootstrap.Modal(acceptModal).show();
-    });
-  });
-
-  document.getElementById('acceptConfirmBtn').addEventListener('click', function() {
-    const id = acceptAdId.value;
-    if (!id) return;
-    fetch('{% url "approve_ad" %}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_id: id })
-    })
-    .then(r => r.json())
-    .then(data => {
-      bootstrap.Modal.getInstance(acceptModal).hide();
-      if (data.status === 'success') {
-        const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
-        if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
-      } else alert(data.message || 'Error');
-    })
-    .catch(() => alert('Request failed'));
-  });
-
-  document.querySelectorAll('.action-reject').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      rejectAdId.value = this.getAttribute('data-ad-id');
-      rejectReasonText.value = this.getAttribute('data-ai-reason') || '';
-      rejectQuickReason.value = '';
-      new bootstrap.Modal(rejectModal).show();
-    });
-  });
-
-  rejectQuickReason.addEventListener('change', function() {
-    if (this.value) rejectReasonText.value = this.value;
-  });
-
-  document.getElementById('rejectConfirmBtn').addEventListener('click', function() {
-    const id = rejectAdId.value;
-    const reason = rejectReasonText.value.trim();
-    if (!id) return;
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
-    fetch('{% url "reject_ad" %}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_id: id, reason: reason })
-    })
-    .then(r => r.json())
-    .then(data => {
-      bootstrap.Modal.getInstance(rejectModal).hide();
-      if (data.status === 'success') {
-        const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
-        if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
-      } else alert(data.message || 'Error');
-    })
-    .catch(() => alert('Request failed'));
-  });
 
   document.getElementById('bulkClearBtn').addEventListener('click', function() {
     document.querySelectorAll('.ad-select:checked').forEach(cb => { cb.checked = false; });
@@ -729,13 +616,14 @@
   document.getElementById('bulkRejectBtn').addEventListener('click', function() {
     if (getSelectedIds().length === 0) { alert('Select at least one ad.'); return; }
     bulkRejectReason.value = '';
-    new bootstrap.Modal(bulkRejectModal).show();
+    bootstrap.Modal.getOrCreateInstance(bulkRejectModal).show();
   });
 
   document.getElementById('bulkRejectConfirm').addEventListener('click', function() {
     const reason = bulkRejectReason.value.trim();
     if (!reason) { alert('Please enter a rejection reason.'); return; }
     const ids = getSelectedIds();
+    safeHideModal(bulkRejectModal);
     fetch('{% url "bulk_reject" %}', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
@@ -743,7 +631,6 @@
     })
     .then(r => r.json())
     .then(data => {
-      bootstrap.Modal.getInstance(bulkRejectModal).hide();
       if (data.status === 'success') {
         ids.forEach(id => {
           const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');

@@ -3,6 +3,8 @@ Iraniu — Main bot runtime. Starts supervisor; runs polling or webhook health c
 Run: python manage.py runbots [options]
 
 No external supervisors. Bots run in child processes; DB holds worker_pid, heartbeat.
+Uses run_bots_supervisor() from core.services.bot_runner so logic is shared with
+auto-start (AppConfig.ready).
 """
 
 import signal
@@ -12,7 +14,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from core.services.bot_runner import BotRunnerManager
+from core.services.bot_runner import BotRunnerManager, run_bots_supervisor
 
 
 class Command(BaseCommand):
@@ -51,16 +53,6 @@ class Command(BaseCommand):
         if not log_dir:
             base = Path(settings.BASE_DIR)
             log_dir = str(base / "logs")
-        manager = BotRunnerManager(log_dir=log_dir)
-
-        def sigterm(signum, frame):
-            self.stdout.write(self.style.WARNING("SIGTERM received, shutting down"))
-            manager.shutdown()
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, sigterm)
-        signal.signal(signal.SIGINT, sigterm)
-
         once = options.get("once", False)
         bot_ids = options.get("bot_ids") or None
         debug = options.get("debug", False)
@@ -71,12 +63,35 @@ class Command(BaseCommand):
                 f"Supervisor starting (mode={mode}) — Ctrl+C to stop"
             )
         )
+
+        manager_ref = {}
+
+        def sigterm(signum, frame):
+            self.stdout.write(self.style.WARNING("SIGTERM received, shutting down"))
+            manager = manager_ref.get("manager")
+            if manager:
+                manager.shutdown()
+            sys.exit(0)
+
+        try:
+            signal.signal(signal.SIGTERM, sigterm)
+            signal.signal(signal.SIGINT, sigterm)
+        except (ValueError, OSError):
+            pass
+
         if once:
             self.stdout.write("Running single tick then exit...")
+            manager = BotRunnerManager(log_dir=log_dir)
             manager.run_once(bot_ids=bot_ids, debug=debug)
         else:
             try:
-                manager.run_supervisor_loop(bot_ids=bot_ids, debug=debug)
+                run_bots_supervisor(
+                    log_dir=log_dir,
+                    bot_ids=bot_ids,
+                    debug=debug,
+                    manager_ref=manager_ref,
+                )
             except KeyboardInterrupt:
                 self.stdout.write(self.style.WARNING("Interrupted"))
-                manager.shutdown()
+                if manager_ref.get("manager"):
+                    manager_ref["manager"].shutdown()

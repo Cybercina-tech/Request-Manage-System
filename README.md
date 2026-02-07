@@ -321,15 +321,34 @@ Used by the dashboard for auto-refresh.
 
 ### Telegram Bot Runner
 
-The `runbots` management command provides a managed, production-safe way to run all active Telegram bots.
+Telegram bots (polling workers and webhook health checker) can run in two ways: **auto-start with Django** (default) or **standalone** via the `runbots` management command.
 
-#### How to start
+#### Auto-start with Django (default)
+
+When you start Django — `python manage.py runserver`, **gunicorn**, or any WSGI/ASGI server — the bot supervisor starts automatically in a background thread. You do **not** need to run `python manage.py runbots` separately.
+
+- Works on **Windows**, **macOS**, and **Linux**.
+- Bots start only once (singleton); Django’s runserver autoreload does not start duplicate supervisors.
+- Supervisor runs in a daemon thread and does not block the main process.
+- SIGTERM/SIGINT trigger graceful shutdown of the supervisor and workers.
+- If the supervisor loop crashes, it restarts after 60 seconds.
+- To disable auto-start (e.g. in tests or when you run `runbots` manually), set:
+
+  ```bash
+  ENABLE_AUTO_BOTS=false
+  ```
+
+  Or in `settings.py`: `ENABLE_AUTO_BOTS = False`. Auto-start is also skipped when running `manage.py test`, `migrate`, `makemigrations`, `shell`, etc.
+
+#### Standalone: runbots command
+
+For a dedicated process (e.g. separate systemd unit or when auto-start is disabled), run:
 
 ```bash
 python manage.py runbots [--log-dir=logs]
 ```
 
-This starts the supervisor, which:
+This starts the same supervisor, which:
 
 - Loads all active bots (`is_active=True`)
 - Starts one worker process per polling bot
@@ -361,11 +380,14 @@ This starts the supervisor, which:
 #### Settings
 
 ```python
-# iraniu/settings.py (or env TELEGRAM_MODE)
-TELEGRAM_MODE = "polling"  # or "webhook"
+# iraniu/settings.py (or env)
+TELEGRAM_MODE = "polling"   # or "webhook"
+ENABLE_AUTO_BOTS = True     # default; set False or env ENABLE_AUTO_BOTS=false to disable auto-start
 ```
 
-#### Systemd example
+#### Systemd example (optional)
+
+Use this only if you want a **separate** process for bots (e.g. you set `ENABLE_AUTO_BOTS=false` so the web process does not run bots):
 
 ```ini
 [Unit]
@@ -384,7 +406,9 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-#### Supervisor example
+#### Supervisor example (optional)
+
+Use this only if you run bots in a separate process (with `ENABLE_AUTO_BOTS=false`):
 
 ```ini
 [program:iraniu-runbots]

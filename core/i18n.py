@@ -22,23 +22,121 @@ MESSAGES = {
         "en": "🇮🇷 فارسی",
         "fa": "🇮🇷 فارسی",
     },
-    # ——— Main menu ———
+    # ——— Main menu (friendly greeting + intro) ———
     "main_menu": {
         "en": "📋 Main menu",
         "fa": "📋 منوی اصلی",
     },
+    "main_menu_greeting": {
+        "en": "👋 Hello! Welcome to Iraniu.\n\n"
+        "We help you publish classified ads safely and reach the right audience. "
+        "Our platform offers categories for jobs, rent, events, services, and more.\n\n"
+        "🔒 Your data is protected and we review ads to keep our community safe.\n"
+        "✅ You can trust Iraniu for professional, reliable classifieds.\n\n"
+        "Choose an option below:",
+        "fa": "👋 سلام! به ایرانيو خوش آمدید.\n\n"
+        "ما به شما کمک می‌کنیم آگهی‌های خود را به‌صورت امن منتشر کنید و به مخاطب درست برسید. "
+        "دسته‌بندی‌های شغل، اجاره، رویدادها، خدمات و غیره در اختیار شماست.\n\n"
+        "🔒 اطلاعات شما محافظت می‌شود و آگهی‌ها بررسی می‌شوند تا جامعه ما امن بماند.\n"
+        "✅ می‌توانید برای آگهی‌های حرفه‌ای و معتبر به ایرانيو اعتماد کنید.\n\n"
+        "یکی از گزینه‌های زیر را انتخاب کنید:",
+    },
+    "btn_about_us": {
+        "en": "ℹ️ About us",
+        "fa": "ℹ️ درباره ما",
+    },
+    "btn_my_ads": {
+        "en": "📋 My Ads",
+        "fa": "📋 آگهی‌های من",
+    },
+    "btn_back_to_home": {
+        "en": "🏠 Back to Home",
+        "fa": "🏠 بازگشت به خانه",
+    },
+    "about_us_message": {
+        "en": "ℹ️ **Iraniu** — Your trusted classifieds platform.\n\n"
+        "• **Who we are:** We connect people with the right opportunities through safe, reviewed ads.\n"
+        "• **What we do:** Jobs, rent, events, services, sale, and more in one place.\n"
+        "• **Security:** We review content and protect your data. Only quality ads go live.\n"
+        "• **Why trust us:** Professional service, clear process, and support when you need it.\n\n"
+        "Thank you for choosing Iraniu. 🙏",
+        "fa": "ℹ️ **ایرانيو** — پلتفرم مطمئن آگهی‌های شما.\n\n"
+        "• **ما کیستیم:** با آگهی‌های امن و بررسی‌شده، افراد را به فرصت‌های درست وصل می‌کنیم.\n"
+        "• **چه می‌کنیم:** شغل، اجاره، رویدادها، خدمات، فروش و بیشتر در یک جا.\n"
+        "• **امنیت:** محتوا بررسی می‌شود و اطلاعات شما محافظت می‌شود. فقط آگهی‌های باکیفیت منتشر می‌شوند.\n"
+        "• **چرا به ما اعتماد کنید:** خدمات حرفه‌ای، فرایند شفاف و پشتیبانی وقتی نیاز دارید.\n\n"
+        "از اینکه ایرانيو را انتخاب کردید متشکریم. 🙏",
+    },
+    "my_ads_intro": {
+        "en": "📋 **Your ads**\n\n",
+        "fa": "📋 **آگهی‌های شما**\n\n",
+    },
+    "my_ads_empty": {
+        "en": "📋 You have no ads yet.\n\nCreate one from the main menu when you're ready!",
+        "fa": "📋 هنوز آگهی ندارید.\n\nوقتی آماده بودید از منوی اصلی یک آگهی ثبت کنید!",
+    },
+    "my_ads_item": {
+        "en": "• {preview} — **{status}**\n",
+        "fa": "• {preview} — **{status}**\n",
+    },
+    "ad_status_approved": {"en": "✅ Approved", "fa": "✅ تأیید شده"},
+    "ad_status_pending": {"en": "⏳ Pending", "fa": "⏳ در انتظار"},
+    "ad_status_rejected": {"en": "❌ Rejected", "fa": "❌ رد شده"},
+    "rejection_reason_label": {"en": "Reason: ", "fa": "دلیل: "},
     "create_new_ad": {
         "en": "✨ Create new ad",
         "fa": "✨ ثبت آگهی جدید",
     },
-    # ——— Ad content flow ———
-    "enter_ad_text": {
-        "en": "✍️ Enter your ad text (you can send one message with your full ad).",
-        "fa": "✍️ متن آگهی را وارد کنید (یک پیام با متن کامل آگهی بفرستید).",
+    # ——— Ad content flow (category first, then text) ———
+    "select_category_prompt": {
+        "en": "📂 First choose a category for your ad.",
+        "fa": "📂 ابتدا دسته‌بندی آگهی را انتخاب کنید.",
+    },
+    "category_explanation": {
+        "en": "📂 **Category: {category_name}**\n\n"
+        "At **Iraniu** we help you reach the right audience. "
+        "This category is designed for ads like yours.\n\n"
+        "• **What we do:** We review and publish your ad so it appears to interested users.\n"
+        "• **How it works:** After you send your ad text, we check it and notify you when it goes live or if changes are needed.\n"
+        "• **Benefits:** Clear process, safe platform, and professional presentation of your offer.\n\n"
+        "Use the button below to go back to the main menu anytime.",
+        "fa": "📂 **دسته‌بندی: {category_name}**\n\n"
+        "در **ایرانيو** به شما کمک می‌کنیم به مخاطب درست برسید. "
+        "این دسته برای آگهی‌هایی مثل شما طراحی شده است.\n\n"
+        "• **چه می‌کنیم:** آگهی شما را بررسی و منتشر می‌کنیم تا به کاربران علاقه‌مند نمایش داده شود.\n"
+        "• **چطور کار می‌کند:** بعد از ارسال متن آگهی، آن را بررسی می‌کنیم و وقتی منتشر شد یا تغییری لازم باشد به شما خبر می‌دهیم.\n"
+        "• **مزایا:** فرایند شفاف، پلتفرم امن و ارائه حرفه‌ای پیشنهاد شما.\n\n"
+        "هر زمان می‌توانید با دکمه زیر به منوی اصلی برگردید.",
     },
     "choose_category": {
         "en": "📂 Choose category",
         "fa": "📂 دسته‌بندی را انتخاب کنید",
+    },
+    "enter_ad_text": {
+        "en": "✍️ Enter your ad text (you can send one message with your full ad).",
+        "fa": "✍️ متن آگهی را وارد کنید (یک پیام با متن کامل آگهی بفرستید).",
+    },
+    "enter_ad_text_prompt": {
+        "en": "✍️ Now send your ad text (one message).",
+        "fa": "✍️ حالا متن آگهی را بفرستید (یک پیام).",
+    },
+    "enter_ad_text_detailed": {
+        "en": "✍️ **Write your ad — Category: {category_name}**\n\n"
+        "Please send your ad in **one message**. We'll review it and publish if it meets our guidelines.\n\n"
+        "**Tips for better results:**\n"
+        "• Use a clear title or opening line.\n"
+        "• Include important details (location, price, contact if allowed).\n"
+        "• Keep it honest and professional.\n"
+        "• Avoid prohibited content (spam, illegal items).\n\n"
+        "You can use normal line breaks. When you're ready, send your text below. We're here to help! 🙏",
+        "fa": "✍️ **متن آگهی را بنویسید — دسته: {category_name}**\n\n"
+        "لطفاً آگهی را در **یک پیام** بفرستید. ما آن را بررسی می‌کنیم و در صورت رعایت ضوابط منتشر می‌کنیم.\n\n"
+        "**نکات برای نتیجه بهتر:**\n"
+        "• عنوان یا خط اول را واضح بنویسید.\n"
+        "• جزئیات مهم (مکان، قیمت، تماس در صورت مجاز) را ذکر کنید.\n"
+        "• صادق و حرفه‌ای باشید.\n"
+        "• از محتوای ممنوع (اسپم، موارد غیرقانونی) خودداری کنید.\n\n"
+        "می‌توانید از خط جدید استفاده کنید. وقتی آماده بودید متن را بفرستید. ما اینجا هستیم تا کمک کنیم! 🙏",
     },
     "content_confirm": {
         "en": "📝 Your ad:",
@@ -170,11 +268,30 @@ MESSAGES = {
         "en": "❌ You can only resubmit your own ads. Please use the main menu.",
         "fa": "❌ فقط آگهی‌های خودتان قابل ارسال مجدد هستند. لطفاً از منوی اصلی استفاده کنید.",
     },
+    # ——— Approval / Rejection notifications (no Ad ID; category + friendly tone) ———
+    "notification_approved": {
+        "en": "✅ Your ad in 📂 {category} has been approved!\n\nThank you for using Iraniu. 🥳 You can post more ads anytime from the main menu.",
+        "fa": "✅ آگهی شما در دسته 📂 {category} تأیید شد!\n\nاز اینکه از ایرانيو استفاده می‌کنید متشکریم. 🥳 هر زمان می‌توانید از منوی اصلی آگهی‌های بیشتر ثبت کنید.",
+    },
+    "notification_rejected": {
+        "en": "❌ Your ad in 📂 {category} was not approved.\n\nReason: {reason}\n\nPlease review and try again — we’re here to help. 💡 Thank you for choosing Iraniu.",
+        "fa": "❌ آگهی شما در دسته 📂 {category} تأیید نشد.\n\nدلیل: {reason}\n\nلطفاً بررسی کنید و دوباره ارسال کنید؛ ما اینجا هستیم تا کمک کنیم. 💡 از اینکه ایرانيو را انتخاب کردید متشکریم.",
+    },
     # ——— Errors (generic) ———
     "error_generic": {
         "en": "❌ Something went wrong! Please try again.",
         "fa": "❌ مشکلی پیش آمد! لطفاً دوباره تلاش کنید.",
     },
+}
+
+# Map AdRequest.category value to i18n key for display name (used in approval/rejection notifications)
+CATEGORY_MESSAGE_KEYS = {
+    "job_vacancy": "category_job",
+    "rent": "category_rent",
+    "events": "category_events",
+    "services": "category_services",
+    "sale": "category_sale",
+    "other": "category_other",
 }
 
 
@@ -189,3 +306,9 @@ def get_message(key: str, lang: str | None) -> str:
     if lang and lang in msgs:
         return msgs[lang]
     return msgs.get("en", list(msgs.values())[0] if msgs else "")
+
+
+def get_category_display_name(category_value: str, lang: str | None) -> str:
+    """Return localized category name for approval/rejection messages."""
+    key = CATEGORY_MESSAGE_KEYS.get(category_value or "other", "category_other")
+    return get_message(key, lang)

@@ -83,6 +83,12 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Cache busting for static assets (icons, CSS)
 STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
 
+# Media for user-uploaded and generated images (Instagram)
+MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
+# Public base URL for Instagram image URLs (required; set in .env)
+INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_URL = '/login/'
@@ -94,6 +100,9 @@ LOGOUT_REDIRECT_URL = '/'
 TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
     TELEGRAM_MODE = 'polling'
+
+# Auto-start bots with Django (runserver, gunicorn, WSGI). Set env ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
+ENABLE_AUTO_BOTS = os.environ.get('ENABLE_AUTO_BOTS', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Security headers (only when not debugging)
 if not DEBUG:

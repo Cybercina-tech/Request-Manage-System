@@ -18,6 +18,7 @@ from .models import (
     InstagramConfiguration,
     ApiClient,
     DeliveryLog,
+    ScheduledInstagramPost,
 )
 
 
@@ -174,6 +175,16 @@ class ApiClientAdmin(admin.ModelAdmin):
     search_fields = ['name']
     readonly_fields = ['created_at', 'last_used_at']
     exclude = ['api_key_hashed']
+
+
+@admin.register(ScheduledInstagramPost)
+class ScheduledInstagramPostAdmin(admin.ModelAdmin):
+    list_display = ['pk', 'status', 'scheduled_at', 'published_at', 'ad', 'created_at']
+    list_filter = ['status']
+    search_fields = ['message_text', 'caption', 'email', 'phone']
+    readonly_fields = ['instagram_media_id', 'error_message', 'published_at', 'created_at']
+    date_hierarchy = 'scheduled_at'
+    list_editable = ['status']
 
 
 @admin.register(DeliveryLog)

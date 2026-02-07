@@ -22,6 +22,7 @@ from .models import (
     InstagramConfiguration,
     ApiClient,
     DeliveryLog,
+    ScheduledInstagramPost,
     REJECTION_REASONS,
     REJECTION_REASONS_DETAIL,
 )
@@ -140,11 +141,82 @@ def ad_detail(request, uuid):
     context = {
         'ad': ad,
         'client': client,
-        'rejection_reasons': REJECTION_REASONS,
-        'rejection_reasons_detail': REJECTION_REASONS_DETAIL,
         'ai_suggested_reason': ad.ai_suggested_reason or '',
     }
     return render(request, 'core/ad_detail.html', context)
+
+
+@staff_member_required
+def confirm_approve(request, uuid):
+    """
+    Confirm approval page. GET: show confirmation; POST: approve ad via approve_one_ad.
+    Staff-only. Redirects to detail page after success.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
+        return redirect('ad_detail', uuid=ad.uuid)
+    client = None
+    if getattr(ad, 'user_id', None) and ad.user_id:
+        client = ad.user
+    elif ad.telegram_user_id:
+        client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
+    if request.method == 'POST':
+        approve_one_ad(ad, approved_by=request.user)
+        logger.info(
+            "Ad approved: uuid=%s by=%s at=%s",
+            ad.uuid,
+            getattr(request.user, 'username', None) or getattr(request.user, 'id', None),
+            timezone.now(),
+        )
+        return redirect('ad_detail', uuid=ad.uuid)
+    context = {'ad': ad, 'client': client}
+    return render(request, 'core/confirm_approve.html', context)
+
+
+@staff_member_required
+def confirm_reject(request, uuid):
+    """
+    Confirm rejection page. GET: show form; POST: reject via reject_one_ad.
+    Staff-only. Validates ad exists, status is pending, not already processed.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
+        return redirect('ad_detail', uuid=ad.uuid)
+    client = None
+    if getattr(ad, 'user_id', None) and ad.user_id:
+        client = ad.user
+    elif ad.telegram_user_id:
+        client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
+    if request.method == 'POST':
+        reason = (request.POST.get('reason') or '').strip()
+        comment = (request.POST.get('comment') or '').strip()
+        if not reason:
+            context = {
+                'ad': ad,
+                'client': client,
+                'rejection_reasons_detail': REJECTION_REASONS_DETAIL,
+                'error': 'Rejection reason is required.',
+            }
+            return render(request, 'core/confirm_reject.html', context)
+        labels_by_key = dict(REJECTION_REASONS_DETAIL)
+        stored_reason = labels_by_key.get(reason, reason)
+        if reason == 'other' and comment:
+            stored_reason = f"Other: {comment}"
+        reject_one_ad(ad, stored_reason, rejected_by=request.user)
+        logger.info(
+            "Ad rejected: uuid=%s reason=%s by=%s at=%s",
+            ad.uuid,
+            stored_reason[:50],
+            getattr(request.user, 'username', None) or getattr(request.user, 'id', None),
+            timezone.now(),
+        )
+        return redirect('ad_detail', uuid=ad.uuid)
+    context = {
+        'ad': ad,
+        'client': client,
+        'rejection_reasons_detail': REJECTION_REASONS_DETAIL,
+    }
+    return render(request, 'core/confirm_reject.html', context)
 
 
 @staff_member_required
@@ -604,6 +676,66 @@ def settings_instagram_test(request, pk):
     config = get_object_or_404(InstagramConfiguration, pk=pk)
     ok, msg = InstagramService.validate_credentials(config)
     return JsonResponse({'success': ok, 'message': msg})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+@csrf_exempt
+def api_instagram_post(request):
+    """
+    POST /api/instagram/post/
+    Body: { image_url, caption } or { image_url, message_text, email, phone }
+    Optional: scheduled_at (ISO) — schedules instead of posting immediately.
+    Returns JSON { success, message, id } or { scheduled: true, pk }.
+    """
+    from core.services.instagram import InstagramService
+
+    data = parse_request_json(request) or request.POST.dict()
+    image_url = (data.get('image_url') or '').strip()
+    caption = (data.get('caption') or '').strip()
+    message_text = (data.get('message_text') or '').strip()
+    email = (data.get('email') or '').strip()[:254]
+    phone = (data.get('phone') or '').strip()[:20]
+    scheduled_at_str = (data.get('scheduled_at') or '').strip()
+    lang = (data.get('lang') or 'en').strip() or 'en'
+
+    if not image_url:
+        return JsonResponse({'success': False, 'message': 'image_url is required'}, status=400)
+
+    if not caption and message_text:
+        parts = [message_text]
+        if email:
+            parts.append(f'📧 {email}')
+        if phone:
+            parts.append(f'📞 {phone}')
+        parts.append('🙏 Iraniu — trusted classifieds' if lang == 'en' else '🙏 ایرانيو — آگهی‌های معتبر')
+        caption = '\n\n'.join(parts)[:2200]
+
+    if not caption:
+        return JsonResponse({'success': False, 'message': 'caption or message_text is required'}, status=400)
+
+    if scheduled_at_str:
+        try:
+            from datetime import datetime
+            scheduled_at = datetime.fromisoformat(scheduled_at_str.replace('Z', '+00:00'))
+            if scheduled_at.tzinfo is None:
+                scheduled_at = timezone.make_aware(scheduled_at)
+        except (ValueError, TypeError):
+            return JsonResponse({'success': False, 'message': 'Invalid scheduled_at format (use ISO 8601)'}, status=400)
+        post = ScheduledInstagramPost.objects.create(
+            image_url=image_url,
+            caption=caption,
+            message_text=message_text,
+            email=email,
+            phone=phone,
+            scheduled_at=scheduled_at,
+        )
+        return JsonResponse({'scheduled': True, 'pk': post.pk, 'scheduled_at': scheduled_at_str})
+
+    result = InstagramService.post_custom(image_url=image_url, caption=caption)
+    if result.get('success'):
+        return JsonResponse({'success': True, 'message': result.get('message', 'Published'), 'id': result.get('id')})
+    return JsonResponse({'success': False, 'message': result.get('message', 'Unknown error')}, status=500)
 
 
 # ---------- API clients ----------

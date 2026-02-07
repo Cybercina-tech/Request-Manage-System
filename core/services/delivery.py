@@ -48,7 +48,7 @@ class DeliveryService:
             if channel == 'telegram':
                 ok = DeliveryService._send_telegram(ad)
             elif channel == 'instagram':
-                ok = DeliveryService._send_instagram(ad)
+                ok = DeliveryService._send_instagram(ad, log)
             else:  # api
                 ok = DeliveryService._send_api(ad)
 
@@ -68,13 +68,21 @@ class DeliveryService:
 
     @staticmethod
     def _send_telegram(ad: AdRequest) -> bool:
-        """Send approval notification via Telegram (legacy config or ad.bot)."""
+        """Send approval notification via Telegram (localized, category, no Ad ID)."""
+        from core.i18n import get_message, get_category_display_name
+        from core.models import TelegramSession
         from core.services import send_telegram_message, send_telegram_message_via_bot
 
         config = SiteConfiguration.get_config()
-        msg = (config.approval_message_template or "Your ad has been approved. Ad ID: {ad_id}.").format(
-            ad_id=str(ad.uuid)
-        )
+        lang = "en"
+        if ad.telegram_user_id and ad.bot_id:
+            session = TelegramSession.objects.filter(
+                telegram_user_id=ad.telegram_user_id, bot_id=ad.bot_id
+            ).first()
+            if session and session.language:
+                lang = session.language
+        category_name = get_category_display_name(ad.category or "other", lang)
+        msg = get_message("notification_approved", lang).format(category=category_name)
         if not ad.telegram_user_id:
             logger.debug("DeliveryService._send_telegram: no telegram_user_id for ad %s", ad.uuid)
             return True  # nothing to send, consider success
@@ -83,13 +91,15 @@ class DeliveryService:
         return send_telegram_message(ad.telegram_user_id, msg, config)
 
     @staticmethod
-    def _send_instagram(ad: AdRequest) -> bool:
-        """Post ad to Instagram via InstagramService."""
+    def _send_instagram(ad: AdRequest, log: DeliveryLog | None = None) -> bool:
+        """Post ad to Instagram via InstagramService. Populates log.error_message on failure."""
         from core.services.instagram import InstagramService
 
         result = InstagramService.post_ad(ad)
         if isinstance(result, dict) and result.get('success'):
             return True
+        if log is not None and isinstance(result, dict) and result.get('message'):
+            log.error_message = result.get('message', '')[:500]
         return False
 
     @staticmethod

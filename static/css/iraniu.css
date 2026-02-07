@@ -642,7 +642,15 @@ li {
 .badge-cat.sale { background: rgba(139, 148, 158, 0.3); color: var(--text-muted); }
 .badge-cat.other { background: rgba(255,255,255,0.08); color: var(--text-main); }
 
-/* Modals — Glass */
+/* Modals — Glass (z-index ensures modal above backdrop; Bootstrap default 1055/1050, explicit for custom themes) */
+.modal,
+.modal.fade.show {
+  z-index: 1060;
+}
+.modal-backdrop {
+  z-index: 1050;
+}
+
 .modal-soul .modal-content {
   background: rgba(21, 25, 35, 0.8);
   backdrop-filter: blur(15px);

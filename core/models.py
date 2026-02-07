@@ -40,9 +40,10 @@ class SiteConfiguration(models.Model):
     telegram_bot_username = models.CharField(max_length=64, blank=True, help_text='Bot username without @, for Edit & Resubmit link')
     telegram_webhook_url = models.URLField(blank=True)
     use_webhook = models.BooleanField(default=False)
-    # Messaging
+    # Messaging (client-facing: no internal IDs; friendly tone + emoji)
     approval_message_template = models.TextField(
-        default='Your ad has been approved. Ad ID: {ad_id}. Thank you for using Iraniu.'
+        default='🎉 Your ad has been approved! Thank you for using Iraniu. 🙏',
+        help_text='Sent to user on approval. Use {ad_id} only if you need it (not shown by default).',
     )
     rejection_message_template = models.TextField(
         default='Your ad was not approved. Reason: {reason}. Ad ID: {ad_id}.'
@@ -297,6 +298,7 @@ class TelegramSession(models.Model):
         ENTER_PHONE = 'ENTER_PHONE', 'Enter Phone'
         ENTER_EMAIL = 'ENTER_EMAIL', 'Enter Email'
         MAIN_MENU = 'MAIN_MENU', 'Main Menu'
+        MY_ADS = 'MY_ADS', 'My Ads'
         ENTER_CONTENT = 'ENTER_CONTENT', 'Enter Content'
         SELECT_CATEGORY = 'SELECT_CATEGORY', 'Select Category'
         CONFIRM = 'CONFIRM', 'Confirm'
@@ -392,6 +394,54 @@ class ApiClient(models.Model):
 
     def __str__(self):
         return f'{self.name} (active={self.is_active})'
+
+
+class ScheduledInstagramPost(models.Model):
+    """
+    Scheduled Instagram post. Run management command or Celery beat to publish.
+    image_url must be publicly accessible. caption can include message, email, phone.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PUBLISHED = 'published', 'Published'
+        FAILED = 'failed', 'Failed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    image_url = models.URLField(max_length=2048, help_text='Public URL of image for posting')
+    caption = models.TextField(help_text='Caption (message, email, phone). Max 2200 chars.')
+    message_text = models.TextField(blank=True, help_text='Original message text')
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    scheduled_at = models.DateTimeField(db_index=True, help_text='When to publish')
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    instagram_media_id = models.CharField(max_length=64, blank=True)
+    error_message = models.TextField(blank=True)
+    ad = models.ForeignKey(
+        AdRequest,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='scheduled_instagram_posts',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['scheduled_at']
+        verbose_name = 'Scheduled Instagram Post'
+        verbose_name_plural = 'Scheduled Instagram Posts'
+        indexes = [
+            models.Index(fields=['status', 'scheduled_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.status} @ {self.scheduled_at}'
 
 
 class DeliveryLog(models.Model):

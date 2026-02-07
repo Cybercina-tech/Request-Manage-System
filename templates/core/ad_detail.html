@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{# Request Detail: ad info, client info (read-only), approve with confirmation / reject with dropdown reason. #}
+{# Request Detail: ad info, client info (read-only), approve/reject via dedicated confirmation pages. #}
 
 {% block title %}Request {{ ad.uuid }}{% endblock %}
 
@@ -79,138 +79,18 @@
   </ul>
 </div>
 
-{# —— Approval actions (only when pending) —— #}
+{# —— Approval actions (only when pending) —— No modals; links to confirmation pages #}
 {% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
 <div class="card-soul mt-4">
   <h5 class="text-muted mb-3">Actions</h5>
   <div class="d-flex flex-wrap gap-2">
-    <button type="button" class="btn btn-success px-3" id="approveDetailBtn" title="Approve this ad">
+    <a href="{% url 'confirm_approve' ad.uuid %}" class="btn btn-success px-3" title="Approve this ad">
       <i class="fa-solid fa-check icon" aria-hidden="true"></i> Approve
-    </button>
-    <button type="button" class="btn btn-hot px-3" data-bs-toggle="modal" data-bs-target="#rejectDetailModal" title="Reject with reason">
+    </a>
+    <a href="{% url 'confirm_reject' ad.uuid %}" class="btn btn-hot px-3" title="Reject with reason">
       <i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject
-    </button>
+    </a>
   </div>
 </div>
-
-{# Approve confirmation modal — prevents accidental approval #}
-<div class="modal modal-soul fade" id="approveConfirmModal" tabindex="-1" aria-labelledby="approveConfirmModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title text-success" id="approveConfirmModalLabel"><i class="fa-solid fa-check icon" aria-hidden="true"></i> Confirm approval</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <p class="mb-0">Are you sure you want to approve this ad? The submitter will be notified.</p>
-      </div>
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-success" id="approveConfirmSubmit"><i class="fa-solid fa-check icon" aria-hidden="true"></i> Yes, approve</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-{# Reject modal — dropdown of predefined reasons; optional comment for "Other" #}
-<div class="modal modal-soul fade" id="rejectDetailModal" tabindex="-1" aria-labelledby="rejectDetailModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title text-danger" id="rejectDetailModalLabel"><i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject ad</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <label class="form-label">Rejection reason <span class="text-danger">*</span></label>
-        <select id="detailRejectReason" class="form-select form-select-sm mb-3" required>
-          <option value="">— Choose a reason —</option>
-          {% for value, label in rejection_reasons_detail %}
-          <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-        <div id="detailRejectOtherWrap" class="d-none">
-          <label class="form-label small text-muted">Optional comment for "Other"</label>
-          <textarea id="detailRejectComment" class="form-control form-control-sm" rows="2" placeholder="Optional details…" maxlength="500"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-hot" id="detailRejectConfirm"><i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject</button>
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
-{% endblock %}
-
-{% block extra_js %}
-{% if ad.status == 'pending_manual' or ad.status == 'pending_ai' %}
-<script>
-(function() {
-  const adId = '{{ ad.uuid }}';
-
-  // Approve: show confirmation modal first, then submit
-  const approveBtn = document.getElementById('approveDetailBtn');
-  const approveModal = document.getElementById('approveConfirmModal');
-  const approveConfirmSubmit = document.getElementById('approveConfirmSubmit');
-
-  approveBtn.addEventListener('click', function() {
-    const modal = new bootstrap.Modal(approveModal);
-    modal.show();
-  });
-
-  approveConfirmSubmit.addEventListener('click', function() {
-    fetch('{% url "approve_ad" %}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_id: adId })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.status === 'success') window.location.href = '{% url "ad_list" %}';
-      else alert(data.message || 'Error');
-    })
-    .catch(() => alert('Request failed'));
-    bootstrap.Modal.getInstance(approveModal).hide();
-  });
-
-  // Reject: dropdown required; show optional comment only when "Other" selected
-  const reasonSelect = document.getElementById('detailRejectReason');
-  const otherWrap = document.getElementById('detailRejectOtherWrap');
-  const commentEl = document.getElementById('detailRejectComment');
-
-  reasonSelect.addEventListener('change', function() {
-    if (this.value === 'other') {
-      otherWrap.classList.remove('d-none');
-    } else {
-      otherWrap.classList.add('d-none');
-      commentEl.value = '';
-    }
-  });
-
-  document.getElementById('detailRejectConfirm').addEventListener('click', function() {
-    const reason = reasonSelect.value.trim();
-    if (!reason) {
-      alert('Please choose a rejection reason.');
-      return;
-    }
-    const comment = commentEl.value.trim();
-    const body = { ad_id: adId, reason: reason };
-    if (reason === 'other' && comment) body.comment = comment;
-
-    fetch('{% url "reject_ad" %}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body)
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.status === 'success') window.location.href = '{% url "ad_list" %}';
-      else alert(data.message || 'Error');
-    })
-    .catch(() => alert('Request failed'));
-  });
-})();
-</script>
 {% endif %}
 {% endblock %}

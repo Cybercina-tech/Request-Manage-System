@@ -93,35 +93,64 @@ class ConversationEngine:
                 return self._reply_main_menu(session, edit_previous, message_id)
             return self._reply_select_language(session, edit_previous, message_id)
 
+        # Flow: MAIN_MENU → (about_us | my_ads | create_ad) → SELECT_CATEGORY → ENTER_CONTENT → CONFIRM
         if session.state == TelegramSession.State.MAIN_MENU:
+            if callback_data == "back_to_home":
+                return self._reply_main_menu(session, edit_previous, message_id)
+            if callback_data == "about_us":
+                return self._reply_about_us(session, edit_previous, message_id)
+            if callback_data == "my_ads":
+                session.state = TelegramSession.State.MY_ADS
+                session.save(update_fields=["state", "last_activity"])
+                logger.info("conversation state session_id=%s MAIN_MENU → MY_ADS", session.pk)
+                return self._reply_my_ads(session, edit_previous, message_id)
             create_key_en = get_message("create_new_ad", "en").lower()
             create_key_fa = get_message("create_new_ad", "fa")
             if callback_data == "create_ad" or (
                 text and (create_key_en in (text or "").lower() or (create_key_fa and create_key_fa in (text or "")))
             ):
-                session.state = TelegramSession.State.ENTER_CONTENT
+                session.state = TelegramSession.State.SELECT_CATEGORY
                 session.context = {}
                 session.save(update_fields=["state", "context", "last_activity"])
-                return self._reply_enter_content(session)
+                logger.info("conversation state session_id=%s MAIN_MENU → SELECT_CATEGORY", session.pk)
+                return self._reply_select_category(session, edit_previous, message_id)
             return self._reply_main_menu(session, edit_previous, message_id)
 
-        if session.state == TelegramSession.State.ENTER_CONTENT:
-            if not text or not text.strip():
-                return self._reply_enter_content(session)
-            session.context["content"] = text.strip()[:4000]
-            session.state = TelegramSession.State.SELECT_CATEGORY
-            session.save(update_fields=["state", "context", "last_activity"])
-            return self._reply_select_category(session, edit_previous, message_id)
+        if session.state == TelegramSession.State.MY_ADS:
+            if callback_data == "back_to_home":
+                session.state = TelegramSession.State.MAIN_MENU
+                session.save(update_fields=["state", "last_activity"])
+                return self._reply_main_menu(session, edit_previous, message_id)
+            return self._reply_my_ads(session, edit_previous, message_id)
 
         if session.state == TelegramSession.State.SELECT_CATEGORY:
+            if callback_data == "back_to_home":
+                session.state = TelegramSession.State.MAIN_MENU
+                session.save(update_fields=["state", "last_activity"])
+                return self._reply_main_menu(session, edit_previous, message_id)
             cat = callback_data or (text.strip() if text else "")
             valid = [c[0] for c in CATEGORY_KEYS]
             if cat in valid:
                 session.context["category"] = cat
-                session.state = TelegramSession.State.CONFIRM
+                session.state = TelegramSession.State.ENTER_CONTENT
                 session.save(update_fields=["state", "context", "last_activity"])
-                return self._reply_confirm(session, edit_previous, message_id)
+                logger.info("conversation state session_id=%s SELECT_CATEGORY → ENTER_CONTENT category=%s", session.pk, cat)
+                return self._reply_after_category(session, edit_previous, message_id)
             return self._reply_select_category(session, edit_previous, message_id)
+
+        if session.state == TelegramSession.State.ENTER_CONTENT:
+            if callback_data == "back_to_home":
+                session.state = TelegramSession.State.MAIN_MENU
+                session.context = {}
+                session.save(update_fields=["state", "context", "last_activity"])
+                return self._reply_main_menu(session, edit_previous, message_id)
+            if not text or not text.strip():
+                return self._reply_enter_content(session, edit_previous=edit_previous, message_id=message_id)
+            session.context["content"] = text.strip()[:4000]
+            session.state = TelegramSession.State.CONFIRM
+            session.save(update_fields=["state", "context", "last_activity"])
+            logger.info("conversation state session_id=%s ENTER_CONTENT → CONFIRM", session.pk)
+            return self._reply_confirm(session, edit_previous, message_id)
 
         if session.state == TelegramSession.State.CONFIRM:
             if callback_data == "confirm_yes":
@@ -140,7 +169,12 @@ class ConversationEngine:
             if callback_data == "confirm_edit":
                 session.state = TelegramSession.State.ENTER_CONTENT
                 session.save(update_fields=["state", "last_activity"])
-                return self._reply_enter_content(session, old_content=session.context.get("content", ""))
+                return self._reply_enter_content(
+                    session,
+                    old_content=session.context.get("content", ""),
+                    edit_previous=edit_previous,
+                    message_id=message_id,
+                )
             return self._reply_confirm(session, edit_previous, message_id)
 
         if session.state == TelegramSession.State.ASK_CONTACT:
@@ -334,28 +368,120 @@ class ConversationEngine:
 
     def _reply_main_menu(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
         lang = session.language or "en"
-        text = get_message("main_menu", lang)
+        text = get_message("main_menu_greeting", lang)
+        about_label = get_message("btn_about_us", lang)
+        my_ads_label = get_message("btn_my_ads", lang)
         create_label = get_message("create_new_ad", lang)
-        reply_markup = {"inline_keyboard": [[{"text": create_label, "callback_data": "create_ad"}]]}
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": about_label, "callback_data": "about_us"}, {"text": my_ads_label, "callback_data": "my_ads"}],
+                [{"text": create_label, "callback_data": "create_ad"}],
+            ]
+        }
         out = {"text": text, "reply_markup": reply_markup}
         if edit_previous and message_id is not None:
             out["edit_previous"] = True
             out["message_id"] = message_id
         return out
 
-    def _reply_enter_content(self, session: TelegramSession, old_content: str = "") -> dict:
+    def _reply_about_us(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
         lang = session.language or "en"
-        text = get_message("enter_ad_text", lang)
+        text = get_message("about_us_message", lang)
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_my_ads(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
+        lang = session.language or "en"
+        ads = list(
+            AdRequest.objects.filter(telegram_user_id=session.telegram_user_id).order_by("-created_at")[:50]
+        )
+        intro = get_message("my_ads_intro", lang)
+        if not ads:
+            text = get_message("my_ads_empty", lang)
+        else:
+            status_key = {
+                AdRequest.Status.APPROVED: "ad_status_approved",
+                AdRequest.Status.PENDING: "ad_status_pending",
+                AdRequest.Status.PENDING_AI: "ad_status_pending",
+                AdRequest.Status.PENDING_MANUAL: "ad_status_pending",
+                AdRequest.Status.REJECTED: "ad_status_rejected",
+                AdRequest.Status.SOLVED: "ad_status_approved",
+                AdRequest.Status.EXPIRED: "ad_status_rejected",
+            }
+            reason_label = get_message("rejection_reason_label", lang)
+            lines = [intro]
+            for ad in ads:
+                st = status_key.get(ad.status, "ad_status_pending")
+                status_text = get_message(st, lang)
+                preview = (ad.content or "")[:80].replace("\n", " ") + ("…" if len(ad.content or "") > 80 else "")
+                lines.append(get_message("my_ads_item", lang).format(preview=preview, status=status_text))
+                if ad.status == AdRequest.Status.REJECTED and getattr(ad, "rejection_reason", None):
+                    lines.append(f"  {reason_label}{ad.rejection_reason}\n")
+            text = "".join(lines).strip()
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_after_category(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
+        """After category selected: long explanation + enter ad text instructions, one message, with Back to Home."""
+        lang = session.language or "en"
+        category = (session.context or {}).get("category", "other")
+        category_name = next(
+            (get_message(msg_key, lang) for ck, msg_key in CATEGORY_KEYS if ck == category),
+            category,
+        )
+        part1 = get_message("category_explanation", lang).format(category_name=category_name)
+        part2 = get_message("enter_ad_text_detailed", lang).format(category_name=category_name)
+        text = f"{part1}\n\n———\n\n{part2}"
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_enter_content(
+        self,
+        session: TelegramSession,
+        old_content: str = "",
+        edit_previous: bool = False,
+        message_id: int | None = None,
+    ) -> dict:
+        lang = session.language or "en"
+        category = (session.context or {}).get("category", "other")
+        category_name = next(
+            (get_message(msg_key, lang) for ck, msg_key in CATEGORY_KEYS if ck == category),
+            category,
+        )
+        text = get_message("enter_ad_text_detailed", lang).format(category_name=category_name)
         if old_content:
             text = f"{text}\n\n———\n{old_content[:500]}\n———"
-        return {"text": text}
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
 
     def _reply_select_category(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
         lang = session.language or "en"
-        text = get_message("choose_category", lang)
+        text = get_message("select_category_prompt", lang)
         keyboard = []
         for cat_key, msg_key in CATEGORY_KEYS:
             keyboard.append([{"text": get_message(msg_key, lang), "callback_data": cat_key}])
+        back_label = get_message("btn_back_to_home", lang)
+        keyboard.append([{"text": back_label, "callback_data": "back_to_home"}])
         out = {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
         if edit_previous and message_id is not None:
             out["edit_previous"] = True
@@ -473,6 +599,11 @@ class ConversationEngine:
     def _reply_resubmit_error(self, session: TelegramSession, error_key: str) -> dict:
         lang = session.language or "en"
         text = get_message(error_key, lang)
+        back_label = get_message("btn_back_to_home", lang)
         create_label = get_message("create_new_ad", lang)
-        reply_markup = {"inline_keyboard": [[{"text": create_label, "callback_data": "create_ad"}]]}
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": back_label, "callback_data": "back_to_home"}, {"text": create_label, "callback_data": "create_ad"}]
+            ]
+        }
         return {"text": text, "reply_markup": reply_markup}

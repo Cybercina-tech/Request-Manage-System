@@ -1,11 +1,18 @@
 """
 Iraniu — Bot runner manager: start/stop/restart polling workers.
 Supports polling (getUpdates) and webhook (health checker only) modes.
+
+Provides run_bots_supervisor() for use by the runbots management command and
+by the auto-start runner (AppConfig.ready) so logic is not duplicated.
 """
 
+import atexit
 import logging
 import multiprocessing
 import os
+import signal
+import sys
+import threading
 import time
 
 from django.conf import settings
@@ -321,6 +328,162 @@ class BotRunnerManager:
         for bot_id in list(self._processes.keys()):
             self._stop_bot_process(bot_id)
         logger.info("Supervisor shutdown complete")
+
+
+def run_bots_supervisor(
+    log_dir=None,
+    bot_ids=None,
+    debug=False,
+    manager_ref=None,
+):
+    """
+    Create a BotRunnerManager and run the supervisor loop (blocking).
+    Used by the runbots management command and by the auto-start runner thread.
+
+    :param log_dir: Directory for bot_<id>.log files; default from settings.BASE_DIR/logs.
+    :param bot_ids: Optional list of bot IDs to run; None = all active.
+    :param debug: Enable debug logging.
+    :param manager_ref: Optional dict; if provided, manager_ref['manager'] is set to the
+        BotRunnerManager so callers (e.g. signal handlers) can call manager.shutdown().
+    """
+    from pathlib import Path
+
+    if not log_dir or not str(log_dir).strip():
+        base = getattr(settings, "BASE_DIR", None)
+        if base is None:
+            base = Path(__file__).resolve().parent.parent.parent
+        log_dir = str(Path(base) / "logs")
+    else:
+        log_dir = str(log_dir).strip() or str(Path(settings.BASE_DIR) / "logs")
+
+    manager = BotRunnerManager(log_dir=log_dir)
+    if manager_ref is not None:
+        manager_ref["manager"] = manager
+    try:
+        manager.run_supervisor_loop(bot_ids=bot_ids, debug=debug)
+    finally:
+        if manager_ref is not None:
+            manager_ref.pop("manager", None)
+
+
+# --- Auto-start runner (singleton, background thread) ---
+
+_auto_lock = threading.Lock()
+_auto_started = False
+_auto_manager_ref = {}
+_auto_thread = None
+_AUTO_RESTART_DELAY_SEC = 60
+
+
+class _StreamToLog:
+    """File-like wrapper that writes to Django logger (for stdout/stderr redirect)."""
+
+    def __init__(self, log_func, prefix=""):
+        self._log = log_func
+        self._prefix = (prefix + " ") if prefix else ""
+
+    def write(self, msg):
+        if msg and msg.strip():
+            self._log("%s%s", self._prefix, msg.rstrip())
+
+    def flush(self):
+        pass
+
+
+def _should_skip_auto_bots():
+    """True if we should not start auto bots (tests, migrations, or disabled by env)."""
+    if os.environ.get("ENABLE_AUTO_BOTS", "").lower() in ("false", "0", "no", "off"):
+        return True
+    enabled = getattr(settings, "ENABLE_AUTO_BOTS", None)
+    if enabled is not None and not enabled:
+        return True
+    argv = getattr(sys, "argv", []) or []
+    # Do not start during test, migrate, or other management commands.
+    skip_commands = ("test", "migrate", "makemigrations", "shell", "shell_plus", "flush", "loaddata", "dumpdata")
+    if any(c in argv for c in skip_commands):
+        return True
+    # Django autoreload: only run in the child process that actually serves (RUN_MAIN=true).
+    # Prevents two polling workers (parent + child) and duplicate message handling in dev.
+    if "runserver" in argv and os.environ.get("RUN_MAIN") != "true":
+        return True
+    return False
+
+
+def _shutdown_auto_runner(*_args):
+    """Signal/atexit: request supervisor shutdown so the runner thread can exit."""
+    manager = _auto_manager_ref.get("manager")
+    if manager:
+        try:
+            manager.shutdown()
+        except Exception as e:
+            logger.exception("Error shutting down auto bot runner: %s", e)
+
+
+def _auto_runner_thread_target():
+    """Background thread: run supervisor with restart-on-crash and stdout/stderr → logging."""
+    runner_logger = logging.getLogger("core.services.bot_runner.auto")
+    # Redirect stdout/stderr in this thread to Django logging
+    orig_stdout, orig_stderr = sys.stdout, sys.stderr
+    sys.stdout = _StreamToLog(runner_logger.info, "stdout")
+    sys.stderr = _StreamToLog(runner_logger.warning, "stderr")
+    try:
+        while True:
+            try:
+                run_bots_supervisor(
+                    log_dir=None,
+                    bot_ids=None,
+                    debug=False,
+                    manager_ref=_auto_manager_ref,
+                )
+                break
+            except Exception as e:
+                runner_logger.exception(
+                    "Auto bot supervisor loop crashed, restarting in %ss: %s",
+                    _AUTO_RESTART_DELAY_SEC,
+                    e,
+                )
+                time.sleep(_AUTO_RESTART_DELAY_SEC)
+    finally:
+        sys.stdout = orig_stdout
+        sys.stderr = orig_stderr
+
+
+def start_auto_bot_runner():
+    """
+    Start the bot supervisor in a background thread (singleton).
+    Safe to call from AppConfig.ready(). Skips if ENABLE_AUTO_BOTS is False
+    or when under Django autoreload (only starts in the real server process).
+    """
+    global _auto_started, _auto_thread
+
+    if _should_skip_auto_bots():
+        logger.debug("Auto bot runner skipped (ENABLE_AUTO_BOTS or runserver reload)")
+        return
+
+    with _auto_lock:
+        if _auto_started:
+            logger.debug("Auto bot runner already started")
+            return
+        _auto_started = True
+
+    # Register shutdown so SIGTERM/SIGINT and process exit trigger graceful shutdown
+    try:
+        signal.signal(signal.SIGTERM, _shutdown_auto_runner)
+    except (ValueError, OSError):
+        pass  # main thread only on some platforms
+    try:
+        signal.signal(signal.SIGINT, _shutdown_auto_runner)
+    except (ValueError, OSError):
+        pass
+    atexit.register(_shutdown_auto_runner)
+
+    _auto_thread = threading.Thread(
+        target=_auto_runner_thread_target,
+        name="iraniu-auto-bots",
+        daemon=True,
+    )
+    _auto_thread.start()
+    logger.info("Auto bot runner started in background thread (runserver/gunicorn/WSGI)")
 
 
 def register_webhook_for_bot(bot: TelegramBot):

@@ -27,6 +27,10 @@ from core.services import (
     answer_callback_query_via_bot,
 )
 from core.services.users import get_or_create_user_from_update
+from core.services.telegram_update_handler import (
+    should_skip_duplicate_update,
+    LAST_PROCESSED_UPDATE_ID_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +90,21 @@ def telegram_webhook(request, bot_id: int):
         logger.debug("Webhook bot_id=%s update_id=%s: no message/callback to handle, ack", bot_id, update_id)
         return HttpResponse(status=200)
 
+    engine = ConversationEngine(bot)
+    session = engine.get_or_create_session(user_id)
+    if should_skip_duplicate_update(session, update_id):
+        logger.info(
+            "Webhook skip duplicate update_id=%s session_id=%s bot_id=%s",
+            update_id, session.pk, bot_id,
+        )
+        return HttpResponse(status=200)
+
     logger.info(
-        "Telegram message received bot_id=%s chat_id=%s user_id=%s text=%s callback=%s contact=%s",
+        "Telegram message received bot_id=%s chat_id=%s user_id=%s update_id=%s text=%s callback=%s contact=%s",
         bot_id,
         chat_id,
         user_id,
+        update_id,
         (text or "")[:100] if text else None,
         callback_data,
         bool(contact_phone),
@@ -117,8 +131,6 @@ def telegram_webhook(request, bot_id: int):
         logger.debug("Message log create failed: %s", e)
 
     try:
-        engine = ConversationEngine(bot)
-        session = engine.get_or_create_session(user_id)
         response = engine.process_update(
             session,
             text=text,
@@ -147,10 +159,9 @@ def telegram_webhook(request, bot_id: int):
 
     if text_out:
         try:
-            used_edit = False
             sent_message_id = None
             if edit_previous:
-                # Only bot messages can be edited. Fallback: if edit fails, send new message (same text/reply_markup).
+                # Only bot messages can be edited. Fallback: if edit fails, send new message once (no duplicate).
                 ok = edit_message_text_via_bot(
                     chat_id,
                     response["message_id"],
@@ -159,26 +170,29 @@ def telegram_webhook(request, bot_id: int):
                     reply_markup=reply_markup,
                 )
                 if ok:
-                    used_edit = True
                     sent_message_id = response["message_id"]
                 else:
                     logger.warning(
-                        "Webhook edit failed (message deleted/invalid/too old), sending new message bot_id=%s chat_id=%s",
+                        "Webhook edit failed (message not editable), sending new message once bot_id=%s chat_id=%s",
                         bot_id, chat_id,
                     )
                     sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
-            if not used_edit:
+            else:
                 sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
             if sent_message_id is not None:
                 ctx = session.context or {}
                 ctx["last_bot_message_id"] = sent_message_id
+                ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
                 session.context = ctx
                 session.save(update_fields=["context"])
             logger.info(
-                "Telegram reply sent bot_id=%s chat_id=%s edit=%s len=%s",
+                "Telegram reply sent bot_id=%s chat_id=%s update_id=%s session_id=%s sent_msg_id=%s edit=%s len=%s",
                 bot_id,
                 chat_id,
-                used_edit,
+                update_id,
+                session.pk,
+                sent_message_id,
+                edit_previous,
                 len(text_out),
             )
         except Exception as e:
