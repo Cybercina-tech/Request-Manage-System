@@ -1,0 +1,7 @@
+# Serve Django static files
+Alias /static /home/iraniu/Ads_manager/public/staticfiles
+
+<Directory /home/iraniu/Ads_manager/public/staticfiles>
+    Options Indexes FollowSymLinks
+    Require all granted
+</Directory>
