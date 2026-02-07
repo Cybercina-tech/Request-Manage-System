@@ -1492,3 +1492,58 @@ input[type="range"]::-moz-range-thumb {
   height: 20px;
   vertical-align: middle;
 }
+
+/* ============================================
+   ERROR PAGES — 404, 500, 403, 400 (branded)
+   ============================================ */
+.error-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 2rem;
+  text-align: center;
+}
+.error-page-inner {
+  max-width: 420px;
+}
+.error-page .error-code {
+  font-family: var(--font-heading);
+  font-size: 4rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  background: var(--soul-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.5rem;
+}
+.error-page .error-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+}
+.error-page .error-message {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+.error-page .btn-soul,
+.error-page .btn-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.error-page .error-emoji {
+  font-size: 2.5rem;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+  display: block;
+}
+@media (max-width: 576px) {
+  .error-page .error-code { font-size: 3rem; }
+  .error-page .error-title { font-size: 1.15rem; }
+}

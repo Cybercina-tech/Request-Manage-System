@@ -10,9 +10,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-iraniu')
 
-DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+DEBUG = False
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = [
+    "requests.iraniu.uk",
+    "www.requests.iraniu.uk",
+    "localhost",
+    "127.0.0.1",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://requests.iraniu.uk",
+    "http://requests.iraniu.uk",
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -77,11 +87,18 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
 # Cache busting for static assets (icons, CSS)
 STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
+
+# Security defaults (minimal, no HSTS yet)
+SESSION_COOKIE_SECURE = False  # enable later if SSL forced
+CSRF_COOKIE_SECURE = False     # enable later if SSL forced
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -95,8 +112,3 @@ TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
     TELEGRAM_MODE = 'polling'
 
-# Security headers (only when not debugging)
-if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'DENY'
