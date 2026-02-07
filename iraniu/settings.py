@@ -13,15 +13,15 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-irani
 DEBUG = False
 
 ALLOWED_HOSTS = [
-    "requests.iraniu.uk",
-    "www.requests.iraniu.uk",
+    "request.iraniu.uk",
+    "www.request.iraniu.uk",
     "localhost",
     "127.0.0.1",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://requests.iraniu.uk",
-    "http://requests.iraniu.uk",
+    "https://request.iraniu.uk",
+    "http://request.iraniu.uk",
 ]
 
 INSTALLED_APPS = [
@@ -87,9 +87,13 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "/static/"
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # folder for collected static files
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
 # Cache busting for static assets (icons, CSS)
 STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
 
