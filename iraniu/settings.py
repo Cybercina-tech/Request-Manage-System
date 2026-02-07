@@ -93,26 +93,21 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # folder for collected static files
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
 # Cache busting for static assets (icons, CSS)
 STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
 
-<<<<<<< HEAD
 # Media for user-uploaded and generated images (Instagram)
-MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
+MEDIA_ROOT = BASE_DIR / 'media'
 # Public base URL for Instagram image URLs (required; set in .env)
 INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
-=======
+
 # Security defaults (minimal, no HSTS yet)
 SESSION_COOKIE_SECURE = False  # enable later if SSL forced
 CSRF_COOKIE_SECURE = False     # enable later if SSL forced
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
->>>>>>> 29451ba321b94dab344d06bf8c4e17cff1d87f44
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -126,7 +121,6 @@ TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
     TELEGRAM_MODE = 'polling'
 
-<<<<<<< HEAD
 # Auto-start bots with Django (runserver, gunicorn, WSGI). Set env ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
 ENABLE_AUTO_BOTS = os.environ.get('ENABLE_AUTO_BOTS', 'true').lower() in ('true', '1', 'yes', 'on')
 
@@ -135,5 +129,3 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
-=======
->>>>>>> 29451ba321b94dab344d06bf8c4e17cff1d87f44
