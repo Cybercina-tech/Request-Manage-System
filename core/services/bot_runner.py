@@ -194,6 +194,7 @@ class BotRunnerManager:
         Check workers; apply requested_action; restart dead; mark stale offline.
         """
         _mark_stale_offline()
+        # Only POLLING bots: WEBHOOK bots are never spawned as polling workers.
         try:
             bots = list(
                 TelegramBot.objects.filter(
@@ -391,19 +392,20 @@ class _StreamToLog:
 
 
 def _should_skip_auto_bots():
-    """True if we should not start auto bots (tests, migrations, or disabled by env)."""
+    """True if we should not start auto bots (tests, migrations, Passenger, or disabled by env)."""
     if os.environ.get("ENABLE_AUTO_BOTS", "").lower() in ("false", "0", "no", "off"):
         return True
     enabled = getattr(settings, "ENABLE_AUTO_BOTS", None)
     if enabled is not None and not enabled:
         return True
+    if os.environ.get("PASSENGER_APP_ENV"):
+        return True
+    if "Phusion_Passenger" in (os.environ.get("SERVER_SOFTWARE") or ""):
+        return True
     argv = getattr(sys, "argv", []) or []
-    # Do not start during test, migrate, or other management commands.
     skip_commands = ("test", "migrate", "makemigrations", "shell", "shell_plus", "flush", "loaddata", "dumpdata")
     if any(c in argv for c in skip_commands):
         return True
-    # Django autoreload: only run in the child process that actually serves (RUN_MAIN=true).
-    # Prevents two polling workers (parent + child) and duplicate message handling in dev.
     if "runserver" in argv and os.environ.get("RUN_MAIN") != "true":
         return True
     return False

@@ -9,6 +9,7 @@ from django.utils.html import format_html
 from datetime import timedelta
 from .models import (
     SiteConfiguration,
+    Category,
     AdRequest,
     TelegramBot,
     TelegramSession,
@@ -113,6 +114,14 @@ class VerificationCodeAdmin(admin.ModelAdmin):
         return False
 
 
+@admin.register(Category)
+class CategoryAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'color', 'is_active', 'order']
+    list_filter = ['is_active']
+    search_fields = ['name', 'slug']
+    list_editable = ['is_active', 'order']
+
+
 @admin.register(AdRequest)
 class AdRequestAdmin(admin.ModelAdmin):
     list_display = ['uuid', 'category', 'status', 'bot', 'user', 'created_at']
@@ -124,16 +133,17 @@ class AdRequestAdmin(admin.ModelAdmin):
 @admin.register(TelegramBot)
 class TelegramBotAdmin(admin.ModelAdmin):
     list_display = [
-        'name', 'username', 'is_active', 'status', 'worker_pid',
-        'last_heartbeat', 'last_error_short', 'updated_at',
+        'name', 'username', 'is_default', 'is_active', 'status', 'mode', 'worker_pid',
+        'last_heartbeat', 'last_webhook_received', 'last_error_short', 'updated_at',
     ]
-    list_filter = ['is_active', 'status', 'mode']
+    list_filter = ['is_active', 'is_default', 'status', 'mode']
     search_fields = ['name', 'username']
     readonly_fields = [
-        'created_at', 'updated_at', 'last_heartbeat', 'worker_pid',
-        'worker_started_at', 'last_error', 'status',
+        'created_at', 'updated_at', 'last_heartbeat', 'last_webhook_received',
+        'worker_pid', 'worker_started_at', 'last_error', 'status', 'webhook_secret_token',
     ]
     exclude = ['bot_token_encrypted']  # Never show in admin; use set_token in code only
+    actions = ['activate_webhook_mode']
 
     def last_error_short(self, obj):
         if not obj.last_error:
@@ -141,6 +151,28 @@ class TelegramBotAdmin(admin.ModelAdmin):
         s = obj.last_error[:80] + "…" if len(obj.last_error) > 80 else obj.last_error
         return s
     last_error_short.short_description = "Last Error"
+
+    @admin.action(description='Switch to Webhook Mode')
+    def activate_webhook_mode(self, request, queryset):
+        from core.services.bot_manager import activate_webhook
+        done = 0
+        urls = []
+        for bot in queryset:
+            success, msg, full_url = activate_webhook(bot)
+            if success:
+                done += 1
+                if full_url:
+                    urls.append(f"{bot.name}: {full_url}")
+            else:
+                self.message_user(request, f"{bot.name}: {msg}", level=admin.constants.WARNING)
+        if done:
+            self.message_user(
+                request,
+                f"Webhook activated for {done} bot(s). URL(s): " + "; ".join(urls) if urls else f"Webhook activated for {done} bot(s).",
+                level=admin.constants.SUCCESS,
+            )
+        elif not urls:
+            self.message_user(request, "No bot activated. Set production_base_url (HTTPS) in Site Configuration.", level=admin.constants.ERROR)
 
 
 @admin.register(TelegramSession)

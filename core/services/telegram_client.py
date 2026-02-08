@@ -26,14 +26,14 @@ logger = logging.getLogger(__name__)
 # Telegram API base URL
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
-# Default timeouts (seconds)
-DEFAULT_CONNECT_TIMEOUT = 10
-DEFAULT_READ_TIMEOUT = 30
-DEFAULT_TOTAL_TIMEOUT = 40
+# Default timeouts (seconds) - strict to avoid blocking request thread
+DEFAULT_CONNECT_TIMEOUT = 5
+DEFAULT_READ_TIMEOUT = 15
+DEFAULT_TOTAL_TIMEOUT = 25
 
-# Retry configuration
-MAX_RETRIES = 3
-BACKOFF_FACTOR = 0.5
+# Retry configuration - fewer retries, shorter backoff
+MAX_RETRIES = 2
+BACKOFF_FACTOR = 0.3
 RETRY_STATUS_CODES = [500, 502, 503, 504]  # Retry on server errors
 
 

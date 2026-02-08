@@ -15,8 +15,11 @@ How updates work (webhook mode):
 import json
 import logging
 from django.http import HttpResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.views import View
+from django.utils.decorators import method_decorator
 from django.core.cache import cache
 
 from core.models import TelegramBot, TelegramMessageLog
@@ -37,6 +40,130 @@ logger = logging.getLogger(__name__)
 # Rate limit: max requests per user per minute per bot
 WEBHOOK_RATE_LIMIT = 30
 WEBHOOK_RATE_WINDOW = 60  # seconds
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TelegramWebhookView(View):
+    """
+    Webhook gateway by secret UUID. Path: /telegram/webhook/<uuid:webhook_secret_token>/.
+    Validates token, updates last_webhook_received, processes update. Always returns 200 so
+    Telegram does not retry (processing errors are logged but not surfaced).
+    """
+
+    def post(self, request, webhook_secret_token):
+        bot = TelegramBot.objects.filter(
+            webhook_secret_token=webhook_secret_token, is_active=True
+        ).first()
+        if not bot:
+            logger.warning("Webhook: token=%s not found or inactive", webhook_secret_token)
+            return HttpResponse(status=404)
+        # Optional: verify header matches (Telegram sends this when we set secret_token in setWebhook)
+        secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "").strip()
+        if secret_header and str(webhook_secret_token) != secret_header:
+            logger.warning("Webhook secret header mismatch for bot_id=%s", bot.pk)
+            return HttpResponse(status=403)
+        try:
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning("Webhook invalid JSON bot_id=%s: %s", bot.pk, e)
+            return HttpResponse(status=400)
+        # Update health as soon as we have valid JSON (so dashboard shows "active")
+        TelegramBot.objects.filter(pk=bot.pk).update(last_webhook_received=timezone.now())
+        update_id = body.get("update_id", "?")
+        logger.info("Webhook ping received bot_id=%s update_id=%s", bot.pk, update_id)
+        try:
+            _process_webhook_payload(bot, body)
+        except Exception as e:
+            logger.warning("Webhook processing failed bot_id=%s update_id=%s: %s", bot.pk, update_id, e)
+        return HttpResponse(status=200)
+
+
+def _process_webhook_payload(bot, body):
+    """Parse update, run conversation, send reply. Raises on error."""
+    bot_id = bot.pk
+    update_id = body.get("update_id")
+    logger.info(
+        "Telegram update received bot_id=%s update_id=%s",
+        bot_id, update_id, extra={"update_keys": list(body.keys())},
+    )
+    user_id = _get_telegram_user_id(body)
+    if not user_id:
+        logger.debug("Webhook bot_id=%s update_id=%s: no user id", bot_id, update_id)
+        return
+    cache_key = f"telegram_webhook_{bot_id}_{user_id}"
+    count = cache.get(cache_key, 0) + 1
+    cache.set(cache_key, count, timeout=WEBHOOK_RATE_WINDOW)
+    if count > WEBHOOK_RATE_LIMIT:
+        logger.warning("Rate limit exceeded bot_id=%s user_id=%s", bot_id, user_id)
+        return
+    chat_id, text, callback_data, message_id, callback_query_id, contact_phone = _parse_update(body)
+    if chat_id is None:
+        logger.debug("Webhook bot_id=%s update_id=%s: no message/callback", bot_id, update_id)
+        return
+    engine = ConversationEngine(bot)
+    session = engine.get_or_create_session(user_id)
+    if should_skip_duplicate_update(session, update_id):
+        logger.info("Webhook skip duplicate update_id=%s session_id=%s bot_id=%s", update_id, session.pk, bot_id)
+        return
+    logger.info(
+        "Telegram message received bot_id=%s chat_id=%s user_id=%s update_id=%s text=%s callback=%s contact=%s",
+        bot_id, chat_id, user_id, update_id, (text or "")[:100] if text else None, callback_data, bool(contact_phone),
+    )
+    try:
+        get_or_create_user_from_update(body)
+    except Exception as e:
+        logger.exception("Webhook get_or_create_user_from_update failed bot_id=%s: %s", bot_id, e)
+    try:
+        inbound_text = text or (f"[callback:{callback_data}]" if callback_data else "") or (f"[contact:{contact_phone}]" if contact_phone else "")
+        if inbound_text:
+            TelegramMessageLog.objects.create(
+                bot=bot, telegram_user_id=user_id, direction="in", text=inbound_text[:4096], raw_payload=body,
+            )
+    except Exception as e:
+        logger.debug("Message log create failed: %s", e)
+    response = engine.process_update(
+        session, text=text, callback_data=callback_data, message_id=message_id, contact_phone=contact_phone,
+    )
+    text_out = response.get("text")
+    reply_markup = response.get("reply_markup")
+    edit_previous = response.get("edit_previous") and response.get("message_id") is not None
+    if callback_query_id:
+        try:
+            answer_callback_query_via_bot(callback_query_id, bot)
+        except Exception as e:
+            logger.debug("Webhook answer_callback_query: %s", e)
+    if text_out:
+        try:
+            sent_message_id = None
+            if edit_previous:
+                ok = edit_message_text_via_bot(
+                    chat_id, response["message_id"], text_out, bot, reply_markup=reply_markup,
+                )
+                if ok:
+                    sent_message_id = response["message_id"]
+                else:
+                    sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            else:
+                sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
+            if sent_message_id is not None:
+                ctx = session.context or {}
+                ctx["last_bot_message_id"] = sent_message_id
+                ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
+                session.context = ctx
+                session.save(update_fields=["context"])
+            logger.info(
+                "Telegram reply sent bot_id=%s chat_id=%s update_id=%s session_id=%s sent_msg_id=%s edit=%s len=%s",
+                bot_id, chat_id, update_id, session.pk, sent_message_id, edit_previous, len(text_out),
+            )
+        except Exception as e:
+            logger.exception("Webhook send/edit failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
+        try:
+            TelegramMessageLog.objects.create(
+                bot=bot, telegram_user_id=user_id, direction="out", text=text_out[:4096],
+                raw_payload={"reply_markup": reply_markup, "edit": edit_previous} if reply_markup or edit_previous else None,
+            )
+        except Exception as e:
+            logger.debug("Message log create failed: %s", e)
 
 
 @csrf_exempt
@@ -63,153 +190,11 @@ def telegram_webhook(request, bot_id: int):
     except (json.JSONDecodeError, TypeError) as e:
         logger.warning("Webhook invalid JSON bot_id=%s: %s", bot_id, e)
         return HttpResponse(status=400)
-
-    update_id = body.get("update_id")
-    logger.info(
-        "Telegram update received bot_id=%s update_id=%s",
-        bot_id,
-        update_id,
-        extra={"update_keys": list(body.keys())},
-    )
-
-    user_id = _get_telegram_user_id(body)
-    if not user_id:
-        logger.debug("Webhook bot_id=%s update_id=%s: no user id (e.g. channel post), ack", bot_id, update_id)
-        return HttpResponse(status=200)
-
-    # Rate limit per user per bot
-    cache_key = f"telegram_webhook_{bot_id}_{user_id}"
-    count = cache.get(cache_key, 0) + 1
-    cache.set(cache_key, count, timeout=WEBHOOK_RATE_WINDOW)
-    if count > WEBHOOK_RATE_LIMIT:
-        logger.warning("Rate limit exceeded bot_id=%s user_id=%s", bot_id, user_id)
-        return HttpResponse(status=429)
-
-    chat_id, text, callback_data, message_id, callback_query_id, contact_phone = _parse_update(body)
-    if chat_id is None:
-        logger.debug("Webhook bot_id=%s update_id=%s: no message/callback to handle, ack", bot_id, update_id)
-        return HttpResponse(status=200)
-
-    engine = ConversationEngine(bot)
-    session = engine.get_or_create_session(user_id)
-    if should_skip_duplicate_update(session, update_id):
-        logger.info(
-            "Webhook skip duplicate update_id=%s session_id=%s bot_id=%s",
-            update_id, session.pk, bot_id,
-        )
-        return HttpResponse(status=200)
-
-    logger.info(
-        "Telegram message received bot_id=%s chat_id=%s user_id=%s update_id=%s text=%s callback=%s contact=%s",
-        bot_id,
-        chat_id,
-        user_id,
-        update_id,
-        (text or "")[:100] if text else None,
-        callback_data,
-        bool(contact_phone),
-    )
-
-    # Create/update Telegram user before any conversation logic
+    TelegramBot.objects.filter(pk=bot.pk).update(last_webhook_received=timezone.now())
     try:
-        get_or_create_user_from_update(body)
+        _process_webhook_payload(bot, body)
     except Exception as e:
-        logger.exception("Webhook get_or_create_user_from_update failed bot_id=%s: %s", bot_id, e)
-        # Continue; we can still reply
-
-    try:
-        inbound_text = text or (f"[callback:{callback_data}]" if callback_data else "") or (f"[contact:{contact_phone}]" if contact_phone else "")
-        if inbound_text:
-            TelegramMessageLog.objects.create(
-                bot=bot,
-                telegram_user_id=user_id,
-                direction="in",
-                text=inbound_text[:4096],
-                raw_payload=body,
-            )
-    except Exception as e:
-        logger.debug("Message log create failed: %s", e)
-
-    try:
-        response = engine.process_update(
-            session,
-            text=text,
-            callback_data=callback_data,
-            message_id=message_id,
-            contact_phone=contact_phone,
-        )
-    except Exception as e:
-        logger.exception("Webhook conversation failed bot_id=%s user_id=%s: %s", bot_id, user_id, e)
-        if callback_query_id:
-            try:
-                answer_callback_query_via_bot(callback_query_id, bot, text="Error")
-            except Exception:
-                pass
-        return HttpResponse(status=200)
-
-    text_out = response.get("text")
-    reply_markup = response.get("reply_markup")
-    edit_previous = response.get("edit_previous") and response.get("message_id") is not None
-
-    if callback_query_id:
-        try:
-            answer_callback_query_via_bot(callback_query_id, bot)
-        except Exception as e:
-            logger.debug("Webhook answer_callback_query: %s", e)
-
-    if text_out:
-        try:
-            sent_message_id = None
-            if edit_previous:
-                # Only bot messages can be edited. Fallback: if edit fails, send new message once (no duplicate).
-                ok = edit_message_text_via_bot(
-                    chat_id,
-                    response["message_id"],
-                    text_out,
-                    bot,
-                    reply_markup=reply_markup,
-                )
-                if ok:
-                    sent_message_id = response["message_id"]
-                else:
-                    logger.warning(
-                        "Webhook edit failed (message not editable), sending new message once bot_id=%s chat_id=%s",
-                        bot_id, chat_id,
-                    )
-                    sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
-            else:
-                sent_message_id = send_telegram_message_via_bot(chat_id, text_out, bot, reply_markup=reply_markup)
-            if sent_message_id is not None:
-                ctx = session.context or {}
-                ctx["last_bot_message_id"] = sent_message_id
-                ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
-                session.context = ctx
-                session.save(update_fields=["context"])
-            logger.info(
-                "Telegram reply sent bot_id=%s chat_id=%s update_id=%s session_id=%s sent_msg_id=%s edit=%s len=%s",
-                bot_id,
-                chat_id,
-                update_id,
-                session.pk,
-                sent_message_id,
-                edit_previous,
-                len(text_out),
-            )
-        except Exception as e:
-            logger.exception("Webhook send/edit failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
-        try:
-            TelegramMessageLog.objects.create(
-                bot=bot,
-                telegram_user_id=user_id,
-                direction="out",
-                text=text_out[:4096],
-                raw_payload={"reply_markup": reply_markup, "edit": edit_previous} if reply_markup or edit_previous else None,
-            )
-        except Exception as e:
-            logger.debug("Message log create failed: %s", e)
-    else:
-        logger.debug("Webhook bot_id=%s: no text in response, nothing to send", bot_id)
-
+        logger.exception("Webhook processing failed bot_id=%s: %s", bot_id, e)
     return HttpResponse(status=200)
 
 

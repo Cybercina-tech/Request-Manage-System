@@ -8,7 +8,7 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import AdRequest, SiteConfiguration, TelegramBot, TelegramUser
+from core.models import AdRequest, Category, SiteConfiguration, TelegramBot, TelegramUser
 from core.services import clean_ad_text, run_ai_moderation
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,11 @@ class SubmitAdService:
             return None
 
         config = SiteConfiguration.get_config()
-        valid_categories = dict(AdRequest.Category.choices)
-        category = category if category in valid_categories else AdRequest.Category.OTHER
+        if isinstance(category, str):
+            cat = Category.objects.filter(slug=category, is_active=True).first() or Category.objects.filter(slug='other').first()
+            category = cat or Category.objects.order_by('order').first()
+        elif not isinstance(category, Category):
+            category = Category.objects.filter(slug='other').first() or Category.objects.order_by('order').first()
 
         snapshot = contact_snapshot if isinstance(contact_snapshot, dict) else {}
 

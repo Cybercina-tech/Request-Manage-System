@@ -16,6 +16,7 @@ from django.core.paginator import Paginator
 
 from .models import (
     AdRequest,
+    Category,
     SiteConfiguration,
     TelegramBot,
     TelegramUser,
@@ -36,7 +37,7 @@ from .services import (
     delete_webhook,
 )
 from .services.dashboard import get_dashboard_context, get_pulse_data
-from .services.ad_actions import approve_one_ad, reject_one_ad
+from .services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
 from .view_utils import parse_request_json
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def api_pulse(request):
 @staff_member_required
 def ad_list(request):
     """New Requests workspace: triage list with filters and pagination."""
-    qs = AdRequest.objects.select_related().order_by('-created_at')
+    qs = AdRequest.objects.select_related('category').order_by('-created_at')
     # Optional: .only() for list to avoid loading full content
     category = request.GET.get('category')
     status = request.GET.get('status')
@@ -75,7 +76,7 @@ def ad_list(request):
     search = request.GET.get('search', '').strip()
 
     if category:
-        qs = qs.filter(category=category)
+        qs = qs.filter(category__slug=category)
     if status:
         qs = qs.filter(status=status)
     if date_from:
@@ -103,10 +104,11 @@ def ad_list(request):
         created_at__lt=timezone.now() - timedelta(hours=24)
     ).count()
 
+    category_choices = [(c.slug, c.name) for c in Category.objects.filter(is_active=True).order_by('order', 'name')]
     context = {
         'page_obj': page_obj,
         'rejection_reasons': REJECTION_REASONS,
-        'category_choices': AdRequest.Category.choices,
+        'category_choices': category_choices,
         'status_choices': AdRequest.Status.choices,
         'quick_stats': {
             'pending': total_pending,
@@ -220,6 +222,21 @@ def confirm_reject(request, uuid):
 
 
 @staff_member_required
+def confirm_request_revision(request, uuid):
+    """
+    Request revision: set ad to NEEDS_REVISION and send Telegram with Edit & Resubmit button.
+    GET: show confirm; POST: perform action.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
+        return redirect('ad_detail', uuid=ad.uuid)
+    if request.method == 'POST':
+        request_revision_one_ad(ad, requested_by=request.user)
+        return redirect('ad_detail', uuid=ad.uuid)
+    return render(request, 'core/confirm_request_revision.html', {'ad': ad})
+
+
+@staff_member_required
 @require_http_methods(['GET'])
 def settings_view(request):
     """Settings page: tabs for AI, Telegram, Maintenance."""
@@ -242,6 +259,7 @@ def settings_save(request):
     config.approval_message_template = data.get('approval_message_template') or config.approval_message_template
     config.rejection_message_template = data.get('rejection_message_template') or config.rejection_message_template
     config.submission_ack_message = data.get('submission_ack_message') or config.submission_ack_message
+    config.production_base_url = (data.get('production_base_url') or '').strip() or config.production_base_url
     config.save()
     return JsonResponse({'status': 'success'})
 
@@ -369,6 +387,83 @@ def bulk_reject(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
+# ---------- Category Management ----------
+
+@staff_member_required
+def category_list(request):
+    """List all categories with add/edit/delete/toggle actions."""
+    categories = Category.objects.all().order_by('order', 'name')
+    return render(request, 'core/category_list.html', {'categories': categories})
+
+
+@staff_member_required
+def category_edit(request, pk=None):
+    """Create or edit category. GET: form; POST: save."""
+    category = get_object_or_404(Category, pk=pk) if pk else None
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        slug = (request.POST.get('slug') or '').strip()
+        color = (request.POST.get('color') or '#7C4DFF').strip()
+        icon = (request.POST.get('icon') or '').strip()
+        is_active = request.POST.get('is_active') == 'on'
+        try:
+            order = int(request.POST.get('order') or 0)
+        except (ValueError, TypeError):
+            order = 0
+        if not name:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'status': 'error', 'message': 'Name is required'}, status=400)
+            return render(request, 'core/category_form.html', {'category': category, 'error': 'Name is required'})
+        if not slug:
+            from django.utils.text import slugify
+            slug = slugify(name)[:64]
+        if category:
+            category.name = name
+            category.slug = slug
+            category.color = color or '#7C4DFF'
+            category.icon = icon
+            category.is_active = is_active
+            category.order = order
+            category.save()
+        else:
+            if Category.objects.filter(slug=slug).exists():
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'status': 'error', 'message': 'Slug already exists'}, status=400)
+                return render(request, 'core/category_form.html', {'category': None, 'error': 'Slug already exists'})
+            category = Category.objects.create(
+                name=name, slug=slug, color=color or '#7C4DFF',
+                icon=icon, is_active=is_active, order=order,
+            )
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'status': 'success', 'redirect': reverse('categories')})
+        return redirect('categories')
+    return render(request, 'core/category_form.html', {'category': category})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def category_toggle(request, pk):
+    """Toggle is_active via AJAX."""
+    category = get_object_or_404(Category, pk=pk)
+    category.is_active = not category.is_active
+    category.save()
+    return JsonResponse({'status': 'success', 'is_active': category.is_active})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def category_delete(request, pk):
+    """Delete category. Ads with this category get category set to NULL; use SET_NULL or migrate to Other."""
+    category = get_object_or_404(Category, pk=pk)
+    other = Category.objects.filter(slug='other').first()
+    if other:
+        AdRequest.objects.filter(category=category).update(category=other)
+    else:
+        AdRequest.objects.filter(category=category).update(category=None)
+    category.delete()
+    return JsonResponse({'status': 'success', 'redirect': reverse('categories')})
+
+
 @staff_member_required
 @require_http_methods(['GET'])
 def export_config(request):
@@ -403,9 +498,10 @@ def submit_ad(request):
         if not content:
             return JsonResponse({'error': 'content is required'}, status=400)
         content = clean_ad_text(content)
-        category = data.get('category') or AdRequest.Category.OTHER
-        if category not in dict(AdRequest.Category.choices):
-            category = AdRequest.Category.OTHER
+        slug = (data.get('category') or 'other').strip()
+        category = Category.objects.filter(slug=slug, is_active=True).first() or Category.objects.filter(slug='other').first()
+        if not category:
+            category = Category.objects.order_by('order').first()
         config = SiteConfiguration.get_config()
         ad = AdRequest.objects.create(
             category=category,
@@ -468,9 +564,25 @@ def import_config(request):
 @staff_member_required
 @require_http_methods(['GET'])
 def bot_list(request):
-    """List all bots with status and last heartbeat."""
-    bots = TelegramBot.objects.all().order_by('name')
-    context = {'bots': bots}
+    """List all bots. Default bot in System Core card; others in table."""
+    default_bot = TelegramBot.objects.filter(is_default=True).first()
+    other_bots = TelegramBot.objects.exclude(is_default=True).order_by('name')
+    default_bot_pulse_state = None
+    default_bot_pulse_label = None
+    if default_bot:
+        from core.services.bot_manager import webhook_pulse_for_bot
+        default_bot_pulse_state, default_bot_pulse_label = webhook_pulse_for_bot(default_bot)
+    config = SiteConfiguration.get_config()
+    production_base_url = (config.production_base_url or "").strip()
+    production_base_url_set = bool(production_base_url and production_base_url.startswith("https://"))
+    context = {
+        'default_bot': default_bot,
+        'default_bot_pulse_state': default_bot_pulse_state,
+        'default_bot_pulse_label': default_bot_pulse_label,
+        'other_bots': other_bots,
+        'production_base_url_set': production_base_url_set,
+        'production_base_url': production_base_url,
+    }
     return render(request, 'core/bot_list.html', context)
 
 
@@ -572,6 +684,53 @@ def bot_test(request, pk):
         bot.last_error = ''
         bot.save(update_fields=['status', 'last_heartbeat', 'last_error'])
     return JsonResponse({'success': ok, 'message': msg})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def bot_sync_webhook(request, pk):
+    """Sync webhook for default bot: deleteWebhook then setWebhook with production_base_url. POST only."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    if not bot.is_default:
+        return JsonResponse({'success': False, 'message': 'Only the default bot can use this endpoint.'}, status=400)
+    from core.services.bot_manager import activate_webhook
+    success, message, url = activate_webhook(bot)
+    return JsonResponse({'success': success, 'message': message or ('Webhook synced.' if success else 'Webhook sync failed.'), 'url': url})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def bot_update_default_token(request, pk):
+    """Update default bot token and reconfigure webhook. POST: bot_token."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    if not bot.is_default:
+        return JsonResponse({'success': False, 'message': 'Only the default bot can use this endpoint.'}, status=400)
+    data = parse_request_json(request) if request.body else {}
+    new_token = (request.POST.get('bot_token') or (data.get('bot_token') if data else None) or '').strip()
+    if not new_token:
+        return JsonResponse({'success': False, 'message': 'Token is required.'}, status=400)
+    bot.set_token(new_token)
+    bot.save(update_fields=['bot_token_encrypted'])
+    ok, msg = test_telegram_connection(bot.get_decrypted_token())
+    if ok:
+        bot.status = TelegramBot.Status.ONLINE
+        bot.last_heartbeat = timezone.now()
+        bot.last_error = ''
+        bot.save(update_fields=['status', 'last_heartbeat', 'last_error'])
+        from core.services.bot_manager import activate_webhook
+        success, webhook_msg, url = activate_webhook(bot)
+        if success:
+            msg = f"Token updated. {webhook_msg}"
+        elif webhook_msg and 'production_base_url' in webhook_msg.lower():
+            msg = "Token updated. Set production_base_url in Settings to activate webhook."
+        else:
+            msg = f"Token updated. Webhook: {webhook_msg or 'not set'}"
+    else:
+        bot.status = TelegramBot.Status.ERROR
+        bot.last_error = msg or 'Invalid token'
+        bot.save(update_fields=['status', 'last_error'])
+        return JsonResponse({'success': False, 'message': msg or 'Invalid token'}, status=400)
+    return JsonResponse({'success': True, 'message': msg})
 
 
 @staff_member_required

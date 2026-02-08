@@ -79,6 +79,15 @@
     <!-- Maintenance Tab -->
     <div class="tab-pane fade" id="tab-maintenance">
       <div class="card-soul mb-3">
+        <h5 class="mb-3" style="color: var(--brand-vivid); border-bottom: 2px solid var(--brand-vivid); padding-bottom: 0.5rem;">Site (Webhook)</h5>
+        <p class="text-muted small mb-3">Required for Telegram webhook. Use HTTPS only (e.g. https://iraniu.ir).</p>
+        <div class="mb-3">
+          <label class="form-label">Production base URL</label>
+          <input type="url" class="form-control" name="production_base_url" value="{{ config.production_base_url|default:'' }}" placeholder="https://iraniu.ir">
+          <small class="text-muted">Base URL of this site. Used to build webhook URL when you activate webhook in Bots.</small>
+        </div>
+      </div>
+      <div class="card-soul mb-3">
         <h5 class="mb-3" style="color: var(--brand-vivid); border-bottom: 2px solid var(--brand-vivid); padding-bottom: 0.5rem;">Maintenance</h5>
         <p class="text-muted mb-3">Export configuration as JSON (no API keys). Import merges non-secret fields.</p>
         <div class="d-flex gap-2 flex-wrap">

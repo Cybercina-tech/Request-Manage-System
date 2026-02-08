@@ -7,9 +7,9 @@ inline edit/back/confirm, emoji messages (EN/FA), resubmit deep link.
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.models import TelegramBot, TelegramSession, AdRequest, SiteConfiguration, TelegramUser
+from core.models import TelegramBot, TelegramSession, AdRequest, Category, SiteConfiguration, TelegramUser
 from core.i18n import get_message
-from core.services.conversation import ConversationEngine, CATEGORY_KEYS
+from core.services.conversation import ConversationEngine
 from core.services.submit_ad_service import SubmitAdService
 from core.services.telegram_update_handler import should_skip_duplicate_update, LAST_PROCESSED_UPDATE_ID_KEY
 
@@ -277,7 +277,7 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
         ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
         self.assertEqual(ad.content, "Ad content here")
-        self.assertEqual(ad.category, "rent")
+        self.assertEqual(ad.category.slug if ad.category else None, "rent")
         self.assertEqual(ad.user_id, user.pk)
         self.assertIn("phone", ad.contact_snapshot)
         self.assertIn("verified_phone", ad.contact_snapshot)
@@ -371,7 +371,7 @@ class ConversationEngineTests(TestCase):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         ad = AdRequest.objects.create(
             content="Old rejected ad text",
-            category="other",
+            category=Category.objects.get(slug='other'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=12345,
             bot=self.bot,
@@ -392,7 +392,7 @@ class ConversationEngineTests(TestCase):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         ad = AdRequest.objects.create(
             content="Approved ad",
-            category="other",
+            category=Category.objects.get(slug='other'),
             status=AdRequest.Status.APPROVED,
             telegram_user_id=12345,
             bot=self.bot,
@@ -411,7 +411,7 @@ class ConversationEngineTests(TestCase):
         TelegramUser.objects.create(telegram_user_id=other_user_id, username="other")
         ad = AdRequest.objects.create(
             content="Other user ad",
-            category="other",
+            category=Category.objects.get(slug='other'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=other_user_id,
             bot=self.bot,
@@ -428,7 +428,7 @@ class ConversationEngineTests(TestCase):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         original = AdRequest.objects.create(
             content="Rejected content",
-            category="rent",
+            category=Category.objects.get(slug='rent'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=12345,
             bot=self.bot,
@@ -451,7 +451,7 @@ class ConversationEngineTests(TestCase):
         new_ads = AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).exclude(uuid=original.uuid)
         self.assertEqual(new_ads.count(), 1)
         self.assertEqual(new_ads.get().content, "New revised ad text")
-        self.assertEqual(new_ads.get().category, "rent")
+        self.assertEqual(new_ads.get().category.slug if new_ads.get().category else None, "rent")
 
 
 class SubmitAdServiceTests(TestCase):
@@ -473,7 +473,7 @@ class SubmitAdServiceTests(TestCase):
     def test_submit_creates_ad(self):
         ad = SubmitAdService.submit(
             content="Test ad",
-            category="other",
+            category=Category.objects.get(slug='other'),
             telegram_user_id=999,
             bot=self.bot,
             user=self.user,
@@ -481,7 +481,7 @@ class SubmitAdServiceTests(TestCase):
         )
         self.assertIsNotNone(ad)
         self.assertEqual(ad.content, "Test ad")
-        self.assertEqual(ad.category, "other")
+        self.assertEqual(ad.category.slug if ad.category else None, "other")
         self.assertEqual(ad.telegram_user_id, 999)
         self.assertEqual(ad.bot_id, self.bot.pk)
         self.assertEqual(ad.user_id, self.user.pk)

@@ -7,7 +7,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 
-from core.models import AdRequest, TelegramBot
+from core.models import AdRequest, Category, TelegramBot
 
 User = get_user_model()
 
@@ -30,7 +30,7 @@ class ConfirmApproveTests(TestCase):
         self.ad = AdRequest.objects.create(
             content='Test ad content',
             status=AdRequest.Status.PENDING_MANUAL,
-            category=AdRequest.Category.OTHER,
+            category=Category.objects.get(slug='other'),
             bot=self.bot,
         )
 
@@ -104,7 +104,7 @@ class ConfirmRejectTests(TestCase):
         self.ad = AdRequest.objects.create(
             content='Test ad content',
             status=AdRequest.Status.PENDING_MANUAL,
-            category=AdRequest.Category.OTHER,
+            category=Category.objects.get(slug='other'),
             bot=self.bot,
         )
 

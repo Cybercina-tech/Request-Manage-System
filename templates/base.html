@@ -18,9 +18,14 @@
   <div class="app-layout">
     {% if user.is_authenticated %}
     <aside class="sidebar">
-      <div class="sidebar-brand">
-        <h1>Iraniu</h1>
-        <small class="text-muted">Management Platform</small>
+      <div class="sidebar-brand d-flex align-items-center justify-content-between w-100">
+        <div>
+          <h1>Iraniu</h1>
+          <small class="text-muted">Management Platform</small>
+        </div>
+        {% if user.is_authenticated and webhook_health %}
+        <span class="webhook-pulse webhook-pulse--{{ webhook_health.state }}" title="{{ webhook_health.label }}" aria-label="Bot webhook: {{ webhook_health.state }}"></span>
+        {% endif %}
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">
@@ -36,6 +41,10 @@
           <a href="{% url 'bot_list' %}" class="{% if 'bot_' in request.resolver_match.url_name or request.resolver_match.url_name == 'bot_list' %}active{% endif %}">
             <i class="fa-solid fa-robot icon me-2" aria-hidden="true"></i>
             Bots
+          </a>
+          <a href="{% url 'categories' %}" class="{% if 'category' in request.resolver_match.url_name %}active{% endif %}">
+            <i class="fa-solid fa-folder icon me-2" aria-hidden="true"></i>
+            Categories
           </a>
           <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
             <i class="fa-solid fa-gear icon me-2" aria-hidden="true"></i>

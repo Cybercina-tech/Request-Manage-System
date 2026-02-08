@@ -37,6 +37,7 @@ if os.path.isdir(site_packages) and site_packages not in sys.path:
     sys.path.insert(0, site_packages)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "iraniu.settings")
+os.environ.setdefault("PASSENGER_APP_ENV", "production")
 
 from django.core.wsgi import get_wsgi_application
 application = get_wsgi_application()

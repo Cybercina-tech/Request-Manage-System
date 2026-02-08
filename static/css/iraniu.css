@@ -26,6 +26,7 @@
   --glow-soul: 0 0 15px rgba(124, 77, 255, 0.4);
   --glow-action: 0 0 15px rgba(0, 229, 255, 0.3);
   --glow-hot: 0 0 15px rgba(255, 61, 0, 0.3);
+  --gold-glow: 0 0 20px rgba(255, 193, 7, 0.35);
   --font-heading: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
   --font-body: 'Inter', -apple-system, sans-serif;
 }
@@ -635,6 +636,13 @@ li {
   font-weight: 500;
 }
 
+/* Dynamic category badges — use inline --cat-color from model */
+.badge-cat-dynamic {
+  background: color-mix(in srgb, var(--cat-color, #7C4DFF) 20%, transparent);
+  color: var(--cat-color, #7C4DFF);
+  border: 1px solid color-mix(in srgb, var(--cat-color, #7C4DFF) 40%, transparent);
+}
+
 .badge-cat.rent { background: rgba(0, 229, 255, 0.2); color: var(--accent-action); }
 .badge-cat.job_vacancy { background: rgba(0, 230, 118, 0.2); color: #00E676; }
 .badge-cat.events { background: rgba(255, 193, 7, 0.2); color: #FFC107; }
@@ -1063,6 +1071,32 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0.05em;
   color: var(--text-muted);
   margin-top: 0.25rem;
+}
+
+/* ——— Sidebar: Webhook health pulse (neon) ——— */
+.webhook-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+.webhook-pulse--active {
+  background: var(--action-cyan);
+  box-shadow: 0 0 10px var(--action-cyan);
+}
+.webhook-pulse--idle {
+  background: var(--brand-gold);
+  box-shadow: 0 0 10px var(--brand-gold);
+}
+.webhook-pulse--dead {
+  background: #ff3d00;
+  box-shadow: 0 0 15px #ff3d00;
+  animation: webhook-pulse-dead 1.5s ease-in-out infinite;
+}
+@keyframes webhook-pulse-dead {
+  0%, 100% { opacity: 1; box-shadow: 0 0 15px #ff3d00; }
+  50% { opacity: 0.7; box-shadow: 0 0 25px #ff3d00; }
 }
 
 .kpi-card.live-pulse .number {

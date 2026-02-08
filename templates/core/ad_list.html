@@ -156,7 +156,7 @@
             {% endif %}
           </div>
         </td>
-        <td class="align-middle"><span class="badge badge-cat {{ ad.category }}">{{ ad.get_category_display }}</span></td>
+        <td class="align-middle"><span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display }}</span></td>
         <td class="align-middle">
           <span class="badge-glow {{ ad.status }}">{{ ad.get_status_display }}</span>
         </td>

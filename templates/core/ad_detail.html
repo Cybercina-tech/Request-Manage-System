@@ -15,7 +15,7 @@
 {# —— Status & timestamps bar —— #}
 <div class="card-soul mb-3">
   <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
-    <span class="badge badge-cat {{ ad.category }}">{{ ad.get_category_display }}</span>
+    <span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display }}</span>
     <span class="badge-glow {{ ad.status }}">
       {% if ad.status == 'approved' %}<i class="fa-solid fa-check icon" aria-hidden="true"></i>
       {% elif ad.status == 'rejected' %}<i class="fa-solid fa-times icon" aria-hidden="true"></i>
@@ -89,6 +89,9 @@
     </a>
     <a href="{% url 'confirm_reject' ad.uuid %}" class="btn btn-hot px-3" title="Reject with reason">
       <i class="fa-solid fa-times icon" aria-hidden="true"></i> Reject
+    </a>
+    <a href="{% url 'confirm_request_revision' ad.uuid %}" class="btn btn-soul px-3" title="Request revision (sends Edit & Resubmit to user)">
+      <i class="fa-solid fa-pen icon" aria-hidden="true"></i> Request revision
     </a>
   </div>
 </div>

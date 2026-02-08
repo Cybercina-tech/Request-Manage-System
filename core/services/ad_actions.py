@@ -77,7 +77,7 @@ def reject_one_ad(ad: AdRequest, reason: str, rejected_by=None) -> None:
         ).first()
         if session and session.language:
             lang = session.language
-    category_name = get_category_display_name(ad.category or "other", lang)
+    category_name = (ad.category.name if ad.category else get_category_display_name("other", lang))
     msg = get_message("notification_rejected", lang).format(
         category=category_name, reason=reason
     )
@@ -90,3 +90,41 @@ def reject_one_ad(ad: AdRequest, reason: str, rejected_by=None) -> None:
             send_telegram_rejection_with_button(
                 ad.telegram_user_id, msg, str(ad.uuid), config
             )
+
+
+def request_revision_one_ad(ad: AdRequest, requested_by=None) -> None:
+    """
+    Set ad to NEEDS_REVISION and send Telegram notification with Edit & Resubmit button.
+    Caller must have already validated ad is in PENDING_AI or PENDING_MANUAL.
+    """
+    ad.status = AdRequest.Status.NEEDS_REVISION
+    ad.save(update_fields=["status"])
+
+    if requested_by is not None:
+        logger.info(
+            "Ad needs revision: uuid=%s by=%s at=%s",
+            ad.uuid,
+            getattr(requested_by, "username", None) or getattr(requested_by, "id", None),
+            timezone.now(),
+        )
+
+    if not ad.telegram_user_id:
+        return
+    lang = "en"
+    if ad.bot_id:
+        session = TelegramSession.objects.filter(
+            telegram_user_id=ad.telegram_user_id, bot_id=ad.bot_id
+        ).first()
+        if session and session.language:
+            lang = session.language
+    category_name = (ad.category.name if ad.category else get_category_display_name("other", lang))
+    msg = get_message("notification_needs_revision", lang).format(category=category_name)
+    if ad.bot and ad.bot.is_active:
+        send_telegram_rejection_with_button_via_bot(
+            ad.telegram_user_id, msg, str(ad.uuid), ad.bot
+        )
+    else:
+        config = SiteConfiguration.get_config()
+        send_telegram_rejection_with_button(
+            ad.telegram_user_id, msg, str(ad.uuid), config
+        )

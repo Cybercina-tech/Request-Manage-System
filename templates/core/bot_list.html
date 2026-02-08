@@ -9,8 +9,59 @@
 </h1>
 <p class="text-muted mb-4">Manage Telegram bots. Use <strong>Polling</strong> + <code>python manage.py runbots</code> for a long-running worker, or <strong>Webhook</strong> with HTTPS.</p>
 
+{% if default_bot %}
+{# ——— System Core: Default Bot (Iraniu Soulful + Gold Glow) ——— #}
+{% if not production_base_url_set %}
+<div class="alert alert-warning mb-3 d-flex align-items-center gap-2" role="alert">
+  <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+  <span><strong>production_base_url</strong> is not set or not HTTPS. Set it in <a href="{% url 'settings' %}" class="alert-link">Settings → Maintenance</a> so the webhook URL can be built. Without it, Sync Webhook will fail.</span>
+</div>
+{% endif %}
+<div class="card mb-4 system-core-card" style="border: 2px solid var(--brand-vivid); background: var(--bg-surface); border-radius: 12px; box-shadow: var(--glow-soul), var(--gold-glow);">
+  <div class="card-body">
+    <h6 class="text-uppercase text-muted small mb-2" style="letter-spacing: 0.08em;">System Core</h6>
+    <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+      <h5 class="mb-0 text-light d-flex align-items-center gap-2">
+        <i class="fa-solid fa-circle-check text-success" aria-hidden="true" title="Verified default bot"></i>
+        <span>{{ default_bot.name }}</span>
+      </h5>
+      <span class="webhook-pulse webhook-pulse--{{ default_bot_pulse_state|default:'dead' }}" title="{{ default_bot_pulse_label|default:'' }}" aria-label="Webhook: {{ default_bot_pulse_state|default:'dead' }}"></span>
+      {% if default_bot.mode == 'webhook' %}
+      <span class="badge bg-info" title="Webhook URL is set in Telegram">Webhook Active</span>
+      {% endif %}
+      {% if default_bot.username %}
+      <span class="text-muted">@{{ default_bot.username }}</span>
+      {% endif %}
+      <span class="badge {% if default_bot.status == 'online' %}bg-success{% elif default_bot.status == 'error' %}bg-danger{% else %}bg-secondary{% endif %}">{{ default_bot.get_status_display }}</span>
+    </div>
+    {% if default_bot.mode == 'webhook' and default_bot.last_webhook_received %}
+    <p class="text-muted small mb-2"><strong>Last webhook received:</strong> {{ default_bot.last_webhook_received|date:"Y-m-d H:i:s" }} ({{ default_bot.last_webhook_received|timesince }} ago)</p>
+    {% elif default_bot.mode == 'webhook' %}
+    <p class="text-muted small mb-2">Last webhook received: <span class="text-warning">Never</span> — set <strong>production_base_url</strong> and use Manual Sync to register the webhook.</p>
+    {% endif %}
+    <p class="text-muted small mb-3">This is your <strong>Default System Bot</strong>. You can update its Token below or add additional bots for other services if needed.</p>
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <button type="button" class="btn btn-soul" id="syncWebhookBtn" data-url="{% url 'bot_sync_webhook' default_bot.pk %}" title="Call setWebhook for this bot to fix connection issues">
+        <i class="fa-solid fa-rotate icon" aria-hidden="true"></i> Manual Sync
+      </button>
+      <span id="syncWebhookResult" class="small text-muted"></span>
+    </div>
+    <form id="defaultBotTokenForm" class="mt-3" data-url="{% url 'bot_update_default_token' default_bot.pk %}">
+      {% csrf_token %}
+      <label class="form-label text-muted small">Update Token (masked)</label>
+      <div class="input-group" style="max-width: 420px;">
+        <input type="password" class="form-control bg-dark border-secondary text-light" name="bot_token" id="defaultBotToken" placeholder="Paste new bot token (masked)" autocomplete="off">
+        <button type="button" class="input-group-text bg-dark border-secondary text-muted toggle-password" id="toggleDefaultBotToken" style="cursor:pointer" title="Show/hide" aria-label="Toggle token visibility"><i class="fa-regular fa-eye icon" aria-hidden="true"></i></button>
+        <button type="submit" class="btn btn-soul" id="defaultBotTokenBtn">Update & sync webhook</button>
+      </div>
+      <div id="defaultBotTokenResult" class="small mt-2"></div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <span class="text-muted">{{ bots|length }} bot(s)</span>
+  <span class="text-muted">{% if default_bot %}{{ other_bots|length }} other bot(s){% else %}{{ other_bots|length }} bot(s){% endif %}</span>
   <a href="{% url 'bot_create' %}" class="btn btn-soul">
     <i class="fa-solid fa-plus icon me-1" aria-hidden="true"></i>
     Add bot
@@ -36,7 +87,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for bot in bots %}
+        {% for bot in other_bots %}
         <tr data-bot-id="{{ bot.pk }}" data-mode="{{ bot.mode }}">
           <td><strong>{{ bot.name }}</strong></td>
           <td>{% if bot.username %}@{{ bot.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
@@ -99,7 +150,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="11" class="text-center text-muted py-4">No bots yet. <a href="{% url 'bot_create' %}">Add one</a>.</td>
+          <td colspan="11" class="text-center text-muted py-4">{% if default_bot %}No other bots.{% else %}No bots yet.{% endif %} <a href="{% url 'bot_create' %}">Add one</a>.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -108,12 +159,95 @@
 </div>
 
 <div id="botTestResult" class="mt-2 small"></div>
+
+<footer class="mt-5 pt-4 border-top border-secondary text-center text-muted small">
+  <span style="color: var(--brand-gold);">Powered by <strong>Siavash</strong></span> — Iraniu
+</footer>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function() {
   var resultEl = document.getElementById('botTestResult');
+
+  // Default bot: token show/hide
+  var tokenInput = document.getElementById('defaultBotToken');
+  var toggleBtn = document.getElementById('toggleDefaultBotToken');
+  if (tokenInput && toggleBtn) {
+    toggleBtn.addEventListener('click', function() {
+      var isPass = tokenInput.type === 'password';
+      tokenInput.type = isPass ? 'text' : 'password';
+      var icon = toggleBtn.querySelector('i');
+      if (icon) icon.className = (isPass ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye') + ' icon';
+    });
+  }
+
+  // Default bot: Sync Webhook button
+  var syncBtn = document.getElementById('syncWebhookBtn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', function() {
+      var url = syncBtn.getAttribute('data-url');
+      var resEl = document.getElementById('syncWebhookResult');
+      if (resEl) { resEl.textContent = 'Syncing…'; resEl.className = 'small text-muted'; }
+      syncBtn.disabled = true;
+      fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrfToken } })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (resEl) {
+            resEl.textContent = data.message || (data.success ? 'Webhook synced.' : 'Failed');
+            resEl.className = 'small ' + (data.success ? 'text-success' : 'text-danger');
+          }
+          syncBtn.disabled = false;
+          if (data.success) setTimeout(function() { window.location.reload(); }, 1500);
+        })
+        .catch(function() {
+          if (resEl) { resEl.textContent = 'Request failed'; resEl.className = 'small text-danger'; }
+          syncBtn.disabled = false;
+        });
+    });
+  }
+
+  // Default bot: update token form
+  var tokenForm = document.getElementById('defaultBotTokenForm');
+  if (tokenForm) {
+    tokenForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var token = document.getElementById('defaultBotToken');
+      if (!token || !token.value.trim()) {
+        document.getElementById('defaultBotTokenResult').textContent = 'Enter a new token.';
+        document.getElementById('defaultBotTokenResult').className = 'small mt-2 text-warning';
+        return;
+      }
+      var btn = document.getElementById('defaultBotTokenBtn');
+      var resEl = document.getElementById('defaultBotTokenResult');
+      btn.disabled = true;
+      resEl.textContent = 'Updating…';
+      resEl.className = 'small mt-2 text-muted';
+      var formData = new FormData(tokenForm);
+      formData.set('bot_token', token.value.trim());
+      fetch(tokenForm.getAttribute('data-url'), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken },
+        body: formData
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        resEl.textContent = data.message || (data.success ? 'Token updated.' : 'Failed');
+        resEl.className = 'small mt-2 ' + (data.success ? 'text-success' : 'text-danger');
+        if (data.success) {
+          token.value = '';
+          setTimeout(function() { window.location.reload(); }, 1200);
+        }
+        btn.disabled = false;
+      })
+      .catch(function() {
+        resEl.textContent = 'Request failed';
+        resEl.className = 'small mt-2 text-danger';
+        btn.disabled = false;
+      });
+    });
+  }
+
   function postAction(url, done) {
     resultEl.textContent = '…';
     resultEl.className = 'mt-2 small text-muted';

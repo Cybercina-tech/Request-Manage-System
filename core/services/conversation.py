@@ -9,7 +9,7 @@ import uuid as uuid_module
 from django.utils import timezone
 
 from core.i18n import get_message
-from core.models import TelegramSession, TelegramBot, AdRequest, TelegramUser
+from core.models import TelegramSession, TelegramBot, AdRequest, Category, TelegramUser
 from core.services.submit_ad_service import SubmitAdService
 from core.services.users import update_contact_info
 
@@ -18,15 +18,29 @@ logger = logging.getLogger(__name__)
 # Deep link prefix for Edit & Resubmit (matches t.me/bot?start=resubmit_<uuid>)
 RESUBMIT_START_PREFIX = "resubmit_"
 
-# Valid categories for keyboard
-CATEGORY_KEYS = [
-    ("job_vacancy", "category_job"),
-    ("rent", "category_rent"),
-    ("events", "category_events"),
-    ("services", "category_services"),
-    ("sale", "category_sale"),
-    ("other", "category_other"),
-]
+# Fallback i18n keys for legacy/default categories (when Category model not yet migrated)
+_CATEGORY_I18N_KEYS = {
+    "job_vacancy": "category_job",
+    "rent": "category_rent",
+    "events": "category_events",
+    "services": "category_services",
+    "sale": "category_sale",
+    "other": "category_other",
+}
+
+
+def _get_active_categories():
+    """Return active categories for bot keyboard (ordered)."""
+    return list(Category.objects.filter(is_active=True).order_by("order", "name"))
+
+
+def _get_category_display(cat_slug: str, lang: str | None) -> str:
+    """Display name for category: from model first, else i18n fallback."""
+    cat = Category.objects.filter(slug=cat_slug, is_active=True).first()
+    if cat:
+        return cat.name
+    key = _CATEGORY_I18N_KEYS.get(cat_slug, "category_other")
+    return get_message(key, lang)
 
 
 class ConversationEngine:
@@ -129,7 +143,7 @@ class ConversationEngine:
                 session.save(update_fields=["state", "last_activity"])
                 return self._reply_main_menu(session, edit_previous, message_id)
             cat = callback_data or (text.strip() if text else "")
-            valid = [c[0] for c in CATEGORY_KEYS]
+            valid = [c.slug for c in _get_active_categories()]
             if cat in valid:
                 session.context["category"] = cat
                 session.state = TelegramSession.State.ENTER_CONTENT
@@ -256,7 +270,7 @@ class ConversationEngine:
 
     def _do_submit(self, session: TelegramSession) -> AdRequest | None:
         content = (session.context or {}).get("content")
-        category = (session.context or {}).get("category", AdRequest.Category.OTHER)
+        category = (session.context or {}).get("category", "other")
         if not content:
             return None
         telegram_user = TelegramUser.objects.filter(telegram_user_id=session.telegram_user_id).first()
@@ -289,7 +303,7 @@ class ConversationEngine:
         ad = AdRequest.objects.filter(uuid=ad_uuid).first()
         if not ad:
             return None, "resubmit_error_not_found"
-        if ad.status != AdRequest.Status.REJECTED:
+        if ad.status not in (AdRequest.Status.REJECTED, AdRequest.Status.NEEDS_REVISION):
             return None, "resubmit_error_not_rejected"
         if ad.telegram_user_id != telegram_user_id:
             return None, "resubmit_error_not_yours"
@@ -306,7 +320,7 @@ class ConversationEngine:
         session.context = {
             "mode": "resubmit",
             "original_ad_id": str(ad.uuid),
-            "original_category": ad.category,
+            "original_category": ad.category.slug if ad.category else "other",
             "original_content": ad.content or "",
         }
         session.state = TelegramSession.State.RESUBMIT_EDIT
@@ -317,7 +331,7 @@ class ConversationEngine:
         ctx = session.context or {}
         original_ad_id = ctx.get("original_ad_id")
         content = (ctx.get("content") or "").strip()
-        category = ctx.get("original_category") or AdRequest.Category.OTHER
+        category = ctx.get("original_category") or "other"
 
         if not original_ad_id or not content:
             lang = session.language or "en"
@@ -409,6 +423,7 @@ class ConversationEngine:
                 AdRequest.Status.PENDING: "ad_status_pending",
                 AdRequest.Status.PENDING_AI: "ad_status_pending",
                 AdRequest.Status.PENDING_MANUAL: "ad_status_pending",
+                AdRequest.Status.NEEDS_REVISION: "ad_status_needs_revision",
                 AdRequest.Status.REJECTED: "ad_status_rejected",
                 AdRequest.Status.SOLVED: "ad_status_approved",
                 AdRequest.Status.EXPIRED: "ad_status_rejected",
@@ -435,10 +450,7 @@ class ConversationEngine:
         """After category selected: long explanation + enter ad text instructions, one message, with Back to Home."""
         lang = session.language or "en"
         category = (session.context or {}).get("category", "other")
-        category_name = next(
-            (get_message(msg_key, lang) for ck, msg_key in CATEGORY_KEYS if ck == category),
-            category,
-        )
+        category_name = _get_category_display(category, lang)
         part1 = get_message("category_explanation", lang).format(category_name=category_name)
         part2 = get_message("enter_ad_text_detailed", lang).format(category_name=category_name)
         text = f"{part1}\n\n———\n\n{part2}"
@@ -459,10 +471,7 @@ class ConversationEngine:
     ) -> dict:
         lang = session.language or "en"
         category = (session.context or {}).get("category", "other")
-        category_name = next(
-            (get_message(msg_key, lang) for ck, msg_key in CATEGORY_KEYS if ck == category),
-            category,
-        )
+        category_name = _get_category_display(category, lang)
         text = get_message("enter_ad_text_detailed", lang).format(category_name=category_name)
         if old_content:
             text = f"{text}\n\n———\n{old_content[:500]}\n———"
@@ -478,8 +487,9 @@ class ConversationEngine:
         lang = session.language or "en"
         text = get_message("select_category_prompt", lang)
         keyboard = []
-        for cat_key, msg_key in CATEGORY_KEYS:
-            keyboard.append([{"text": get_message(msg_key, lang), "callback_data": cat_key}])
+        for cat in _get_active_categories():
+            display = cat.name
+            keyboard.append([{"text": display, "callback_data": cat.slug}])
         back_label = get_message("btn_back_to_home", lang)
         keyboard.append([{"text": back_label, "callback_data": "back_to_home"}])
         out = {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
@@ -492,7 +502,7 @@ class ConversationEngine:
         lang = session.language or "en"
         content = (session.context or {}).get("content", "")
         category = (session.context or {}).get("category", "other")
-        cat_label = next((get_message(msg_key, lang) for ck, msg_key in CATEGORY_KEYS if ck == category), category)
+        cat_label = _get_category_display(category, lang)
         preview = content[:600] + ("…" if len(content) > 600 else "")
         text = (
             f"{get_message('confirm_submission', lang)}\n\n"

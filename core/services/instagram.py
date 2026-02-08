@@ -14,9 +14,9 @@ from core.models import AdRequest, InstagramConfiguration
 logger = logging.getLogger(__name__)
 
 GRAPH_API_BASE = 'https://graph.facebook.com/v18.0'
-REQUEST_TIMEOUT = 30
-MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 2
+REQUEST_TIMEOUT = 15
+MAX_RETRIES = 2
+RETRY_DELAY_SECONDS = 0.5
 INSTAGRAM_CAPTION_MAX_LENGTH = 2200
 
 

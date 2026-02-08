@@ -81,6 +81,7 @@ MESSAGES = {
     },
     "ad_status_approved": {"en": "✅ Approved", "fa": "✅ تأیید شده"},
     "ad_status_pending": {"en": "⏳ Pending", "fa": "⏳ در انتظار"},
+    "ad_status_needs_revision": {"en": "📝 Needs revision", "fa": "📝 نیاز به اصلاح"},
     "ad_status_rejected": {"en": "❌ Rejected", "fa": "❌ رد شده"},
     "rejection_reason_label": {"en": "Reason: ", "fa": "دلیل: "},
     "create_new_ad": {
@@ -276,6 +277,10 @@ MESSAGES = {
     "notification_rejected": {
         "en": "❌ Your ad in 📂 {category} was not approved.\n\nReason: {reason}\n\nPlease review and try again — we’re here to help. 💡 Thank you for choosing Iraniu.",
         "fa": "❌ آگهی شما در دسته 📂 {category} تأیید نشد.\n\nدلیل: {reason}\n\nلطفاً بررسی کنید و دوباره ارسال کنید؛ ما اینجا هستیم تا کمک کنیم. 💡 از اینکه ایرانيو را انتخاب کردید متشکریم.",
+    },
+    "notification_needs_revision": {
+        "en": "📝 Your ad in 📂 {category} needs revision.\n\nPlease edit and resubmit using the button below. Thank you for using Iraniu.",
+        "fa": "📝 آگهی شما در دسته 📂 {category} نیاز به اصلاح دارد.\n\nلطفاً با دکمه زیر ویرایش و ارسال مجدد کنید. از اینکه از ایرانيو استفاده می‌کنید متشکریم.",
     },
     # ——— Errors (generic) ———
     "error_generic": {

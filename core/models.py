@@ -52,6 +52,12 @@ class SiteConfiguration(models.Model):
         blank=True,
         default='Your broadcast is currently under AI scrutiny. We\'ll notify you the moment it goes live.'
     )
+    # Production URL for webhook (e.g. https://iraniu.ir). Required for Telegram webhook; HTTPS only.
+    production_base_url = models.URLField(
+        blank=True,
+        max_length=512,
+        help_text='Base URL of the site (e.g. https://iraniu.ir). Used to build webhook URL.',
+    )
     # Maintenance
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -60,10 +66,15 @@ class SiteConfiguration(models.Model):
         verbose_name_plural = 'Site Configuration'
 
     def save(self, *args, **kwargs):
-        # Singleton: only one row
         if not self.pk and SiteConfiguration.objects.exists():
             return SiteConfiguration.objects.first()
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+        try:
+            from django.core.cache import cache
+            cache.delete('site_config_singleton')
+        except Exception:
+            pass
+        return result
 
     @classmethod
     def get_config(cls):
@@ -130,33 +141,42 @@ class VerificationCode(models.Model):
         return f"{self.user_id} {self.channel} expires={self.expires_at}"
 
 
+class Category(models.Model):
+    """Dynamic category for ad requests. Replaces hardcoded choices."""
+
+    name = models.CharField(max_length=64, help_text='Display name (e.g. Real Estate, Job)')
+    slug = models.SlugField(max_length=64, unique=True, help_text='URL-safe identifier; used as callback_data in bot')
+    color = models.CharField(max_length=16, default='#7C4DFF', help_text='Hex color for badges (e.g. #7C4DFF)')
+    icon = models.CharField(max_length=64, blank=True, help_text='Optional: Lucide/icon name')
+    is_active = models.BooleanField(default=True, db_index=True)
+    order = models.PositiveIntegerField(default=0, help_text='Sort order (lower first)')
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name = 'Category'
+        verbose_name_plural = 'Categories'
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            from django.utils.text import slugify
+            self.slug = slugify(self.name)[:64]
+        super().save(*args, **kwargs)
+
+
 class AdRequest(models.Model):
     """Core entity: ad submission with lifecycle states."""
 
     class Status(models.TextChoices):
         PENDING_AI = 'pending_ai', 'Pending AI'
         PENDING_MANUAL = 'pending_manual', 'Pending Manual'
+        NEEDS_REVISION = 'needs_revision', 'Needs Revision'
         APPROVED = 'approved', 'Approved'
         REJECTED = 'rejected', 'Rejected'
         EXPIRED = 'expired', 'Expired'
         SOLVED = 'solved', 'Solved'
-
-    class Category(models.TextChoices):
-        JOB = 'job_vacancy', 'Job'
-        RENT = 'rent', 'Rent'
-        EVENTS = 'events', 'Events'
-        SERVICES = 'services', 'Services'
-        SALE = 'sale', 'Sale'
-        OTHER = 'other', 'Other'
-
-    CATEGORY_COLORS = {
-        'rent': 'info',
-        'job_vacancy': 'success',
-        'events': 'warning',
-        'services': 'primary',
-        'sale': 'secondary',
-        'other': 'dark',
-    }
 
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     bot = models.ForeignKey(
@@ -180,7 +200,14 @@ class AdRequest(models.Model):
         blank=True,
         help_text='Contact at submission time: phone, email, verified_phone, verified_email'
     )
-    category = models.CharField(max_length=32, choices=Category.choices, default=Category.OTHER)
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ad_requests',
+        help_text='Ad category (dynamic)',
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -216,8 +243,13 @@ class AdRequest(models.Model):
     def __str__(self):
         return f'{self.get_category_display()} — {self.status} ({self.uuid})'
 
-    def get_category_badge_class(self):
-        return self.CATEGORY_COLORS.get(self.category, 'dark')
+    def get_category_display(self):
+        """Display name for category (compatible with old get_category_display for choices)."""
+        return self.category.name if self.category else 'Other'
+
+    def get_category_color(self):
+        """Hex color for badge styling."""
+        return (self.category.color or '#7C4DFF') if self.category else '#7C4DFF'
 
 
 class TelegramBot(models.Model):
@@ -241,15 +273,32 @@ class TelegramBot(models.Model):
     bot_token_encrypted = models.TextField(blank=True)  # Encrypted at rest; never expose in templates
     username = models.CharField(max_length=64, blank=True, help_text='Bot username without @')
     is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text='Only one bot can be default. Used as the system bot when no other is specified.',
+    )
     mode = models.CharField(
         max_length=16,
         choices=Mode.choices,
-        default=Mode.POLLING,
+        default=Mode.WEBHOOK,
         help_text='Webhook: updates via HTTP. Polling: runbots worker fetches getUpdates.',
     )
     webhook_url = models.URLField(blank=True)
     webhook_secret = models.CharField(max_length=64, blank=True, help_text='Secret for webhook verification')
+    webhook_secret_token = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True,
+        help_text='Secret UUID in webhook path; only Telegram and this app know the URL.',
+    )
     last_heartbeat = models.DateTimeField(null=True, blank=True)
+    last_webhook_received = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Last time Telegram sent an update to this bot (webhook health).',
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
@@ -285,6 +334,11 @@ class TelegramBot(models.Model):
 
     def get_masked_token(self):
         return mask_token(self.get_decrypted_token())
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            TelegramBot.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
 
 
 class TelegramSession(models.Model):

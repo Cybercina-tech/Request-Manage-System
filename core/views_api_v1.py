@@ -9,13 +9,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 
-from core.models import AdRequest, SiteConfiguration
+from core.models import AdRequest, Category, SiteConfiguration
 from core.view_utils import parse_request_json
 from core.services import clean_ad_text, run_ai_moderation
 
 logger = logging.getLogger(__name__)
 
-VALID_CATEGORIES = set(dict(AdRequest.Category.choices).keys())
+
+def _get_valid_category_slugs():
+    return set(Category.objects.filter(is_active=True).values_list('slug', flat=True))
 
 
 def _sanitize_contact(data: dict) -> dict:
@@ -44,9 +46,11 @@ def api_v1_submit(request):
         if not content:
             return JsonResponse({'error': 'Validation error', 'message': 'content is required.'}, status=400)
         content = clean_ad_text(content)
-        category = (data.get('category') or 'other').strip()
-        if category not in VALID_CATEGORIES:
-            category = 'other'
+        slug = (data.get('category') or 'other').strip()
+        valid = _get_valid_category_slugs()
+        if slug not in valid:
+            slug = 'other'
+        category = Category.objects.filter(slug=slug, is_active=True).first() or Category.objects.filter(slug='other').first()
         contact = _sanitize_contact(data.get('contact') or {})
 
         config = SiteConfiguration.get_config()
@@ -88,7 +92,7 @@ def api_v1_status(request, uuid):
     return JsonResponse({
         'uuid': str(ad.uuid),
         'status': ad.status,
-        'category': ad.category,
+        'category': ad.category.slug if ad.category else None,
         'created_at': ad.created_at.isoformat() if ad.created_at else None,
     })
 
@@ -106,8 +110,8 @@ def api_v1_list(request):
     if status and status in dict(AdRequest.Status.choices):
         qs = qs.filter(status=status)
     category = request.GET.get('category', '').strip()
-    if category and category in VALID_CATEGORIES:
-        qs = qs.filter(category=category)
+    if category and category in _get_valid_category_slugs():
+        qs = qs.filter(category__slug=category)
     try:
         limit = min(int(request.GET.get('limit', 50)), 100)
     except (ValueError, TypeError):
@@ -122,7 +126,7 @@ def api_v1_list(request):
         {
             'uuid': str(ad.uuid),
             'status': ad.status,
-            'category': ad.category,
+            'category': ad.category.slug if ad.category else None,
             'created_at': ad.created_at.isoformat() if ad.created_at else None,
         }
         for ad in page

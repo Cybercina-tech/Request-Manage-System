@@ -30,7 +30,7 @@ def run_ai_moderation(content, config):
         import json
         from openai import OpenAI
 
-        client = OpenAI(api_key=config.openai_api_key)
+        client = OpenAI(api_key=config.openai_api_key, timeout=15.0)
         system = config.ai_system_prompt or (
             'You are a moderator for Iraniu. Check if this ad follows community rules. '
             'Reply with JSON only: {"approved": true or false, "reason": "optional reason"}'
@@ -62,7 +62,7 @@ def test_openai_connection(api_key):
         return False, 'No API key provided'
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key.strip())
+        client = OpenAI(api_key=api_key.strip(), timeout=10.0)
         client.chat.completions.create(
             model='gpt-3.5-turbo',
             messages=[{'role': 'user', 'content': 'Say OK'}],

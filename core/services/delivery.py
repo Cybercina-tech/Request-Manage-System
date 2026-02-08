@@ -81,7 +81,7 @@ class DeliveryService:
             ).first()
             if session and session.language:
                 lang = session.language
-        category_name = get_category_display_name(ad.category or "other", lang)
+        category_name = (ad.category.name if ad.category else get_category_display_name("other", lang))
         msg = get_message("notification_approved", lang).format(category=category_name)
         if not ad.telegram_user_id:
             logger.debug("DeliveryService._send_telegram: no telegram_user_id for ad %s", ad.uuid)

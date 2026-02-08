@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% load static %}
+{# Category Create/Edit — Soulful form with color picker #}
+
+{% block title %}{% if category %}Edit {{ category.name }}{% else %}Add Category{% endif %}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    {% if category %}Edit Category{% else %}Add Category{% endif %}
+  </h1>
+  <a href="{% url 'categories' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back</a>
+</div>
+
+<div class="card-soul" style="max-width: 480px;">
+  <form method="post" action="{% if category %}{% url 'category_edit' category.pk %}{% else %}{% url 'category_create' %}{% endif %}" id="categoryForm">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label">Name <span class="text-danger">*</span></label>
+      <input type="text" name="name" class="form-control" required value="{{ category.name|default:'' }}" placeholder="e.g. Real Estate">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Slug</label>
+      <input type="text" name="slug" class="form-control" value="{{ category.slug|default:'' }}" placeholder="Auto-generated from name">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Color</label>
+      <div class="d-flex align-items-center gap-2">
+        <input type="color" id="categoryColor" value="{{ category.color|default:'#7C4DFF' }}" class="form-control form-control-color" style="width: 60px; height: 38px;">
+        <input type="text" name="color" id="categoryColorText" value="{{ category.color|default:'#7C4DFF' }}" class="form-control" placeholder="#7C4DFF">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Icon (optional)</label>
+      <input type="text" name="icon" class="form-control" value="{{ category.icon|default:'' }}" placeholder="e.g. home">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Order</label>
+      <input type="number" name="order" class="form-control" value="{{ category.order|default:0 }}" min="0">
+    </div>
+    <div class="mb-4 form-check form-switch">
+      <input type="checkbox" name="is_active" class="form-check-input" id="categoryActive" {% if not category or category.is_active %}checked{% endif %}>
+      <label class="form-check-label" for="categoryActive">Active</label>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-soul">
+        <i class="fa-solid fa-check icon" aria-hidden="true"></i> Save
+      </button>
+      <a href="{% url 'categories' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function() {
+  var colorEl = document.getElementById('categoryColor');
+  var colorText = document.getElementById('categoryColorText');
+  var form = document.getElementById('categoryForm');
+  if (colorEl && colorText) {
+    colorEl.addEventListener('input', function() { colorText.value = this.value; });
+    colorText.addEventListener('input', function() {
+      if (/^#[0-9A-Fa-f]{6}$/.test(this.value)) colorEl.value = this.value;
+    });
+  }
+  form && form.addEventListener('submit', function() {
+    if (colorEl && colorText && /^#[0-9A-Fa-f]{6}$/.test(colorText.value)) colorText.value = colorEl.value;
+  });
+})();
+</script>
+{% endblock %}

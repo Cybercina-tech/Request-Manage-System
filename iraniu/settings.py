@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-iraniu')
 
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = [
     "request.iraniu.uk",
@@ -62,6 +62,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.site_config',
                 'core.context_processors.static_version',
+                'core.context_processors.webhook_health',
             ],
         },
     },
@@ -69,10 +70,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'iraniu.wsgi.application'
 
+# SQLite: timeout reduces lock wait; WAL via connection_created in core.apps
+# For production concurrency, consider PostgreSQL (no file-level locking).
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 15,
+        },
+        'CONN_MAX_AGE': 0,
     }
 }
 
@@ -91,10 +98,26 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # folder for collected static files
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Avoid manifest strictness in development: use plain storage when DEBUG so missing
+# manifest entries don't cause 500s. Production uses manifest; run collectstatic with
+# DEBUG=False (e.g. in deploy) to build staticfiles.json.
+if DEBUG:
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+else:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Cache busting for static assets (icons, CSS)
 STATIC_VERSION = os.environ.get('STATIC_VERSION', '1')
+
+# Cache: LocMemCache is process-local; avoids DB for rate limits and SiteConfig cache.
+# For multi-worker production, use Redis/Memcached if shared rate limiting is needed.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'iraniu-default',
+        'OPTIONS': {'MAX_ENTRIES': 1000},
+    }
+}
 
 # Media for user-uploaded and generated images (Instagram)
 MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
@@ -116,12 +139,12 @@ LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
 # Telegram Bot Runner
-# polling: long-poll getUpdates (dev, no HTTPS). webhook: validate + health only (prod with HTTPS).
-TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
+# webhook (default): no polling; use setWebhook + HTTPS. polling: long-poll getUpdates (dev only).
+TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'webhook').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
-    TELEGRAM_MODE = 'polling'
+    TELEGRAM_MODE = 'webhook'
 
-# Auto-start bots with Django (runserver, gunicorn, WSGI). Set env ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
+# Auto-start bots with Django when TELEGRAM_MODE is polling. Set ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
 ENABLE_AUTO_BOTS = os.environ.get('ENABLE_AUTO_BOTS', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Security headers (only when not debugging)
