@@ -11,6 +11,7 @@ response (either edit or send) per update.
 """
 
 import logging
+from django.core.cache import cache
 from core.models import TelegramBot, TelegramMessageLog
 from core.services.conversation import ConversationEngine
 from core.services import (
@@ -24,6 +25,19 @@ logger = logging.getLogger(__name__)
 
 # Key in session.context for update deduplication (Telegram update_id).
 LAST_PROCESSED_UPDATE_ID_KEY = "last_processed_update_id"
+PROCESSING_LOCK_PREFIX = "telegram_update_lock_"
+PROCESSING_LOCK_TIMEOUT = 120  # seconds
+
+
+def acquire_processing_lock(bot_id: int, update_id: int) -> bool:
+    """
+    Try to claim this update for processing. Returns True if lock acquired, False if already claimed.
+    Prevents same update from being processed by multiple workers or webhook retries.
+    """
+    if update_id is None:
+        return True
+    key = f"{PROCESSING_LOCK_PREFIX}{bot_id}_{update_id}"
+    return cache.add(key, 1, timeout=PROCESSING_LOCK_TIMEOUT)
 
 
 def should_skip_duplicate_update(session, update_id: int | None) -> bool:
@@ -54,9 +68,10 @@ def _get_telegram_user_id(body: dict) -> int:
 
 def _parse_update(body: dict) -> tuple:
     """
-    Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone).
+    Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id).
     chat_id None if nothing to process.
     contact_phone: from message.contact.phone_number when user shares contact.
+    contact_user_id: from message.contact.user_id for verification (must match message.from.id).
     """
     message = body.get("message")
     if message:
@@ -64,17 +79,22 @@ def _parse_update(body: dict) -> tuple:
         text = (message.get("text") or "").strip()
         contact = message.get("contact")
         contact_phone = None
+        contact_user_id = None
         if contact and contact.get("phone_number"):
             contact_phone = (contact.get("phone_number") or "").strip()
             if contact_phone and not contact_phone.startswith("+"):
                 contact_phone = "+" + contact_phone
-        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None)
+            try:
+                contact_user_id = int(contact.get("user_id")) if contact.get("user_id") is not None else None
+            except (TypeError, ValueError):
+                pass
+        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None, contact_user_id)
 
     edited = body.get("edited_message")
     if edited:
         chat_id = edited.get("chat", {}).get("id")
         text = (edited.get("text") or "").strip()
-        return (chat_id, text or None, None, edited.get("message_id"), None, None)
+        return (chat_id, text or None, None, edited.get("message_id"), None, None, None)
 
     callback = body.get("callback_query")
     if callback:
@@ -83,9 +103,9 @@ def _parse_update(body: dict) -> tuple:
         message_id = msg.get("message_id")
         data = (callback.get("data") or "").strip()
         callback_query_id = callback.get("id")
-        return (chat_id, None, data or None, message_id, callback_query_id, None)
+        return (chat_id, None, data or None, message_id, callback_query_id, None, None)
 
-    return (None, None, None, None, None, None)
+    return (None, None, None, None, None, None, None)
 
 
 def process_update(bot: TelegramBot, update: dict) -> None:
@@ -101,14 +121,18 @@ def process_update(bot: TelegramBot, update: dict) -> None:
         logger.debug("process_update bot_id=%s update_id=%s: no user id", bot_id, update_id)
         return
 
-    chat_id, text, callback_data, message_id, callback_query_id, contact_phone = _parse_update(update)
+    chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id = _parse_update(update)
     if chat_id is None:
         logger.debug("process_update bot_id=%s update_id=%s: no message/callback", bot_id, update_id)
         return
 
+    # Processing lock: claim update_id to prevent duplicate processing (webhook retry, dual workers).
+    if not acquire_processing_lock(bot_id, update_id):
+        logger.info("process_update skip (lock held) update_id=%s bot_id=%s", update_id, bot_id)
+        return
     engine = ConversationEngine(bot)
     session = engine.get_or_create_session(user_id)
-    # Dedup: same update must not trigger a second response (e.g. webhook retry).
+    # Dedup: same update must not trigger a second response (e.g. session already processed).
     if should_skip_duplicate_update(session, update_id):
         logger.info(
             "process_update skip duplicate update_id=%s session_id=%s bot_id=%s",
@@ -141,6 +165,7 @@ def process_update(bot: TelegramBot, update: dict) -> None:
             callback_data=callback_data,
             message_id=message_id,
             contact_phone=contact_phone,
+            contact_user_id=contact_user_id,
         )
     except Exception as e:
         logger.exception("process_update conversation bot_id=%s user_id=%s update_id=%s: %s", bot_id, user_id, update_id, e)
@@ -197,7 +222,13 @@ def process_update(bot: TelegramBot, update: dict) -> None:
             elif sent_message_id is None:
                 logger.warning("process_update send failed bot_id=%s chat_id=%s", bot_id, chat_id)
         except Exception as e:
-            logger.exception("process_update send_message bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
+            logger.exception("process_update send/edit failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
+            # Still mark update as processed to avoid duplicate retries
+            if update_id is not None:
+                ctx = session.context or {}
+                ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
+                session.context = ctx
+                session.save(update_fields=["context"])
         try:
             TelegramMessageLog.objects.create(
                 bot=bot,

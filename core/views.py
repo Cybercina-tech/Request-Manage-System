@@ -3,10 +3,18 @@ Iraniu — Staff-only views. Request/response only; business logic in services.
 """
 
 import logging
+import os
+import signal
+import subprocess
+import sys
 from datetime import timedelta
+from pathlib import Path
 
+from django.conf import settings
+from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import JsonResponse
+from django.contrib.auth import get_user_model
+from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -16,6 +24,7 @@ from django.core.paginator import Paginator
 
 from .models import (
     AdRequest,
+    AdminProfile,
     Category,
     SiteConfiguration,
     TelegramBot,
@@ -38,7 +47,7 @@ from .services import (
 )
 from .services.dashboard import get_dashboard_context, get_pulse_data
 from .services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
-from .view_utils import parse_request_json
+from .view_utils import get_request_payload, parse_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +155,19 @@ def ad_detail(request, uuid):
         'ai_suggested_reason': ad.ai_suggested_reason or '',
     }
     return render(request, 'core/ad_detail.html', context)
+
+
+@staff_member_required
+def request_detail(request, uuid):
+    """Standalone request detail page (no modal). Same as ad_detail."""
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    client = None
+    if getattr(ad, 'user_id', None) and ad.user_id:
+        client = ad.user
+    elif ad.telegram_user_id:
+        client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
+    context = {'ad': ad, 'client': client, 'ai_suggested_reason': ad.ai_suggested_reason or ''}
+    return render(request, 'core/request_detail.html', context)
 
 
 @staff_member_required
@@ -397,9 +419,8 @@ def category_list(request):
 
 
 @staff_member_required
-def category_edit(request, pk=None):
-    """Create or edit category. GET: form; POST: save."""
-    category = get_object_or_404(Category, pk=pk) if pk else None
+def category_create(request):
+    """Add a new category. GET: form page; POST: validate, save, redirect with success message."""
     if request.method == 'POST':
         name = (request.POST.get('name') or '').strip()
         slug = (request.POST.get('slug') or '').strip()
@@ -411,31 +432,50 @@ def category_edit(request, pk=None):
         except (ValueError, TypeError):
             order = 0
         if not name:
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return JsonResponse({'status': 'error', 'message': 'Name is required'}, status=400)
+            return render(request, 'core/category_form.html', {'category': None, 'error': 'Name is required'})
+        if not slug:
+            from django.utils.text import slugify
+            slug = slugify(name)[:64]
+        if Category.objects.filter(slug=slug).exists():
+            return render(request, 'core/category_form.html', {'category': None, 'error': 'Slug already exists'})
+        Category.objects.create(
+            name=name, slug=slug, color=color or '#7C4DFF',
+            icon=icon, is_active=is_active, order=order,
+        )
+        messages.success(request, 'Category added successfully!')
+        return redirect('categories')
+    return render(request, 'core/category_form.html', {'category': None})
+
+
+@staff_member_required
+def category_edit(request, pk):
+    """Edit existing category. GET: form; POST: save."""
+    category = get_object_or_404(Category, pk=pk)
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        slug = (request.POST.get('slug') or '').strip()
+        color = (request.POST.get('color') or '#7C4DFF').strip()
+        icon = (request.POST.get('icon') or '').strip()
+        is_active = request.POST.get('is_active') == 'on'
+        try:
+            order = int(request.POST.get('order') or 0)
+        except (ValueError, TypeError):
+            order = 0
+        if not name:
             return render(request, 'core/category_form.html', {'category': category, 'error': 'Name is required'})
         if not slug:
             from django.utils.text import slugify
             slug = slugify(name)[:64]
-        if category:
-            category.name = name
-            category.slug = slug
-            category.color = color or '#7C4DFF'
-            category.icon = icon
-            category.is_active = is_active
-            category.order = order
-            category.save()
-        else:
-            if Category.objects.filter(slug=slug).exists():
-                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                    return JsonResponse({'status': 'error', 'message': 'Slug already exists'}, status=400)
-                return render(request, 'core/category_form.html', {'category': None, 'error': 'Slug already exists'})
-            category = Category.objects.create(
-                name=name, slug=slug, color=color or '#7C4DFF',
-                icon=icon, is_active=is_active, order=order,
-            )
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({'status': 'success', 'redirect': reverse('categories')})
+        if Category.objects.filter(slug=slug).exclude(pk=pk).exists():
+            return render(request, 'core/category_form.html', {'category': category, 'error': 'Slug already exists'})
+        category.name = name
+        category.slug = slug
+        category.color = color or '#7C4DFF'
+        category.icon = icon
+        category.is_active = is_active
+        category.order = order
+        category.save()
+        messages.success(request, 'Category updated successfully!')
         return redirect('categories')
     return render(request, 'core/category_form.html', {'category': category})
 
@@ -462,6 +502,121 @@ def category_delete(request, pk):
         AdRequest.objects.filter(category=category).update(category=None)
     category.delete()
     return JsonResponse({'status': 'success', 'redirect': reverse('categories')})
+
+
+# ---------- Admin Management (Superuser only) ----------
+
+def _superuser_required(view_func):
+    """Decorator: require authenticated superuser; return 403 otherwise."""
+    from functools import wraps
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated or not request.user.is_superuser:
+            return HttpResponseForbidden("Superuser access required.")
+        return view_func(request, *args, **kwargs)
+    return _wrapped
+
+
+@staff_member_required
+@_superuser_required
+@require_http_methods(['GET'])
+def admin_management_list(request):
+    """List all staff admins (AdminProfile) with notification status."""
+    admins = AdminProfile.objects.select_related('user').order_by('user__username')
+    return render(request, 'core/admin_management_list.html', {'admins': admins})
+
+
+@staff_member_required
+@_superuser_required
+@require_http_methods(['GET', 'POST'])
+def admin_management_create(request):
+    """Create a new Django User and AdminProfile (username, password, telegram_id, nickname)."""
+    User = get_user_model()
+    if request.method == 'POST':
+        username = (request.POST.get('username') or '').strip()
+        password = request.POST.get('password') or ''
+        telegram_id_raw = (request.POST.get('telegram_id') or '').strip()
+        telegram_id = "".join(c for c in telegram_id_raw if c.isdigit())
+        admin_nickname = (request.POST.get('admin_nickname') or '').strip()[:64]
+        is_notified = request.POST.get('is_notified') == 'on'
+        if not username:
+            return render(request, 'core/admin_management_form.html', {
+                'is_create': True,
+                'error': 'Username is required.',
+            })
+        if not password:
+            return render(request, 'core/admin_management_form.html', {
+                'is_create': True,
+                'error': 'Password is required.',
+            })
+        if User.objects.filter(username__iexact=username).exists():
+            return render(request, 'core/admin_management_form.html', {
+                'is_create': True,
+                'error': 'A user with that username already exists.',
+            })
+        user = User.objects.create_user(username=username, password=password)
+        user.is_staff = True
+        user.save(update_fields=['is_staff'])
+        profile = AdminProfile.objects.create(
+            user=user,
+            telegram_id=telegram_id,
+            is_notified=is_notified,
+            admin_nickname=admin_nickname,
+        )
+        messages.success(request, f'Admin "{username}" created successfully.')
+        return redirect('admin_management_list')
+    return render(request, 'core/admin_management_form.html', {'is_create': True})
+
+
+@staff_member_required
+@_superuser_required
+@require_http_methods(['GET', 'POST'])
+def admin_management_edit(request, pk):
+    """Edit AdminProfile: telegram_id, is_notified, admin_nickname. Optionally set new password."""
+    profile = get_object_or_404(AdminProfile, pk=pk)
+    User = get_user_model()
+    if request.method == 'POST':
+        telegram_id_raw = (request.POST.get('telegram_id') or '').strip()
+        telegram_id = "".join(c for c in telegram_id_raw if c.isdigit())
+        admin_nickname = (request.POST.get('admin_nickname') or '').strip()[:64]
+        is_notified = request.POST.get('is_notified') == 'on'
+        profile.telegram_id = telegram_id
+        profile.admin_nickname = admin_nickname
+        profile.is_notified = is_notified
+        profile.save()
+        new_password = request.POST.get('new_password') or ''
+        if new_password:
+            profile.user.set_password(new_password)
+            profile.user.save(update_fields=['password'])
+        messages.success(request, f'Admin "{profile.user.username}" updated successfully.')
+        return redirect('admin_management_list')
+    return render(request, 'core/admin_management_form.html', {
+        'is_create': False,
+        'profile': profile,
+    })
+
+
+@staff_member_required
+@_superuser_required
+@require_http_methods(['POST'])
+def admin_test_notification(request, pk):
+    """Send a test 'Ping' message to the admin's Telegram to verify telegram_id. Returns JSON with exact error on failure."""
+    profile = get_object_or_404(AdminProfile, pk=pk)
+    tid = (profile.telegram_id or "").strip()
+    if not tid:
+        return JsonResponse({"success": False, "message": "No Telegram ID set for this admin."}, status=400)
+    from core.models import TelegramBot
+    from core.bot_handler import send_message_to_chat
+    default_bot = TelegramBot.objects.filter(is_default=True, is_active=True).first()
+    bot_mention = f"@{default_bot.username}" if default_bot and (default_bot.username or "").strip() else "the bot"
+    test_text = (
+        "🔔 Ping — اعلان تست از پنل مدیریت. اگر این پیام را می‌بینید، شناسه تلگرام درست است.\n\n"
+        f"اگر اعلان دریافت نکردید، حتماً قبلاً ربات را با /start شروع کرده باشید ({bot_mention})."
+    )
+    success, err = send_message_to_chat(tid, test_text)
+    if success:
+        return JsonResponse({"success": True, "message": "Test notification sent."})
+    return JsonResponse({"success": False, "message": err or "Send failed."}, status=502)
 
 
 @staff_member_required
@@ -629,32 +784,40 @@ def bot_create(request):
 @staff_member_required
 @require_http_methods(['GET', 'POST'])
 def bot_edit(request, pk):
-    """Edit bot. Token only updated if new value provided (masked in form)."""
+    """Edit bot. Token from form or JSON (get_request_payload avoids RawPostDataException). Validate with getMe; sync webhook or clear for polling."""
     bot = get_object_or_404(TelegramBot, pk=pk)
     if request.method == 'POST':
-        bot.name = (request.POST.get('name') or bot.name).strip()
-        new_token = (request.POST.get('bot_token') or '').strip()
+        data = get_request_payload(request)
+        bot.name = (data.get('name') or bot.name or '').strip()
+        new_token = (data.get('bot_token') or '').strip()
         if new_token and new_token != bot.get_masked_token():
+            from core.bot_handler import validate_token
+            ok, err, _ = validate_token(new_token)
+            if not ok:
+                return JsonResponse({'status': 'error', 'message': err or 'Invalid token'}, status=400)
             bot.set_token(new_token)
-        bot.username = (request.POST.get('username') or '').strip().lstrip('@')[:64]
-        bot.is_active = request.POST.get('is_active') == 'on'
-        mode = (request.POST.get('mode') or bot.mode or TelegramBot.Mode.POLLING).strip()
+        bot.username = (data.get('username') or '').strip().lstrip('@')[:64]
+        bot.is_active = data.get('is_active') == 'on' or data.get('is_active') is True
+        mode = (data.get('mode') or bot.mode or TelegramBot.Mode.POLLING).strip()
         if mode in dict(TelegramBot.Mode.choices):
             bot.mode = mode
-        bot.webhook_url = (request.POST.get('webhook_url') or '').strip()
-        bot.webhook_secret = (request.POST.get('webhook_secret') or '').strip()[:64]
+        bot.webhook_url = (data.get('webhook_url') or '').strip()
+        bot.webhook_secret = (data.get('webhook_secret') or '').strip()[:64]
         bot.save()
-        # Keep Telegram webhook in sync when URL or secret changes
-        if bot.webhook_url:
-            set_ok, set_msg = set_webhook(
-                bot.get_decrypted_token(),
-                bot.webhook_url,
-                secret_token=bot.webhook_secret or None,
-            )
-            if not set_ok:
-                logger.warning("Bot edit: set_webhook failed for bot_id=%s: %s", bot.pk, set_msg)
+        token = bot.get_decrypted_token()
+        if bot.mode == TelegramBot.Mode.WEBHOOK and (bot.webhook_url or bot.is_default):
+            if bot.is_default:
+                from core.services.bot_manager import activate_webhook
+                set_ok, set_msg, _ = activate_webhook(bot)
+                if not set_ok:
+                    logger.warning("Bot edit: activate_webhook failed for bot_id=%s: %s", bot.pk, set_msg)
+            elif bot.webhook_url and token:
+                set_ok, set_msg = set_webhook(token, bot.webhook_url, secret_token=bot.webhook_secret or None)
+                if not set_ok:
+                    logger.warning("Bot edit: set_webhook failed for bot_id=%s: %s", bot.pk, set_msg)
         else:
-            delete_webhook(bot.get_decrypted_token())
+            if token:
+                delete_webhook(token, drop_pending_updates=True)
         return JsonResponse({'status': 'success'})
     context = {'bot': bot, 'is_create': False}
     return render(request, 'core/bot_form.html', context)
@@ -700,31 +863,56 @@ def bot_sync_webhook(request, pk):
 
 @staff_member_required
 @require_http_methods(['POST'])
+def bot_reset_connection(request, pk):
+    """Troubleshooting: clear webhook (drop_pending_updates), then re-sync if Webhook mode or leave ready for Polling."""
+    bot = get_object_or_404(TelegramBot, pk=pk)
+    token = bot.get_decrypted_token()
+    if not token:
+        return JsonResponse({'success': False, 'message': 'No token configured.'}, status=400)
+    ok_clear, err_clear = delete_webhook(token, drop_pending_updates=True)
+    if not ok_clear:
+        return JsonResponse({'success': False, 'message': f'Clear webhook failed: {err_clear or "Unknown"}'}, status=400)
+    if bot.mode == TelegramBot.Mode.WEBHOOK:
+        from core.services.bot_manager import activate_webhook
+        success, message, url = activate_webhook(bot)
+        if success:
+            return JsonResponse({'success': True, 'message': f'Connection reset. {message}', 'url': url})
+        return JsonResponse({'success': False, 'message': f'Webhook re-sync failed: {message or "Unknown"}'}, status=400)
+    return JsonResponse({'success': True, 'message': 'Connection reset. Webhook cleared; bot is ready for polling (run python manage.py runbots).'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
 def bot_update_default_token(request, pk):
-    """Update default bot token and reconfigure webhook. POST: bot_token."""
+    """Update default bot token. Validates with getMe; if Webhook mode syncs webhook, if Polling clears webhook. POST: bot_token (form or JSON via get_request_payload)."""
     bot = get_object_or_404(TelegramBot, pk=pk)
     if not bot.is_default:
         return JsonResponse({'success': False, 'message': 'Only the default bot can use this endpoint.'}, status=400)
-    data = parse_request_json(request) if request.body else {}
-    new_token = (request.POST.get('bot_token') or (data.get('bot_token') if data else None) or '').strip()
+    data = get_request_payload(request)
+    new_token = (data.get('bot_token') or '').strip()
     if not new_token:
         return JsonResponse({'success': False, 'message': 'Token is required.'}, status=400)
     bot.set_token(new_token)
     bot.save(update_fields=['bot_token_encrypted'])
-    ok, msg = test_telegram_connection(bot.get_decrypted_token())
+    token = bot.get_decrypted_token()
+    ok, msg = test_telegram_connection(token)
     if ok:
         bot.status = TelegramBot.Status.ONLINE
         bot.last_heartbeat = timezone.now()
         bot.last_error = ''
         bot.save(update_fields=['status', 'last_heartbeat', 'last_error'])
-        from core.services.bot_manager import activate_webhook
-        success, webhook_msg, url = activate_webhook(bot)
-        if success:
-            msg = f"Token updated. {webhook_msg}"
-        elif webhook_msg and 'production_base_url' in webhook_msg.lower():
-            msg = "Token updated. Set production_base_url in Settings to activate webhook."
+        if bot.mode == TelegramBot.Mode.WEBHOOK:
+            from core.services.bot_manager import activate_webhook
+            success, webhook_msg, url = activate_webhook(bot)
+            if success:
+                msg = f"Token updated. {webhook_msg}"
+            elif webhook_msg and 'production_base_url' in (webhook_msg or '').lower():
+                msg = "Token updated. Set production_base_url in Settings to activate webhook."
+            else:
+                msg = f"Token updated. Webhook: {webhook_msg or 'not set'}"
         else:
-            msg = f"Token updated. Webhook: {webhook_msg or 'not set'}"
+            ok_del, err_del = delete_webhook(token, drop_pending_updates=True)
+            msg = "Token updated. Webhook cleared for polling." if ok_del else f"Token updated. Webhook clear: {err_del or 'ok'}"
     else:
         bot.status = TelegramBot.Status.ERROR
         bot.last_error = msg or 'Invalid token'
@@ -738,7 +926,7 @@ def bot_update_default_token(request, pk):
 def bot_regenerate_webhook(request, pk):
     """Set or clear webhook for bot. POST: webhook_url (optional). If empty, delete webhook."""
     bot = get_object_or_404(TelegramBot, pk=pk)
-    data = parse_request_json(request) or request.POST.dict()
+    data = get_request_payload(request)
     url = (data.get('webhook_url') or '').strip()
     token = bot.get_decrypted_token()
     if not url:
@@ -785,6 +973,60 @@ def bot_restart(request, pk):
     bot.requested_action = TelegramBot.RequestedAction.RESTART
     bot.save(update_fields=['requested_action'])
     return JsonResponse({'status': 'success', 'message': 'Restart requested.'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def toggle_bot_status(request, bot_id):
+    """
+    Start or stop the runbots process for this bot.
+    Start: spawns `TELEGRAM_MODE=polling python manage.py runbots --bot-id=ID` and stores PID.
+    Stop: sends SIGTERM to the process stored in current_pid and clears current_pid / is_running.
+    """
+    bot = get_object_or_404(TelegramBot, pk=bot_id)
+    if bot.mode != TelegramBot.Mode.POLLING:
+        messages.error(request, "Only polling bots can be started or stopped from this panel.")
+        return redirect("bot_list")
+
+    if getattr(bot, "is_running", False) and getattr(bot, "current_pid", None):
+        # Stop: kill the runbots process
+        pid = bot.current_pid
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError, AttributeError) as e:
+            logger.warning("toggle_bot_status stop: kill pid=%s failed: %s", pid, e)
+        bot.current_pid = None
+        bot.is_running = False
+        bot.save(update_fields=["current_pid", "is_running"])
+        messages.success(request, f"Bot «{bot.name}» runbots process (PID {pid}) stopped.")
+        return redirect("bot_list")
+
+    # Start: run manage.py runbots --bot-id=bot_id in background
+    base_dir = Path(getattr(settings, "BASE_DIR", ".")).resolve()
+    manage_py = base_dir / "manage.py"
+    if not manage_py.exists():
+        messages.error(request, "manage.py not found. Cannot start runbots.")
+        return redirect("bot_list")
+    env = os.environ.copy()
+    env["TELEGRAM_MODE"] = "polling"
+    cmd = [sys.executable, str(manage_py), "runbots", "--bot-id", str(bot_id)]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(base_dir),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        bot.current_pid = proc.pid
+        bot.is_running = True
+        bot.save(update_fields=["current_pid", "is_running"])
+        messages.success(request, f"Bot «{bot.name}» runbots started (PID {proc.pid}).")
+    except Exception as e:
+        logger.exception("toggle_bot_status start: %s", e)
+        messages.error(request, f"Failed to start runbots: {e}")
+    return redirect("bot_list")
 
 
 # ---------- Instagram settings ----------

@@ -40,16 +40,36 @@
     <p class="text-muted small mb-2">Last webhook received: <span class="text-warning">Never</span> — set <strong>production_base_url</strong> and use Manual Sync to register the webhook.</p>
     {% endif %}
     <p class="text-muted small mb-3">This is your <strong>Default System Bot</strong>. You can update its Token below or add additional bots for other services if needed.</p>
+    {% if default_bot.mode == 'polling' %}
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <form method="post" action="{% url 'toggle_bot_status' default_bot.pk %}" class="d-inline" id="defaultBotToggleForm">
+        {% csrf_token %}
+        {% if default_bot.is_running %}
+        <button type="submit" class="btn btn-danger" title="Stop runbots process for this bot">
+          <i class="fa-solid fa-stop icon" aria-hidden="true"></i> Stop Bot
+        </button>
+        {% else %}
+        <button type="submit" class="btn btn-success" title="Start runbots process for this bot">
+          <i class="fa-solid fa-play icon" aria-hidden="true"></i> Start Bot
+        </button>
+        {% endif %}
+      </form>
+    </div>
+    {% endif %}
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
       <button type="button" class="btn btn-soul" id="syncWebhookBtn" data-url="{% url 'bot_sync_webhook' default_bot.pk %}" title="Call setWebhook for this bot to fix connection issues">
         <i class="fa-solid fa-rotate icon" aria-hidden="true"></i> Manual Sync
       </button>
+      <button type="button" class="btn btn-outline-warning" id="resetConnectionBtn" data-url="{% url 'bot_reset_connection' default_bot.pk %}" title="Troubleshooting: clear webhook then re-sync (Webhook) or leave ready for Polling">
+        <i class="fa-solid fa-wrench icon" aria-hidden="true"></i> Reset Bot Connection
+      </button>
       <span id="syncWebhookResult" class="small text-muted"></span>
+      <span id="resetConnectionResult" class="small text-muted"></span>
     </div>
     <form id="defaultBotTokenForm" class="mt-3" data-url="{% url 'bot_update_default_token' default_bot.pk %}">
       {% csrf_token %}
       <label class="form-label text-muted small">Update Token (masked)</label>
-      <div class="input-group" style="max-width: 420px;">
+      <div class="input-group input-group-responsive" style="max-width: 420px;">
         <input type="password" class="form-control bg-dark border-secondary text-light" name="bot_token" id="defaultBotToken" placeholder="Paste new bot token (masked)" autocomplete="off">
         <button type="button" class="input-group-text bg-dark border-secondary text-muted toggle-password" id="toggleDefaultBotToken" style="cursor:pointer" title="Show/hide" aria-label="Toggle token visibility"><i class="fa-regular fa-eye icon" aria-hidden="true"></i></button>
         <button type="submit" class="btn btn-soul" id="defaultBotTokenBtn">Update & sync webhook</button>
@@ -94,7 +114,7 @@
           <td><span class="badge {% if bot.mode == 'polling' %}bg-primary{% else %}bg-secondary{% endif %}">{{ bot.get_mode_display }}</span></td>
           <td>
             {% if bot.mode == 'polling' %}
-              {% if bot.worker_pid %}
+              {% if bot.is_running or bot.worker_pid %}
                 <span class="badge bg-success">running</span>
               {% else %}
                 <span class="badge bg-secondary">stopped</span>
@@ -103,7 +123,7 @@
               <span class="text-muted">—</span>
             {% endif %}
           </td>
-          <td>{% if bot.worker_pid %}{{ bot.worker_pid }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td>{% if bot.current_pid %}{{ bot.current_pid }}{% elif bot.worker_pid %}{{ bot.worker_pid }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>{% if bot.worker_started_at %}{{ bot.worker_started_at|timesince }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>{% if bot.last_heartbeat %}{{ bot.last_heartbeat|timesince }} ago{% else %}<span class="text-muted">—</span>{% endif %}</td>
           <td>
@@ -131,15 +151,18 @@
           </td>
           <td class="text-end">
             {% if bot.mode == 'polling' %}
-              <button type="button" class="btn btn-sm btn-outline-success me-1 bot-start-btn" data-url="{% url 'bot_start' bot.pk %}" {% if bot.worker_pid %}disabled title="Already running"{% endif %} title="Start" aria-label="Start">
-                <i class="fa-solid fa-play icon" aria-hidden="true"></i>
-              </button>
-              <button type="button" class="btn btn-sm btn-outline-warning me-1 bot-stop-btn" data-url="{% url 'bot_stop' bot.pk %}" {% if not bot.worker_pid %}disabled title="Not running"{% endif %} title="Stop" aria-label="Stop">
-                <i class="fa-solid fa-stop icon" aria-hidden="true"></i>
-              </button>
-              <button type="button" class="btn btn-sm btn-outline-info me-1 bot-restart-btn" data-url="{% url 'bot_restart' bot.pk %}" title="Restart" aria-label="Restart">
-                <i class="fa-solid fa-rotate icon" aria-hidden="true"></i>
-              </button>
+              <form method="post" action="{% url 'toggle_bot_status' bot.pk %}" class="d-inline me-1">
+                {% csrf_token %}
+                {% if bot.is_running %}
+                <button type="submit" class="btn btn-sm btn-danger" title="Stop runbots process">
+                  <i class="fa-solid fa-stop icon" aria-hidden="true"></i> Stop Bot
+                </button>
+                {% else %}
+                <button type="submit" class="btn btn-sm btn-success" title="Start runbots process">
+                  <i class="fa-solid fa-play icon" aria-hidden="true"></i> Start Bot
+                </button>
+                {% endif %}
+              </form>
             {% endif %}
             <button type="button" class="btn btn-sm btn-outline-primary me-1 bot-test-btn" data-test-url="{% url 'bot_test' bot.pk %}" title="Test connection" aria-label="Test connection">
               <i class="fa-solid fa-wifi icon" aria-hidden="true"></i>
@@ -203,6 +226,30 @@
         .catch(function() {
           if (resEl) { resEl.textContent = 'Request failed'; resEl.className = 'small text-danger'; }
           syncBtn.disabled = false;
+        });
+    });
+  }
+  // Default bot: Reset Bot Connection (troubleshooting)
+  var resetBtn = document.getElementById('resetConnectionBtn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function() {
+      var url = resetBtn.getAttribute('data-url');
+      var resEl = document.getElementById('resetConnectionResult');
+      if (resEl) { resEl.textContent = 'Resetting…'; resEl.className = 'small text-muted'; }
+      resetBtn.disabled = true;
+      fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrfToken } })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (resEl) {
+            resEl.textContent = data.message || (data.success ? 'Connection reset.' : 'Failed');
+            resEl.className = 'small ' + (data.success ? 'text-success' : 'text-danger');
+          }
+          resetBtn.disabled = false;
+          if (data.success) setTimeout(function() { window.location.reload(); }, 1500);
+        })
+        .catch(function() {
+          if (resEl) { resEl.textContent = 'Request failed'; resEl.className = 'small text-danger'; }
+          resetBtn.disabled = false;
         });
     });
   }

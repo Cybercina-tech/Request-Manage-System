@@ -1,12 +1,14 @@
 """
 Iraniu — BotWorker: single-bot worker with start/stop/run_forever.
 Handles polling loop, heartbeat, error tracking. Used by runbots command.
+Multi-OS: uses pathlib/os for paths; no hardcoded separators.
 """
 
 import logging
 import os
 import signal
 import time
+from pathlib import Path
 
 # Ensure Django is available when run as multiprocessing target
 if os.environ.get("DJANGO_SETTINGS_MODULE") is None:
@@ -20,7 +22,8 @@ except Exception:
 from django.utils import timezone
 
 from core.models import TelegramBot
-from core.services.telegram_client import get_me, get_updates, delete_webhook
+from core.bot_handler import initialize_for_polling
+from core.services.telegram_client import get_updates
 from core.services.telegram_update_handler import process_update
 
 logger = logging.getLogger(__name__)
@@ -31,14 +34,18 @@ RECONNECT_DELAY_MAX = 60
 HEARTBEAT_INTERVAL_SEC = 30
 MAX_CONSECUTIVE_ERRORS = 15
 OFFLINE_THRESHOLD_SEC = 90
+# 409 Conflict = another getUpdates already running; backoff and do not retry immediately
+CONFLICT_BACKOFF_SEC = (5, 10, 20, 40, 60)
+CONFLICT_BACKOFF_MAX_INDEX = len(CONFLICT_BACKOFF_SEC) - 1
 
 
 def _setup_bot_logger(bot_id: int, log_dir: str):
-    """Add TimedRotatingFileHandler for this bot to a dedicated logger."""
+    """Add TimedRotatingFileHandler for this bot. log_dir: path as str (OS-agnostic)."""
     try:
-        os.makedirs(log_dir, exist_ok=True)
+        log_path = Path(log_dir) if log_dir else Path("logs")
+        log_path.mkdir(parents=True, exist_ok=True)
         from logging.handlers import TimedRotatingFileHandler
-        log_file = os.path.join(log_dir, f"bot_{bot_id}.log")
+        log_file = str(log_path / f"bot_{bot_id}.log")
         handler = TimedRotatingFileHandler(
             log_file, when="midnight", backupCount=7, encoding="utf-8"
         )
@@ -93,7 +100,7 @@ class BotWorker:
         return self._log
 
     def start(self) -> bool:
-        """Prepare worker; load bot, validate token. Returns True if ready."""
+        """Prepare worker: validate token, clear webhook (drop_pending_updates), then ready for polling."""
         self._running = True
         self._shutdown_requested = False
         bot_log = self._get_logger()
@@ -109,14 +116,14 @@ class BotWorker:
                 bot_log.error("Bot %s has no token", self.bot_id)
                 _update_error(self.bot_id, "No token configured", TelegramBot.Status.ERROR)
                 return False
-            success, _, err = get_me(token)
+            success, err, username = initialize_for_polling(token)
             if not success:
                 bot_log.error("Invalid token bot_id=%s: %s", self.bot_id, err)
                 _update_error(self.bot_id, err or "Invalid token", TelegramBot.Status.ERROR)
                 return False
-            delete_webhook(token)
-            bot_log.info("Webhook cleared for polling")
             _update_status(self.bot_id, last_error="")
+            display_name = f"@{username}" if username else f"bot_id={self.bot_id}"
+            bot_log.info("Bot %s is now polling...", display_name)
             return True
         except Exception as e:
             bot_log.exception("Startup failed bot_id=%s: %s", self.bot_id, e)
@@ -149,6 +156,7 @@ class BotWorker:
 
         offset = None
         consecutive_errors = 0
+        conflict_backoff_index = 0
         last_heartbeat_time = time.monotonic()
 
         def _sigterm(_signum, _frame):
@@ -165,12 +173,30 @@ class BotWorker:
                 if self._shutdown_requested:
                     break
                 if not success:
+                    err_str = (error or "") if error else ""
+                    is_409 = "409" in err_str or "conflict" in err_str.lower()
+                    if is_409:
+                        delay_sec = CONFLICT_BACKOFF_SEC[min(conflict_backoff_index, CONFLICT_BACKOFF_MAX_INDEX)]
+                        bot_log.warning(
+                            "getUpdates 409 Conflict (multiple instances?); backoff %ss (index=%s)",
+                            delay_sec,
+                            conflict_backoff_index,
+                        )
+                        _update_error(
+                            self.bot_id,
+                            "409 Conflict: another polling instance may be running. Backoff %ss." % delay_sec,
+                            None,
+                        )
+                        time.sleep(delay_sec)
+                        if conflict_backoff_index < CONFLICT_BACKOFF_MAX_INDEX:
+                            conflict_backoff_index += 1
+                        continue
                     consecutive_errors += 1
                     bot_log.warning(
                         "getUpdates failed (%s/%s): %s",
                         consecutive_errors,
                         MAX_CONSECUTIVE_ERRORS,
-                        error,
+                        err_str[:200],
                     )
                     _update_error(
                         self.bot_id,
@@ -188,6 +214,7 @@ class BotWorker:
                     continue
 
                 consecutive_errors = 0
+                conflict_backoff_index = 0
                 _update_status(
                     self.bot_id,
                     last_heartbeat=timezone.now(),
@@ -228,8 +255,9 @@ class BotWorker:
 
             except Exception as e:
                 consecutive_errors += 1
-                bot_log.exception("Loop error bot_id=%s: %s", self.bot_id, e)
-                _update_error(self.bot_id, str(e)[:2048], TelegramBot.Status.ERROR)
+                err_msg = str(e)[:2048] if e else "Unknown error"
+                bot_log.error("Loop error bot_id=%s: %s", self.bot_id, err_msg)
+                _update_error(self.bot_id, err_msg, TelegramBot.Status.ERROR)
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                     break
                 delay = min(

@@ -37,6 +37,7 @@ class CoreConfig(AppConfig):
 
     def ready(self):
         connection_created.connect(_setup_sqlite_pragmas)
+        from core import signals  # noqa: F401 — register post_save on AdRequest for admin notifications
         from django.db.models.signals import post_migrate
         from django.conf import settings
 
@@ -52,9 +53,12 @@ class CoreConfig(AppConfig):
         post_migrate.connect(_ensure_default_bot, sender=self)
         # Deferred thread: only place that does initial connectivity check (avoids RuntimeWarning).
         threading.Thread(target=_run_deferred_startup, daemon=True).start()
-        # Auto-runner (polling loop) only when explicitly in polling mode; never in webhook mode.
-        telegram_mode = getattr(settings, 'TELEGRAM_MODE', 'webhook').lower()
-        if telegram_mode == 'polling':
+        # Start bot supervisor only when running the runbots command, NOT runserver (avoids DB access
+        # during app init and prevents multiple instances / 409 Conflict when runserver is used).
+        import sys
+        argv = getattr(sys, "argv", []) or []
+        if "runserver" in argv:
+            pass
+        elif getattr(settings, "TELEGRAM_MODE", "webhook").lower() == "polling":
             from core.services.bot_runner import start_auto_bot_runner
             start_auto_bot_runner()
-        # In webhook mode we do not start the auto-runner; use webhook only (including in development).

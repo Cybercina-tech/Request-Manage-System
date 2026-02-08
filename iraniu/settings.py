@@ -139,10 +139,10 @@ LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
 # Telegram Bot Runner
-# webhook (default): no polling; use setWebhook + HTTPS. polling: long-poll getUpdates (dev only).
-TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'webhook').lower()
+# polling (default): runbots starts getUpdates workers. webhook: use setWebhook + HTTPS; runbots still starts polling workers for bots with mode=Polling in DB.
+TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
-    TELEGRAM_MODE = 'webhook'
+    TELEGRAM_MODE = 'polling'
 
 # Auto-start bots with Django when TELEGRAM_MODE is polling. Set ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
 ENABLE_AUTO_BOTS = os.environ.get('ENABLE_AUTO_BOTS', 'true').lower() in ('true', '1', 'yes', 'on')

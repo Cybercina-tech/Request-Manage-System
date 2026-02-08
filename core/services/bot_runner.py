@@ -117,8 +117,10 @@ class BotRunnerManager:
             self._telegram_mode = "polling"
 
     def start_bot(self, bot_id: int, debug: bool = False) -> bool:
-        """Start polling worker for bot_id. Returns True if started."""
-        if bot_id in self._processes and self._processes[bot_id].is_alive():
+        """Start polling worker for bot_id (singleton: one process per bot_id). Returns True if started or already running."""
+        proc = self._processes.get(bot_id)
+        if proc is not None and proc.is_alive():
+            logger.debug("start_bot: bot_id=%s already running pid=%s", bot_id, proc.pid)
             return True
         self._stop_bot_process(bot_id)
         try:
@@ -138,7 +140,7 @@ class BotRunnerManager:
             target=run_bot,
             args=(bot_id, self.log_dir),
             kwargs={"debug": debug},
-            daemon=False,
+            daemon=True,
         )
         p.start()
         self._processes[bot_id] = p
@@ -155,18 +157,23 @@ class BotRunnerManager:
         return True
 
     def _stop_bot_process(self, bot_id: int) -> None:
-        """Stop process for bot_id if running; clear DB."""
+        """Stop process for bot_id if running; clear DB (worker_pid, current_pid, is_running)."""
         p = self._processes.pop(bot_id, None)
         if p and p.is_alive():
-            p.terminate()
-            p.join(timeout=10)
-            if p.is_alive():
-                p.kill()
-                p.join(timeout=2)
+            try:
+                p.terminate()
+                p.join(timeout=10)
+                if p.is_alive():
+                    p.kill()
+                    p.join(timeout=2)
+            except (ProcessLookupError, OSError) as e:
+                logger.debug("_stop_bot_process terminate bot_id=%s: %s", bot_id, e)
         try:
             TelegramBot.objects.filter(pk=bot_id).update(
                 worker_pid=None,
                 worker_started_at=None,
+                current_pid=None,
+                is_running=False,
                 requested_action=None,
             )
         except Exception as e:
@@ -232,6 +239,8 @@ class BotRunnerManager:
                     TelegramBot.objects.filter(pk=bot_id).update(
                         worker_pid=None,
                         worker_started_at=None,
+                        current_pid=None,
+                        is_running=False,
                         status=TelegramBot.Status.OFFLINE,
                     )
                 except Exception:
@@ -249,17 +258,16 @@ class BotRunnerManager:
 
     def run_supervisor_loop(self, bot_ids: list = None, debug: bool = False) -> None:
         """
-        Blocking loop: start polling workers, tick supervisor.
-        If bot_ids provided, only run those bots.
+        Blocking loop: start polling workers for any bot with mode=POLLING (regardless of
+        TELEGRAM_MODE), then tick supervisor; when TELEGRAM_MODE is webhook also run
+        webhook health checks for WEBHOOK bots.
         """
         logger.info(
             "Supervisor starting mode=%s log_dir=%s",
             self._telegram_mode,
             self.log_dir,
         )
-        if self._telegram_mode == "webhook":
-            self._run_webhook_loop(bot_ids)
-            return
+        # Always start polling workers for bots that are set to Polling in DB
         try:
             qs = TelegramBot.objects.filter(
                 is_active=True, mode=TelegramBot.Mode.POLLING
@@ -272,9 +280,24 @@ class BotRunnerManager:
                 self.start_bot(bot.pk, debug=debug)
         except Exception as e:
             logger.exception("Supervisor initial start: %s", e)
+        last_webhook_check = 0.0
         while not self._shutdown:
             time.sleep(SUPERVISOR_INTERVAL)
             self.supervisor_tick(debug=debug)
+            # When in webhook mode, also run health checks for WEBHOOK bots
+            if self._telegram_mode == "webhook":
+                now = time.time()
+                if now - last_webhook_check >= HEARTBEAT_CHECK_INTERVAL:
+                    last_webhook_check = now
+                    wqs = TelegramBot.objects.filter(
+                        is_active=True, mode=TelegramBot.Mode.WEBHOOK
+                    )
+                    if bot_ids is not None:
+                        wqs = wqs.filter(pk__in=bot_ids)
+                    for bot in wqs:
+                        if self._shutdown:
+                            break
+                        _run_webhook_health_check(bot)
 
     def _run_webhook_loop(self, bot_ids: list = None) -> None:
         """Webhook mode: health check only, no polling workers."""
@@ -299,17 +322,8 @@ class BotRunnerManager:
             time.sleep(SUPERVISOR_INTERVAL)
 
     def run_once(self, bot_ids: list = None, debug: bool = False) -> None:
-        """Single tick: start workers if needed, apply actions, then exit."""
+        """Single tick: start polling workers for POLLING bots, run webhook health check if webhook mode, then tick."""
         logger.info("Supervisor run_once mode=%s", self._telegram_mode)
-        if self._telegram_mode == "webhook":
-            qs = TelegramBot.objects.filter(
-                is_active=True, mode=TelegramBot.Mode.WEBHOOK
-            )
-            if bot_ids is not None:
-                qs = qs.filter(pk__in=bot_ids)
-            for bot in qs:
-                _run_webhook_health_check(bot)
-            return
         _mark_stale_offline()
         try:
             qs = TelegramBot.objects.filter(
@@ -321,6 +335,14 @@ class BotRunnerManager:
                 self.start_bot(bot.pk, debug=debug)
         except Exception as e:
             logger.exception("run_once start: %s", e)
+        if self._telegram_mode == "webhook":
+            wqs = TelegramBot.objects.filter(
+                is_active=True, mode=TelegramBot.Mode.WEBHOOK
+            )
+            if bot_ids is not None:
+                wqs = wqs.filter(pk__in=bot_ids)
+            for bot in wqs:
+                _run_webhook_health_check(bot)
         self.supervisor_tick(debug=debug)
 
     def shutdown(self) -> None:
@@ -356,6 +378,7 @@ def run_bots_supervisor(
         log_dir = str(Path(base) / "logs")
     else:
         log_dir = str(log_dir).strip() or str(Path(settings.BASE_DIR) / "logs")
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     manager = BotRunnerManager(log_dir=log_dir)
     if manager_ref is not None:

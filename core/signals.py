@@ -1,0 +1,101 @@
+"""
+Iraniu — Django signals.
+
+- post_save on AdminProfile: when created or is_notified set to True (first time), send welcome Telegram message.
+- post_save on AdRequest: when a new request is created, notify all admins with Persian message and panel link.
+"""
+
+import logging
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
+
+from core.models import AdRequest, AdminProfile, SiteConfiguration
+from core.services.admin_notifications import send_admin_notification
+from core.bot_handler import send_message_to_chat
+
+logger = logging.getLogger(__name__)
+
+# Store previous is_notified per AdminProfile pk for post_save (updates only).
+_admin_old_is_notified: dict[int, bool] = {}
+
+WELCOME_MESSAGE = (
+    "🎉 خوش آمدید! شما اکنون به عنوان مدیر سیستم انتخاب شدید. "
+    "از این پس اعلان‌های درخواست‌های جدید را اینجا دریافت خواهید کرد."
+)
+
+
+@receiver(pre_save, sender=AdminProfile)
+def _admin_profile_pre_save(sender, instance, **kwargs):
+    """Remember is_notified before save so we can detect first-time True in post_save."""
+    if instance.pk:
+        try:
+            old = AdminProfile.objects.get(pk=instance.pk)
+            _admin_old_is_notified[instance.pk] = old.is_notified
+        except AdminProfile.DoesNotExist:
+            pass
+
+
+@receiver(post_save, sender=AdminProfile)
+def on_admin_profile_save(sender, instance, created, **kwargs):
+    """When an admin is created or is_notified is set to True for the first time, send welcome message."""
+    tid = (instance.telegram_id or "").strip()
+    if not tid or not instance.is_notified:
+        if instance.pk in _admin_old_is_notified:
+            _admin_old_is_notified.pop(instance.pk, None)
+        return
+    should_send = False
+    if created:
+        should_send = True
+    else:
+        old = _admin_old_is_notified.pop(instance.pk, None)
+        if old is False:
+            should_send = True
+    if not should_send:
+        return
+    try:
+        success, err = send_message_to_chat(tid, WELCOME_MESSAGE)
+        if not success:
+            logger.warning(
+                "on_admin_profile_save: failed to send welcome to admin pk=%s telegram_id=%s: %s",
+                instance.pk, tid, err,
+            )
+    except Exception as e:
+        logger.exception("on_admin_profile_save: unexpected error: %s", e)
+
+
+@receiver(post_save, sender=AdRequest)
+def on_ad_request_created(sender, instance, created, **kwargs):
+    """When a new AdRequest is created, notify all admins with Persian message and panel link."""
+    if not created:
+        return
+    try:
+        user_phone = "—"
+        if instance.contact_snapshot and isinstance(instance.contact_snapshot, dict):
+            user_phone = (instance.contact_snapshot.get("phone") or "").strip() or user_phone
+        if user_phone == "—" and instance.user_id and instance.user:
+            user_phone = (getattr(instance.user, "phone_number", None) or "").strip() or user_phone
+        if user_phone == "—" and (instance.telegram_username or "").strip():
+            user_phone = (instance.telegram_username or "").strip()
+        if user_phone == "—":
+            user_phone = (
+                getattr(instance.user, "username", None)
+                and f"@{instance.user.username}"
+            ) or (getattr(instance.user, "first_name", None) or "") or "نامشخص"
+
+        config = SiteConfiguration.get_config()
+        base = (config.production_base_url or "").strip().rstrip("/")
+        panel_url = f"{base}/admin-management/" if base else ""
+
+        request_details = {
+            "title": (instance.content or "").strip()[:80],
+            "content_preview": (instance.content or "").strip()[:80],
+            "user_phone": user_phone,
+            "user_display": user_phone,
+            "created_at": instance.created_at,
+            "panel_url": panel_url,
+            "request_id": instance.pk,
+            "uuid": str(instance.uuid)[:8],
+        }
+        send_admin_notification(request_details)
+    except Exception as e:
+        logger.exception("on_ad_request_created: failed to send admin notification: %s", e)

@@ -31,6 +31,7 @@ from core.services import (
 )
 from core.services.users import get_or_create_user_from_update
 from core.services.telegram_update_handler import (
+    acquire_processing_lock,
     should_skip_duplicate_update,
     LAST_PROCESSED_UPDATE_ID_KEY,
 )
@@ -96,9 +97,12 @@ def _process_webhook_payload(bot, body):
     if count > WEBHOOK_RATE_LIMIT:
         logger.warning("Rate limit exceeded bot_id=%s user_id=%s", bot_id, user_id)
         return
-    chat_id, text, callback_data, message_id, callback_query_id, contact_phone = _parse_update(body)
+    chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id = _parse_update(body)
     if chat_id is None:
         logger.debug("Webhook bot_id=%s update_id=%s: no message/callback", bot_id, update_id)
+        return
+    if not acquire_processing_lock(bot_id, update_id):
+        logger.info("Webhook skip (lock held) update_id=%s bot_id=%s", update_id, bot_id)
         return
     engine = ConversationEngine(bot)
     session = engine.get_or_create_session(user_id)
@@ -122,7 +126,12 @@ def _process_webhook_payload(bot, body):
     except Exception as e:
         logger.debug("Message log create failed: %s", e)
     response = engine.process_update(
-        session, text=text, callback_data=callback_data, message_id=message_id, contact_phone=contact_phone,
+        session,
+        text=text,
+        callback_data=callback_data,
+        message_id=message_id,
+        contact_phone=contact_phone,
+        contact_user_id=contact_user_id,
     )
     text_out = response.get("text")
     reply_markup = response.get("reply_markup")
@@ -157,6 +166,14 @@ def _process_webhook_payload(bot, body):
             )
         except Exception as e:
             logger.exception("Webhook send/edit failed bot_id=%s chat_id=%s: %s", bot_id, chat_id, e)
+            if update_id is not None:
+                try:
+                    ctx = session.context or {}
+                    ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
+                    session.context = ctx
+                    session.save(update_fields=["context"])
+                except Exception:
+                    pass
         try:
             TelegramMessageLog.objects.create(
                 bot=bot, telegram_user_id=user_id, direction="out", text=text_out[:4096],
@@ -214,8 +231,8 @@ def _get_telegram_user_id(body: dict) -> int:
 
 def _parse_update(body: dict) -> tuple:
     """
-    Parse update. Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone).
-    chat_id None if no message/edited_message/callback to process.
+    Parse update. Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id).
+    contact_user_id: from message.contact.user_id for phone verification.
     """
     message = body.get("message")
     if message:
@@ -223,17 +240,22 @@ def _parse_update(body: dict) -> tuple:
         text = (message.get("text") or "").strip()
         contact = message.get("contact")
         contact_phone = None
+        contact_user_id = None
         if contact and contact.get("phone_number"):
             contact_phone = (contact.get("phone_number") or "").strip()
             if contact_phone and not contact_phone.startswith("+"):
                 contact_phone = "+" + contact_phone
-        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None)
+            try:
+                contact_user_id = int(contact.get("user_id")) if contact.get("user_id") is not None else None
+            except (TypeError, ValueError):
+                pass
+        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None, contact_user_id)
 
     edited = body.get("edited_message")
     if edited:
         chat_id = edited.get("chat", {}).get("id")
         text = (edited.get("text") or "").strip()
-        return (chat_id, text or None, None, edited.get("message_id"), None, None)
+        return (chat_id, text or None, None, edited.get("message_id"), None, None, None)
 
     callback = body.get("callback_query")
     if callback:
@@ -242,6 +264,6 @@ def _parse_update(body: dict) -> tuple:
         message_id = msg.get("message_id")
         data = (callback.get("data") or "").strip()
         callback_query_id = callback.get("id")
-        return (chat_id, None, data or None, message_id, callback_query_id, None)
+        return (chat_id, None, data or None, message_id, callback_query_id, None, None)
 
-    return (None, None, None, None, None, None)
+    return (None, None, None, None, None, None, None)

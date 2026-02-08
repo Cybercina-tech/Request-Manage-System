@@ -72,8 +72,8 @@ MESSAGES = {
         "fa": "📋 **آگهی‌های شما**\n\n",
     },
     "my_ads_empty": {
-        "en": "📋 You have no ads yet.\n\nCreate one from the main menu when you're ready!",
-        "fa": "📋 هنوز آگهی ندارید.\n\nوقتی آماده بودید از منوی اصلی یک آگهی ثبت کنید!",
+        "en": "📋 You haven't posted any ads yet.\n\nCreate one from the main menu when you're ready!",
+        "fa": "📋 هنوز آگهی منتشر نکرده‌اید.\n\nوقتی آماده بودید از منوی اصلی یک آگهی ثبت کنید!",
     },
     "my_ads_item": {
         "en": "• {preview} — **{status}**\n",
@@ -175,10 +175,14 @@ MESSAGES = {
         "en": "✅ Yes, confirm",
         "fa": "✅ بله، تأیید",
     },
-    # ——— Contact at end of flow ———
+    # ——— Contact (mandatory before ad creation) ———
     "ask_contact": {
-        "en": "📱 Share your phone number so we can reach you (optional). Tap the button below or skip.",
-        "fa": "📱 برای تماس با شما شماره تلفن به اشتراک بگذارید (اختیاری). دکمه زیر را بزنید یا رد کنید.",
+        "en": "📱 To create ads, we need to verify your phone number. Tap the button below to share it.",
+        "fa": "📱 برای ثبت آگهی باید شماره تلفن شما تأیید شود. دکمه زیر را بزنید.",
+    },
+    "contact_not_verified": {
+        "en": "❌ The shared contact does not belong to your account. Please share your own phone number.",
+        "fa": "❌ شماره به‌اشتراک‌گذاری‌شده متعلق به حساب شما نیست. لطفاً شماره خودتان را ارسال کنید.",
     },
     "share_contact_btn": {
         "en": "📲 Share my phone number",

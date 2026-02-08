@@ -68,6 +68,7 @@ class ConversationEngine:
         callback_data: str | None = None,
         message_id: int | None = None,
         contact_phone: str | None = None,
+        contact_user_id: int | None = None,
     ) -> dict:
         """
         Process user input. Returns dict with keys: text, reply_markup (optional),
@@ -91,6 +92,13 @@ class ConversationEngine:
             if len(parts) >= 2 and parts[1].startswith(RESUBMIT_START_PREFIX):
                 uuid_str = parts[1][len(RESUBMIT_START_PREFIX) :].strip()
                 return self._handle_resubmit_start(session, uuid_str)
+
+        # /status: admin check (no state change)
+        if text and text.strip().lower() == "/status":
+            from core.models import AdminProfile
+            is_admin = AdminProfile.objects.filter(telegram_id=str(session.telegram_user_id)).exists()
+            msg = "✅ شما مدیر فعال هستید." if is_admin else "❌ شما دسترسی مدیریت ندارید."
+            return {"text": msg, "reply_markup": None, "edit_previous": edit_previous, "message_id": message_id}
 
         if session.state == TelegramSession.State.START:
             session.state = TelegramSession.State.SELECT_LANGUAGE
@@ -123,11 +131,18 @@ class ConversationEngine:
             if callback_data == "create_ad" or (
                 text and (create_key_en in (text or "").lower() or (create_key_fa and create_key_fa in (text or "")))
             ):
-                session.state = TelegramSession.State.SELECT_CATEGORY
+                telegram_user = TelegramUser.objects.filter(telegram_user_id=session.telegram_user_id).first()
+                if telegram_user and telegram_user.phone_verified:
+                    session.state = TelegramSession.State.SELECT_CATEGORY
+                    session.context = {}
+                    session.save(update_fields=["state", "context", "last_activity"])
+                    logger.info("conversation state session_id=%s MAIN_MENU → SELECT_CATEGORY", session.pk)
+                    return self._reply_select_category(session, edit_previous, message_id)
+                session.state = TelegramSession.State.ASK_CONTACT
                 session.context = {}
                 session.save(update_fields=["state", "context", "last_activity"])
-                logger.info("conversation state session_id=%s MAIN_MENU → SELECT_CATEGORY", session.pk)
-                return self._reply_select_category(session, edit_previous, message_id)
+                logger.info("conversation state session_id=%s MAIN_MENU → ASK_CONTACT (phone not verified)", session.pk)
+                return self._reply_ask_contact(session)
             return self._reply_main_menu(session, edit_previous, message_id)
 
         if session.state == TelegramSession.State.MY_ADS:
@@ -142,6 +157,9 @@ class ConversationEngine:
                 session.state = TelegramSession.State.MAIN_MENU
                 session.save(update_fields=["state", "last_activity"])
                 return self._reply_main_menu(session, edit_previous, message_id)
+            # State lock: ignore stale "create_ad" callback — prevents duplicate "First choose a category"
+            if callback_data == "create_ad":
+                return {"text": ""}
             cat = callback_data or (text.strip() if text else "")
             valid = [c.slug for c in _get_active_categories()]
             if cat in valid:
@@ -168,9 +186,9 @@ class ConversationEngine:
 
         if session.state == TelegramSession.State.CONFIRM:
             if callback_data == "confirm_yes":
-                session.state = TelegramSession.State.ASK_CONTACT
+                session.state = TelegramSession.State.ENTER_EMAIL
                 session.save(update_fields=["state", "last_activity"])
-                return self._reply_ask_contact(session)
+                return self._reply_ask_email(session, after_contact=False)
             if callback_data == "confirm_no":
                 session.state = TelegramSession.State.MAIN_MENU
                 session.context = {}
@@ -193,21 +211,21 @@ class ConversationEngine:
 
         if session.state == TelegramSession.State.ASK_CONTACT:
             if contact_phone:
+                # Verify contact belongs to the user (contact.user_id must match message.from_user.id)
+                if contact_user_id is None or int(contact_user_id) != int(session.telegram_user_id):
+                    logger.warning("ASK_CONTACT: contact user_id=%s does not match session user_id=%s", contact_user_id, session.telegram_user_id)
+                    return self._reply_contact_not_verified(session)
                 try:
                     telegram_user = TelegramUser.objects.filter(telegram_user_id=session.telegram_user_id).first()
                     if telegram_user:
                         update_contact_info(telegram_user, phone=contact_phone, mark_phone_verified=True)
-                    session.state = TelegramSession.State.ENTER_EMAIL
+                    session.state = TelegramSession.State.SELECT_CATEGORY
                     session.save(update_fields=["state", "last_activity"])
-                    return self._reply_ask_email(session, after_contact=True)
+                    logger.info("conversation state session_id=%s ASK_CONTACT → SELECT_CATEGORY (phone verified)", session.pk)
+                    return self._reply_select_category(session, edit_previous, message_id)
                 except ValueError:
                     return self._reply_invalid_phone(session)
-            # Skip: text "skip" (reply keyboard has no inline skip; user types skip)
-            skip_texts = ("skip", "رد کردن", "skip email", "رد")
-            if text and text.strip().lower() in skip_texts or (callback_data == "contact_skip"):
-                session.state = TelegramSession.State.ENTER_EMAIL
-                session.save(update_fields=["state", "last_activity"])
-                return self._reply_ask_email(session, after_contact=False)
+            # Mandatory phone: no skip; re-prompt
             return self._reply_ask_contact(session)
 
         if session.state == TelegramSession.State.ENTER_EMAIL:
@@ -233,7 +251,7 @@ class ConversationEngine:
                     return self._reply_error_generic(session)
                 except ValueError:
                     return self._reply_invalid_email(session)
-            # Re-prompt for email or skip (e.g. after invalid email)
+            # Re-prompt: invalid email shows short message; empty shows full prompt with Skip button
             return self._reply_ask_email(session, after_contact=False)
 
         if session.state == TelegramSession.State.RESUBMIT_EDIT:
@@ -411,9 +429,13 @@ class ConversationEngine:
 
     def _reply_my_ads(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
         lang = session.language or "en"
-        ads = list(
-            AdRequest.objects.filter(telegram_user_id=session.telegram_user_id).order_by("-created_at")[:50]
-        )
+        try:
+            ads = list(
+                AdRequest.objects.filter(telegram_user_id=session.telegram_user_id).order_by("-created_at")[:20]
+            )
+        except Exception as e:
+            logger.exception("_reply_my_ads query failed: %s", e)
+            ads = []
         intro = get_message("my_ads_intro", lang)
         if not ads:
             text = get_message("my_ads_empty", lang)
@@ -431,13 +453,21 @@ class ConversationEngine:
             reason_label = get_message("rejection_reason_label", lang)
             lines = [intro]
             for ad in ads:
-                st = status_key.get(ad.status, "ad_status_pending")
-                status_text = get_message(st, lang)
-                preview = (ad.content or "")[:80].replace("\n", " ") + ("…" if len(ad.content or "") > 80 else "")
-                lines.append(get_message("my_ads_item", lang).format(preview=preview, status=status_text))
-                if ad.status == AdRequest.Status.REJECTED and getattr(ad, "rejection_reason", None):
-                    lines.append(f"  {reason_label}{ad.rejection_reason}\n")
+                try:
+                    st = status_key.get(ad.status, "ad_status_pending")
+                    status_text = get_message(st, lang)
+                    content = ad.content or ""
+                    preview = content[:60].replace("\n", " ") + ("…" if len(content) > 60 else "")
+                    lines.append(get_message("my_ads_item", lang).format(preview=preview, status=status_text))
+                    if ad.status == AdRequest.Status.REJECTED:
+                        reason = (getattr(ad, "rejection_reason", None) or "")[:200]
+                        if reason:
+                            lines.append(f"  {reason_label}{reason}\n")
+                except Exception as e:
+                    logger.debug("_reply_my_ads ad format skip: %s", e)
             text = "".join(lines).strip()
+            if len(text) > 4090:
+                text = text[:4087] + "…"
         back_label = get_message("btn_back_to_home", lang)
         reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
         out = {"text": text, "reply_markup": reply_markup}
@@ -554,6 +584,12 @@ class ConversationEngine:
         text = f"{saved}\n\n{menu_text}"
         reply_markup = {"inline_keyboard": [[{"text": create_label, "callback_data": "create_ad"}]]}
         return {"text": text, "reply_markup": reply_markup}
+
+    def _reply_contact_not_verified(self, session: TelegramSession) -> dict:
+        """Contact shared does not belong to this user (user_id mismatch)."""
+        lang = session.language or "en"
+        text = get_message("contact_not_verified", lang)
+        return {"text": text, "reply_markup": self._reply_ask_contact(session).get("reply_markup")}
 
     def _reply_invalid_phone(self, session: TelegramSession) -> dict:
         lang = session.language or "en"

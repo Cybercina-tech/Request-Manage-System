@@ -23,7 +23,7 @@ def send_telegram_message(chat_id, text, config, reply_markup=None):
     token = (config.telegram_bot_token or '').strip()
     if not token or not chat_id:
         return False
-    ok, _ = _send_message(token, chat_id, text, reply_markup=reply_markup)
+    ok, _, _ = _send_message(token, chat_id, text, reply_markup=reply_markup)
     return ok
 
 
@@ -38,7 +38,7 @@ def send_telegram_message_via_bot(chat_id, text, bot, reply_markup=None):
     token = bot.get_decrypted_token()
     if not token or not chat_id:
         return None
-    ok, message_id = _send_message(token, chat_id, text, reply_markup=reply_markup)
+    ok, message_id, _ = _send_message(token, chat_id, text, reply_markup=reply_markup)
     return message_id if ok else None
 
 
@@ -139,13 +139,13 @@ def set_webhook(token, url, secret_token=None):
     return success, message or 'Unknown error'
 
 
-def delete_webhook(token):
+def delete_webhook(token, drop_pending_updates=False):
     """
     Remove webhook. Returns (success, message).
     Backward-compatible wrapper around telegram_client.delete_webhook.
+    Use drop_pending_updates=True when switching to polling.
     """
     if not (token or '').strip():
         return False, 'No token'
-    
-    success, message = _delete_webhook(token.strip())
+    success, message = _delete_webhook(token.strip(), drop_pending_updates=drop_pending_updates)
     return success, message or 'Unknown error'

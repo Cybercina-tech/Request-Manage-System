@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load static %}
+{# Admin Create/Edit — MANAGEMENT PLATFORM theme #}
+
+{% block title %}{% if is_create %}Add Admin{% else %}Edit Admin{% endif %}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    {% if is_create %}Add Admin{% else %}Edit Admin{% endif %}
+  </h1>
+  <a href="{% url 'admin_management_list' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back</a>
+</div>
+
+<div class="card-soul" style="max-width: 480px;">
+  <form method="post" action="{% if is_create %}{% url 'admin_management_create' %}{% else %}{% url 'admin_management_edit' profile.pk %}{% endif %}">
+    {% if error %}<div class="alert alert-danger mb-3">{{ error }}</div>{% endif %}
+    {% csrf_token %}
+    {% if is_create %}
+    <div class="mb-3">
+      <label class="form-label">Username <span class="text-danger">*</span></label>
+      <input type="text" name="username" class="form-control" required value="{{ request.POST.username|default:'' }}" placeholder="e.g. staff1" autocomplete="username">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Password <span class="text-danger">*</span></label>
+      <input type="password" name="password" class="form-control" required placeholder="Min 8 characters" autocomplete="new-password">
+      <small class="text-muted">Stored securely (hashed).</small>
+    </div>
+    {% endif %}
+    <div class="mb-3">
+      <label class="form-label">Telegram ID</label>
+      <input type="text" name="telegram_id" class="form-control" value="{% if is_create %}{{ request.POST.telegram_id|default:'' }}{% else %}{{ profile.telegram_id|default:'' }}{% endif %}" placeholder="e.g. 123456789" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+      <small class="text-muted">Numeric ID only (not @username). To get your ID, message <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a> on Telegram.</small>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Admin nickname (optional)</label>
+      <input type="text" name="admin_nickname" class="form-control" maxlength="64" value="{% if is_create %}{{ request.POST.admin_nickname|default:'' }}{% else %}{{ profile.admin_nickname|default:'' }}{% endif %}" placeholder="e.g. Support Lead">
+    </div>
+    <div class="mb-4 form-check form-switch">
+      <input type="checkbox" name="is_notified" class="form-check-input" id="isNotified" {% if is_create %}checked{% elif profile.is_notified %}checked{% endif %}>
+      <label class="form-check-label" for="isNotified">Receive Telegram notifications for new requests</label>
+    </div>
+    {% if not is_create %}
+    <div class="mb-4">
+      <label class="form-label">New password (optional)</label>
+      <input type="password" name="new_password" class="form-control" placeholder="Leave blank to keep current" autocomplete="new-password">
+    </div>
+    {% endif %}
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-soul">
+        <i class="fa-solid fa-check icon" aria-hidden="true"></i> {% if is_create %}Create Admin{% else %}Save{% endif %}
+      </button>
+      <a href="{% url 'admin_management_list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

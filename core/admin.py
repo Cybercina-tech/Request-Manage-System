@@ -11,6 +11,7 @@ from .models import (
     SiteConfiguration,
     Category,
     AdRequest,
+    AdminProfile,
     TelegramBot,
     TelegramSession,
     TelegramMessageLog,
@@ -225,3 +226,11 @@ class DeliveryLogAdmin(admin.ModelAdmin):
     list_filter = ['channel', 'status']
     search_fields = ['ad__uuid', 'error_message']
     readonly_fields = ['created_at']
+
+
+@admin.register(AdminProfile)
+class AdminProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'admin_nickname', 'telegram_id', 'is_notified']
+    list_filter = ['is_notified']
+    search_fields = ['user__username', 'admin_nickname', 'telegram_id']
+    raw_id_fields = ['user']

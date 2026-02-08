@@ -127,23 +127,37 @@ def _make_request(
                 return True, data.get("result"), None
             else:
                 error_desc = data.get("description", "Unknown Telegram API error")
-                logger.warning(
-                    "Telegram API error endpoint=%s token=%s: %s",
-                    endpoint,
-                    masked_token,
-                    error_desc,
-                )
+                # Invalid token (ok:false, description "Unauthorized"): log at DEBUG to avoid flooding
+                if error_desc and "unauthorized" in error_desc.lower():
+                    logger.debug(
+                        "Telegram API Unauthorized endpoint=%s token=%s (invalid token; update in Bots page)",
+                        endpoint, masked_token,
+                    )
+                else:
+                    logger.warning(
+                        "Telegram API error endpoint=%s token=%s: %s",
+                        endpoint, masked_token, error_desc,
+                    )
                 return False, None, error_desc
-        
-        # Non-200 status
-        logger.warning(
-            "Telegram API HTTP %s endpoint=%s token=%s: %s",
-            response.status_code,
-            endpoint,
-            masked_token,
-            (response.text or "")[:200],
-        )
-        return False, None, f"HTTP {response.status_code}: {response.text[:200]}"
+
+        # Non-200 status: 401 = invalid token, log at DEBUG to avoid log flood
+        is_401 = response.status_code == 401
+        try:
+            resp_json = response.json() if response.text else {}
+            desc = (resp_json.get("description") or response.text or "")[:200]
+        except Exception:
+            desc = (response.text or "")[:200]
+        if is_401:
+            logger.debug(
+                "Telegram API HTTP 401 endpoint=%s token=%s (invalid token; update in Bots page)",
+                endpoint, masked_token,
+            )
+        else:
+            logger.warning(
+                "Telegram API HTTP %s endpoint=%s token=%s: %s",
+                response.status_code, endpoint, masked_token, desc,
+            )
+        return False, None, f"HTTP {response.status_code}: {desc}"
     
     except SSLError as e:
         logger.error(
@@ -200,7 +214,7 @@ def send_message(
     text: str,
     reply_markup: Optional[Dict[str, Any]] = None,
     max_retries: int = MAX_RETRIES,
-) -> Tuple[bool, Optional[int]]:
+) -> Tuple[bool, Optional[int], Optional[str]]:
     """
     Send a message via Telegram Bot API.
 
@@ -212,12 +226,12 @@ def send_message(
         max_retries: Maximum retry attempts (default: 3)
 
     Returns:
-        (success: bool, message_id: int or None). message_id is set when success is True
-        so the caller can store it in session context for edit fallback tracking.
+        (success, message_id, error_message). message_id is set when success is True;
+        on failure, error_message is the Telegram API description (e.g. "Forbidden: bot was blocked by the user").
     """
     if not token or not chat_id:
         logger.warning("send_message: missing token or chat_id")
-        return False, None
+        return False, None, "Missing token or chat_id"
 
     session = _create_session()
     payload = {"chat_id": chat_id, "text": text}
@@ -236,7 +250,7 @@ def send_message(
         if success and result is not None:
             # Telegram returns the sent Message object; extract message_id for tracking.
             message_id = result.get("message_id") if isinstance(result, dict) else None
-            return True, message_id
+            return True, message_id, None
 
         if attempt < max_retries:
             wait_time = BACKOFF_FACTOR * (2 ** attempt)
@@ -250,7 +264,7 @@ def send_message(
             time.sleep(wait_time)
 
     logger.warning("send_message failed after %s attempts: %s", max_retries + 1, error)
-    return False, None
+    return False, None, error
 
 
 def edit_message_text(
@@ -398,27 +412,36 @@ def set_webhook(
     return False, error or "Unknown error"
 
 
-def delete_webhook(token: str) -> Tuple[bool, Optional[str]]:
+def delete_webhook(
+    token: str,
+    drop_pending_updates: bool = False,
+) -> Tuple[bool, Optional[str]]:
     """
-    Remove webhook.
-    
+    Remove webhook. Use drop_pending_updates=True when switching to polling.
+
     Args:
         token: Bot token
-    
+        drop_pending_updates: If True, Telegram drops pending updates (recommended before getUpdates).
+
     Returns:
         (success: bool, message: str or None)
     """
     if not token:
         return False, "No token"
-    
+
+    payload = {}
+    if drop_pending_updates:
+        payload["drop_pending_updates"] = True
+
     session = _create_session()
     success, _, error = _make_request(
         session,
         "POST",
         "deleteWebhook",
         token,
+        json_data=payload if payload else None,
     )
-    
+
     if success:
         return True, "Webhook removed"
     return False, error or "Unknown error"

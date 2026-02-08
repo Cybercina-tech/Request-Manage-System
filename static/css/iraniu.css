@@ -1,9 +1,20 @@
 /**
  * Iraniu — Midnight Obsidian & Electric Soul
- * Custom dark theme for Iraniu
+ * Custom dark theme for Iraniu — Mobile-First Responsive
+ *
+ * Breakpoints:
+ *   Mobile:  < 576px (base styles)
+ *   Tablet:  576px–991px
+ *   Desktop: ≥ 992px
  */
 
 :root {
+  /* Responsive breakpoints (for reference / future use) */
+  --bp-mobile: 576px;
+  --bp-tablet: 992px;
+  --bp-desktop: 1200px;
+  /* Touch target minimum (WCAG) */
+  --touch-target: 44px;
   /* Iraniu Soulful Color Palette */
   --bg-obsidian: #0B0E14;
   --bg-surface: #151923;
@@ -199,6 +210,20 @@ li {
   color: var(--text-main);
 }
 
+/* Django messages — toast-style container */
+.messages-toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1050;
+  max-width: 360px;
+  pointer-events: none;
+}
+.messages-toast-container .alert {
+  pointer-events: auto;
+  box-shadow: var(--glow-soul);
+}
+
 /* Django messages — styled for dark theme */
 .alert {
   border: 1px solid;
@@ -259,24 +284,66 @@ li {
   color: var(--brand-vivid) !important;
 }
 
-/* Layout: sidebar + main */
+/* ============================================
+   LAYOUT — Mobile-First (sidebar + main)
+   ============================================ */
 .app-layout {
   display: flex;
   min-height: 100vh;
   position: relative;
   z-index: 1;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
+/* Sidebar — Mobile: off-canvas drawer; Desktop: fixed rail */
 .sidebar {
   width: 260px;
-  background: rgba(21, 25, 35, 0.8);
+  min-width: 260px;
+  background: rgba(21, 25, 35, 0.98);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border-right: 1px solid rgba(124, 77, 255, 0.1);
   padding: 1.5rem 0;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
   height: 100vh;
+  z-index: 1040;
+  overflow-y: auto;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Mobile & Tablet: sidebar hidden by default, slides in from left */
+@media (max-width: 991px) {
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1035;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .sidebar-overlay.show {
+    display: block;
+    opacity: 1;
+  }
+}
+
+@media (min-width: 992px) {
+  .sidebar {
+    position: sticky;
+  }
 }
 
 .sidebar-brand {
@@ -388,10 +455,76 @@ li {
   opacity: 1;
 }
 
+.content-wrapper {
+  width: 100%;
+  max-width: 100%;
+}
+
 .main-content {
   flex: 1;
-  padding: 2rem;
+  width: 100%;
+  min-width: 0;
+  padding: 1rem;
   overflow-x: auto;
+}
+
+/* Mobile: extra top padding for hamburger; less overall padding */
+@media (max-width: 991px) {
+  .main-content {
+    padding-top: calc(var(--touch-target) + 1rem);
+  }
+}
+
+@media (min-width: 576px) {
+  .main-content {
+    padding: 1.25rem 1.5rem;
+  }
+}
+
+@media (min-width: 992px) {
+  .main-content {
+    padding: 2rem;
+  }
+}
+
+/* Hamburger button — visible only when sidebar is collapsible */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1050;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  padding: 0;
+  border: 1px solid rgba(124, 77, 255, 0.3);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-toggle:hover {
+  border-color: var(--brand-vivid);
+  background: rgba(124, 77, 255, 0.1);
+}
+
+@media (max-width: 991px) {
+  .sidebar-toggle {
+    display: flex;
+  }
+}
+
+@media (min-width: 992px) {
+  .sidebar-toggle {
+    display: none !important;
+  }
 }
 
 /* Cards — Glow & Glass */
@@ -426,6 +559,29 @@ li {
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+/* ============================================
+   TOUCH TARGETS — Min 44px for mobile (WCAG)
+   ============================================ */
+@media (max-width: 991px) {
+  .btn,
+  .btn-sm,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  input[type="search"],
+  textarea,
+  select,
+  .form-control {
+    min-height: var(--touch-target);
+  }
+  .btn-sm {
+    min-height: var(--touch-target);
+    padding: 0.5rem 1rem;
+  }
 }
 
 /* Buttons */
@@ -955,10 +1111,17 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
-/* Sticky table header (optional) */
+/* Table responsive — horizontal scroll on small screens */
 .table-responsive {
   position: relative;
   background: transparent;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive table {
+  min-width: 600px;
 }
 
 /* Override Bootstrap default table backgrounds */
@@ -1156,17 +1319,25 @@ input[type="range"]::-moz-range-thumb {
 .bulk-actions-bar {
   position: fixed;
   bottom: 0;
-  left: 260px;
+  left: 0;
   right: 0;
   background: var(--glass-bg);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--border-subtle);
-  padding: 1rem 2rem;
+  padding: 1rem;
   display: none;
   align-items: center;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
   z-index: 100;
+}
+
+@media (min-width: 992px) {
+  .bulk-actions-bar {
+    left: 260px;
+    padding: 1rem 2rem;
+  }
 }
 
 .bulk-actions-bar.show {
@@ -1588,4 +1759,131 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 576px) {
   .error-page .error-code { font-size: 3rem; }
   .error-page .error-title { font-size: 1.15rem; }
+}
+
+/* ============================================
+   RESPONSIVE — Mobile-First Overrides
+   ============================================ */
+
+/* Fluid widths — replace fixed max-widths on mobile */
+@media (max-width: 575px) {
+  .card-soul,
+  .form-soul.card-soul,
+  .chart-container {
+    max-width: 100% !important;
+  }
+  .input-group[style*="max-width"] {
+    max-width: 100% !important;
+  }
+  .content-preview {
+    max-width: 100%;
+  }
+}
+
+/* Messages toast — adjust position on mobile */
+@media (max-width: 575px) {
+  .messages-toast-container {
+    left: 1rem;
+    right: 1rem;
+    top: auto;
+    bottom: 1rem;
+    max-width: none;
+  }
+}
+
+/* Dashboard — KPI cards stack on mobile */
+@media (max-width: 575px) {
+  .row.g-4 .col-md-3,
+  .row.g-4 .col-md-4 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+  .pulse-gauge {
+    width: 120px;
+    height: 120px;
+  }
+  .pulse-gauge .pulse-value {
+    font-size: 1.75rem;
+  }
+}
+
+/* Forms — single column on mobile (Bootstrap rows/cols) */
+@media (max-width: 575px) {
+  .row .col-md-6,
+  .row .col-lg-4,
+  .row .col-lg-6 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+}
+
+/* Page header — stack title and actions on mobile */
+@media (max-width: 575px) {
+  .d-flex.justify-content-between.align-items-center,
+  .d-flex.flex-wrap.justify-content-between.align-items-center {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+}
+
+/* Footer — reduce margin on mobile */
+@media (max-width: 575px) {
+  .footer-signature {
+    margin-top: 2rem;
+    padding-top: 0.75rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* Filter bar — stack on mobile */
+@media (max-width: 575px) {
+  .filter-bar-glass {
+    padding: 1rem;
+  }
+  .filter-bar-glass .d-flex {
+    flex-direction: column;
+  }
+  .filter-chips {
+    width: 100%;
+  }
+}
+
+/* Mini status bar — wrap */
+@media (max-width: 575px) {
+  .mini-status-bar {
+    flex-direction: column;
+  }
+}
+
+/* Bot list — default bot card and input group stack on mobile */
+@media (max-width: 575px) {
+  .system-core-card .d-flex.flex-wrap {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .input-group-responsive {
+    flex-wrap: wrap;
+    max-width: 100% !important;
+  }
+  .input-group-responsive .form-control {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .input-group-responsive .input-group-text,
+  .input-group-responsive .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Bot list — action buttons wrap on small screens */
+@media (max-width: 767px) {
+  .table-soul td.text-end {
+    white-space: normal;
+  }
+  .table-soul td.text-end .btn,
+  .table-soul td.text-end .form,
+  .table-soul td.text-end a {
+    margin-bottom: 0.25rem;
+  }
 }

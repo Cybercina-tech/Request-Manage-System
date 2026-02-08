@@ -8,9 +8,11 @@ Iraniu — Core models.
 - TelegramBot: multi-bot; token encrypted; webhook optional.
 - TelegramSession: per-user per-bot conversation state.
 - TelegramMessageLog: optional message history for audit.
+- AdminProfile: staff admin with Telegram ID for new-request notifications.
 """
 
 import uuid
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -253,7 +255,11 @@ class AdRequest(models.Model):
 
 
 class TelegramBot(models.Model):
-    """Multi-bot support: one project can manage multiple bots. Only active bots send/receive."""
+    """
+    Multi-bot support: one project can manage multiple bots.
+    Fields: mode (Webhook/Polling), bot_token_encrypted (token at rest), is_active.
+    Only active bots send/receive. Token is validated via getMe on update; use Reset Bot Connection to clear webhook and re-sync.
+    """
 
     class Status(models.TextChoices):
         ONLINE = 'online', 'Online'
@@ -307,6 +313,15 @@ class TelegramBot(models.Model):
     )
     worker_pid = models.PositiveIntegerField(null=True, blank=True, help_text='PID of polling worker when running')
     worker_started_at = models.DateTimeField(null=True, blank=True)
+    current_pid = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='PID of the runbots supervisor process when started from UI (for Stop).',
+    )
+    is_running = models.BooleanField(
+        default=False,
+        help_text='True when a runbots process for this bot was started from the panel.',
+    )
     last_error = models.TextField(blank=True, help_text='Last error message; cleared on success')
     requested_action = models.CharField(
         max_length=16,
@@ -448,6 +463,46 @@ class ApiClient(models.Model):
 
     def __str__(self):
         return f'{self.name} (active={self.is_active})'
+
+
+class AdminProfile(models.Model):
+    """
+    Staff admin profile: extends Django User with Telegram ID for new-request notifications.
+    Only users with an AdminProfile are considered "managed admins" for the Admin Management page.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='admin_profile',
+    )
+    telegram_id = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text='Telegram chat ID to receive new-request notifications (numeric).',
+    )
+    is_notified = models.BooleanField(
+        default=True,
+        help_text='When True, this admin receives Telegram notifications for new requests.',
+    )
+    admin_nickname = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text='Optional display name for this admin (e.g. for lists).',
+    )
+
+    class Meta:
+        verbose_name = 'Admin Profile'
+        verbose_name_plural = 'Admin Profiles'
+        ordering = ['user__username']
+
+    def __str__(self):
+        return self.admin_nickname or self.user.username
+
+    def save(self, *args, **kwargs):
+        # Store only digits (reject @username or spaces); strip whitespace
+        raw = (self.telegram_id or "").strip()
+        self.telegram_id = "".join(c for c in raw if c.isdigit())
+        super().save(*args, **kwargs)
 
 
 class ScheduledInstagramPost(models.Model):

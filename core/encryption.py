@@ -42,6 +42,10 @@ def encrypt_token(plain: str) -> str:
 
 
 def decrypt_token(encrypted: str) -> str:
+    """
+    Decrypt a stored token. Returns empty string on failure so callers never
+    send an encrypted blob to external APIs (e.g. Telegram).
+    """
     if not encrypted:
         return ''
     f = _get_fernet()
@@ -50,8 +54,11 @@ def decrypt_token(encrypted: str) -> str:
     try:
         return f.decrypt(encrypted.encode()).decode()
     except Exception as e:
-        logger.debug('Decrypt failed (maybe plain): %s', e)
-        return encrypted
+        logger.warning(
+            'Token decryption failed (wrong SECRET_KEY or corrupted data). Do not use stored value as token: %s',
+            e,
+        )
+        return ''
 
 
 def mask_token(token: str, visible: int = 4) -> str:

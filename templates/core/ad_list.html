@@ -164,7 +164,7 @@
           <div class="content-preview">
             <span class="content-text">{{ ad.content|truncatewords:15 }}</span>
             {% if ad.content|wordcount > 15 %}
-            <a href="#" class="view-more-link" data-bs-toggle="modal" data-bs-target="#contentModal{{ ad.uuid }}">View More</a>
+            <a href="{% url 'request_detail' ad.uuid %}" class="view-more-link">View More</a>
             {% endif %}
           </div>
         </td>
@@ -178,7 +178,7 @@
               <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
             </a>
             {% endif %}
-            <a href="{% url 'ad_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
+            <a href="{% url 'request_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
               <i class="fa-solid fa-arrow-up-right-from-square icon" aria-hidden="true"></i>
             </a>
           </div>
@@ -198,23 +198,6 @@
     </tbody>
   </table>
 </div>
-
-<!-- Content Preview Modals -->
-{% for ad in page_obj %}
-<div class="modal modal-soul fade" id="contentModal{{ ad.uuid }}" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Full Content</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p style="white-space: pre-wrap; color: var(--text-main);">{{ ad.content }}</p>
-      </div>
-    </div>
-  </div>
-</div>
-{% endfor %}
 
 <!-- Bulk actions bar (sticky footer) -->
 <div class="bulk-actions-bar" id="bulkBar">

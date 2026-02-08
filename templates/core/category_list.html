@@ -9,9 +9,9 @@
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
     Categories
   </h1>
-  <button type="button" class="btn btn-soul" data-bs-toggle="modal" data-bs-target="#categoryModal" id="addCategoryBtn">
+  <a href="{% url 'category_create' %}" class="btn btn-soul">
     <i class="fa-solid fa-plus icon" aria-hidden="true"></i> Add New Category
-  </button>
+  </a>
 </div>
 
 <p class="text-muted mb-4">Manage ad categories. Active categories appear in the Telegram bot and filters.</p>
@@ -61,107 +61,11 @@
   </div>
 </div>
 
-{# Add/Edit Modal #}
-<div class="modal modal-soul fade" id="categoryModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title" id="categoryModalLabel">Add Category</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <form id="categoryForm">
-        <div class="modal-body">
-          {% csrf_token %}
-          <input type="hidden" name="pk" id="categoryPk" value="">
-          <div class="mb-3">
-            <label class="form-label">Name <span class="text-danger">*</span></label>
-            <input type="text" name="name" class="form-control" required placeholder="e.g. Real Estate">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Slug</label>
-            <input type="text" name="slug" class="form-control" placeholder="Auto-generated from name">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Color</label>
-            <div class="d-flex align-items-center gap-2">
-              <input type="color" name="color" id="categoryColor" value="#7C4DFF" class="form-control form-control-color" style="width: 60px; height: 38px;">
-              <input type="text" name="color_text" id="categoryColorText" value="#7C4DFF" class="form-control" placeholder="#7C4DFF">
-            </div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Icon (optional)</label>
-            <input type="text" name="icon" class="form-control" placeholder="e.g. home">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Order</label>
-            <input type="number" name="order" class="form-control" value="0" min="0">
-          </div>
-          <div class="form-check form-switch">
-            <input type="checkbox" name="is_active" class="form-check-input" id="categoryActive" checked>
-            <label class="form-check-label" for="categoryActive">Active</label>
-          </div>
-        </div>
-        <div class="modal-footer border-secondary">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-soul">
-            <i class="fa-solid fa-check icon" aria-hidden="true"></i> Save
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function() {
-  var modal = document.getElementById('categoryModal');
-  var form = document.getElementById('categoryForm');
-  var addBtn = document.getElementById('addCategoryBtn');
-  var colorInput = document.getElementById('categoryColor');
-  var colorText = document.getElementById('categoryColorText');
-
-  function syncColor() {
-    var c = colorInput.value;
-    colorText.value = c;
-    form.querySelector('input[name="color"]') && (form.querySelector('input[name="color"]').value = c);
-  }
-  colorInput && colorInput.addEventListener('input', syncColor);
-  colorText && colorText.addEventListener('input', function() {
-    if (/^#[0-9A-Fa-f]{6}$/.test(this.value)) colorInput.value = this.value;
-  });
-
-  addBtn && addBtn.addEventListener('click', function() {
-    form.reset();
-    document.getElementById('categoryPk').value = '';
-    document.getElementById('categoryModalLabel').textContent = 'Add Category';
-    document.getElementById('categoryColor').value = '#7C4DFF';
-    document.getElementById('categoryColorText').value = '#7C4DFF';
-    document.getElementById('categoryActive').checked = true;
-  });
-
-  form && form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    if (colorText && /^#[0-9A-Fa-f]{6}$/.test(colorText.value)) colorInput.value = colorText.value;
-    var fd = new FormData(form);
-    fd.set('color', colorInput ? colorInput.value : '#7C4DFF');
-    fd.delete('color_text');
-    var pk = document.getElementById('categoryPk').value;
-    var url = pk ? '{% url "category_edit" 0 %}'.replace('/0/', '/' + pk + '/') : '{% url "category_create" %}';
-    fetch(url, {
-      method: 'POST',
-      headers: { 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
-      body: fd,
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.status === 'success') window.location.href = d.redirect;
-      else alert(d.message || 'Error');
-    })
-    .catch(function() { alert('Request failed'); });
-  });
-
   document.querySelectorAll('.category-toggle').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var pk = this.getAttribute('data-pk');

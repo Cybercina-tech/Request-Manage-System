@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% load static %}
+{# Admin Management — MANAGEMENT PLATFORM theme #}
+
+{% block title %}Admin Management{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    Admin Management
+  </h1>
+  <a href="{% url 'admin_management_create' %}" class="btn btn-soul">
+    <i class="fa-solid fa-user-plus icon" aria-hidden="true"></i> Add Admin
+  </a>
+</div>
+
+<p class="text-muted mb-4">Manage staff admins and their Telegram notification settings. New requests trigger a message to each admin with notifications enabled.</p>
+
+<div class="card-soul">
+  <div class="table-responsive">
+    <table class="table table-soul table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Nickname</th>
+          <th>Telegram ID</th>
+          <th>Notifications</th>
+          <th style="width: 220px">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for admin in admins %}
+        <tr>
+          <td class="align-middle">{{ admin.user.username }}</td>
+          <td class="align-middle">{{ admin.admin_nickname|default:"—" }}</td>
+          <td class="align-middle"><code>{{ admin.telegram_id|default:"—" }}</code></td>
+          <td class="align-middle">
+            <span class="badge {% if admin.is_notified %}bg-success{% else %}bg-secondary{% endif %}">
+              {{ admin.is_notified|yesno:"On,Off" }}
+            </span>
+          </td>
+          <td class="align-middle">
+            {% if admin.telegram_id %}
+            <form method="post" action="{% url 'admin_test_notification' admin.pk %}" class="d-inline me-1" data-test-notification>
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm btn-outline-primary" title="Send test notification to Telegram">
+                <i class="fa-solid fa-paper-plane icon" aria-hidden="true"></i> Test Notification
+              </button>
+            </form>
+            {% endif %}
+            <a href="{% url 'admin_management_edit' admin.pk %}" class="btn btn-sm btn-gold" title="Edit">
+              <i class="fa-solid fa-pen icon" aria-hidden="true"></i> Edit
+            </a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">No admins yet. Add one to get started.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('form[data-test-notification]').forEach(function(form) {
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('button[type="submit"]');
+    var origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Sending...';
+    var fd = new FormData(form);
+    fetch(form.action, { method: 'POST', body: fd, headers: { 'X-CSRFToken': fd.get('csrfmiddlewaretoken') } })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          try {
+            var j = JSON.parse(t);
+            return { ok: r.ok, json: j };
+          } catch (e) {
+            return { ok: false, json: { message: r.status + ' ' + r.statusText + (t ? ': ' + t.slice(0, 200) : '') } };
+          }
+        });
+      })
+      .then(function(o) {
+        if (o.ok && o.json.success) {
+          alert('Test notification sent successfully.');
+        } else {
+          alert('Failed: ' + (o.json.message || 'Unknown error'));
+        }
+      })
+      .catch(function(err) { alert('Request failed: ' + (err && err.message ? err.message : 'network error')); })
+      .finally(function() { btn.disabled = false; btn.innerHTML = origText; });
+  });
+});
+</script>
+{% endblock %}
