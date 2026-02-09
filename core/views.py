@@ -259,6 +259,35 @@ def confirm_request_revision(request, uuid):
 
 
 @staff_member_required
+@require_http_methods(['POST'])
+def post_to_instagram_view(request, uuid, target):
+    """
+    Generate image from Request and post to Instagram Feed or Story.
+    target: 'feed' or 'story'
+    Returns JSON { success, message }.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    if target not in ('feed', 'story'):
+        return JsonResponse({'success': False, 'message': 'Invalid target'}, status=400)
+    is_story = target == 'story'
+
+    from core.utils.image_generator import generate_request_image
+    from core.services.instagram_api import post_to_instagram
+    from core.services.instagram import InstagramService
+
+    image_path = generate_request_image(ad.pk, is_story=is_story)
+    if not image_path:
+        return JsonResponse({'success': False, 'message': 'Failed to generate image'}, status=500)
+
+    caption = ''
+    if not is_story:
+        caption = InstagramService.format_caption(ad, lang='fa')
+
+    result = post_to_instagram(image_path=image_path, caption=caption, is_story=is_story)
+    return JsonResponse(result, status=200 if result.get('success') else 500)
+
+
+@staff_member_required
 @require_http_methods(['GET'])
 def settings_view(request):
     """Settings page: tabs for AI, Telegram, Maintenance."""
@@ -282,6 +311,12 @@ def settings_save(request):
     config.rejection_message_template = data.get('rejection_message_template') or config.rejection_message_template
     config.submission_ack_message = data.get('submission_ack_message') or config.submission_ack_message
     config.production_base_url = (data.get('production_base_url') or '').strip() or config.production_base_url
+    ig_id = (data.get('instagram_business_id') or '').strip()
+    if ig_id:
+        config.instagram_business_id = ig_id[:64]
+    fb_token = (data.get('facebook_access_token') or '').strip()
+    if fb_token:
+        config.set_facebook_access_token(fb_token)
     config.save()
     return JsonResponse({'status': 'success'})
 

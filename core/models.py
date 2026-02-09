@@ -60,6 +60,16 @@ class SiteConfiguration(models.Model):
         max_length=512,
         help_text='Base URL of the site (e.g. https://iraniu.ir). Used to build webhook URL.',
     )
+    # Instagram Business (for Post to Feed/Story; fallback if no InstagramConfiguration)
+    instagram_business_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text='Instagram Graph API user ID (Business account linked to Facebook Page).',
+    )
+    facebook_access_token_encrypted = models.TextField(
+        blank=True,
+        help_text='Long-lived Facebook/Instagram access token (encrypted at rest).',
+    )
     # Maintenance
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -82,6 +92,13 @@ class SiteConfiguration(models.Model):
     def get_config(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+    def get_facebook_access_token(self) -> str:
+        """Return decrypted Facebook access token for Instagram API."""
+        return decrypt_token(self.facebook_access_token_encrypted)
+
+    def set_facebook_access_token(self, plain_token: str):
+        self.facebook_access_token_encrypted = encrypt_token((plain_token or '').strip())
 
 
 class TelegramUser(models.Model):

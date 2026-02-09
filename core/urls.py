@@ -16,6 +16,7 @@ urlpatterns = [
     path('requests/<uuid:uuid>/approve/', views.confirm_approve, name='confirm_approve'),
     path('requests/<uuid:uuid>/reject/', views.confirm_reject, name='confirm_reject'),
     path('requests/<uuid:uuid>/request-revision/', views.confirm_request_revision, name='confirm_request_revision'),
+    path('requests/<uuid:uuid>/post-to-instagram/<str:target>/', views.post_to_instagram_view, name='post_to_instagram'),
     path('bots/', views.bot_list, name='bot_list'),
     path('bots/create/', views.bot_create, name='bot_create'),
     path('bots/<int:pk>/edit/', views.bot_edit, name='bot_edit'),
