@@ -150,9 +150,12 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # Public base URL for Instagram image URLs (required; set in .env)
 INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
 
+# اجبار جنگو به تشخیص HTTPS از طریق هدرهای cPanel/پروکسی
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Security defaults (minimal, no HSTS yet)
-SESSION_COOKIE_SECURE = False  # enable later if SSL forced
-CSRF_COOKIE_SECURE = False     # enable later if SSL forced
+SESSION_COOKIE_SECURE = False  # True when not DEBUG (see below)
+CSRF_COOKIE_SECURE = False     # True when not DEBUG (see below)
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
@@ -169,11 +172,14 @@ TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()
 if TELEGRAM_MODE not in ('polling', 'webhook'):
     TELEGRAM_MODE = 'polling'
 
-# Auto-start bots with Django when TELEGRAM_MODE is polling. Set ENABLE_AUTO_BOTS=false to disable (e.g. tests/migrations).
-ENABLE_AUTO_BOTS = os.environ.get('ENABLE_AUTO_BOTS', 'true').lower() in ('true', '1', 'yes', 'on')
+# Auto-start bots with Django when TELEGRAM_MODE is polling. DISABLED for cPanel — use Cron Job with 'python manage.py runbots' instead.
+ENABLE_AUTO_BOTS = False  # Manual execution only via 'python manage.py runbots' (Cron Job)
 
-# Security headers (only when not debugging)
+# Security headers and SSL (only when not debugging — cPanel/production)
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
