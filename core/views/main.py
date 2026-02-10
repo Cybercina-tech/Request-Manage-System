@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.core.paginator import Paginator
 
-from .models import (
+from core.models import (
     AdRequest,
     AdminProfile,
     Category,
@@ -36,7 +36,7 @@ from .models import (
     REJECTION_REASONS,
     REJECTION_REASONS_DETAIL,
 )
-from .services import (
+from core.services import (
     clean_ad_text,
     run_ai_moderation,
     test_telegram_connection,
@@ -45,9 +45,9 @@ from .services import (
     set_webhook,
     delete_webhook,
 )
-from .services.dashboard import get_dashboard_context, get_pulse_data
-from .services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
-from .view_utils import get_request_payload
+from core.services.dashboard import get_dashboard_context, get_pulse_data
+from core.services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
+from core.view_utils import get_request_payload
 
 logger = logging.getLogger(__name__)
 

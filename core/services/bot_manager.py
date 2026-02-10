@@ -1,14 +1,12 @@
 """
 Iraniu — Webhook activation and bot management.
-Builds secret webhook URL and registers it with Telegram.
-Default bot auto-provisioning (idempotent).
+Default bot auto-provisioning (idempotent). activate_webhook delegates to bot_lifecycle.
 """
 
 import logging
-from django.urls import reverse
 
-from core.models import TelegramBot, SiteConfiguration
-from core.services.telegram_client import delete_webhook, set_webhook
+from core.models import TelegramBot
+from core.services import bot_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -37,37 +35,12 @@ def ensure_default_bot():
 
 def activate_webhook(bot: TelegramBot):
     """
-    Activate webhook mode for a bot: delete existing webhook, then set new one
-    using production_base_url + primary path telegram_webhook_by_token (UUID).
-    URL: /telegram/webhook/<webhook_secret_token>/.
-    Uses webhook_secret_token for the path and as Telegram secret_token header.
+    Activate webhook mode for a bot. Delegates to bot_lifecycle.activate_webhook.
 
     Returns:
         (success: bool, message: str, full_url: str or None)
     """
-    config = SiteConfiguration.get_config()
-    base = (config.production_base_url or "").strip().rstrip("/")
-    if not base or not base.startswith("https://"):
-        return False, "Set production_base_url in Site Configuration (HTTPS only).", None
-    token = bot.get_decrypted_token()
-    if not token:
-        return False, "No bot token configured.", None
-    full_url = f"{base}{reverse('telegram_webhook_by_token', kwargs={'webhook_secret_token': bot.webhook_secret_token})}"
-    ok_del, _ = delete_webhook(token)
-    if not ok_del:
-        logger.warning("activate_webhook: delete_webhook failed for bot_id=%s", bot.pk)
-    ok_set, err = set_webhook(
-        token,
-        full_url,
-        secret_token=str(bot.webhook_secret_token),
-    )
-    if not ok_set:
-        return False, err or "setWebhook failed", full_url
-    bot.webhook_url = full_url
-    bot.mode = TelegramBot.Mode.WEBHOOK
-    bot.save(update_fields=["webhook_url", "mode"])
-    logger.info("Webhook activated bot_id=%s url=%s", bot.pk, full_url)
-    return True, "Webhook activated.", full_url
+    return bot_lifecycle.activate_webhook(bot)
 
 
 def health_check_default_bot():

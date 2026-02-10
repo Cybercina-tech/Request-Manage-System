@@ -144,7 +144,7 @@ class TelegramBotAdmin(admin.ModelAdmin):
         'worker_pid', 'worker_started_at', 'last_error', 'status', 'webhook_secret_token',
     ]
     exclude = ['bot_token_encrypted']  # Never show in admin; use set_token in code only
-    actions = ['activate_webhook_mode']
+    actions = ['activate_webhook_mode', 'delete_webhook_action', 'check_webhook_status_action']
 
     def last_error_short(self, obj):
         if not obj.last_error:
@@ -174,6 +174,47 @@ class TelegramBotAdmin(admin.ModelAdmin):
             )
         elif not urls:
             self.message_user(request, "No bot activated. Set production_base_url (HTTPS) in Site Configuration.", level=admin.constants.ERROR)
+
+    @admin.action(description='Delete Webhook')
+    def delete_webhook_action(self, request, queryset):
+        from core.services.telegram_client import delete_webhook
+        done = 0
+        errors = []
+        for bot in queryset:
+            token = bot.get_decrypted_token()
+            if not token:
+                errors.append(f"{bot.name}: No token")
+                continue
+            ok, err = delete_webhook(token, drop_pending_updates=True)
+            if ok:
+                bot.webhook_url = ""
+                bot.save(update_fields=["webhook_url"])
+                done += 1
+            else:
+                errors.append(f"{bot.name}: {err or 'Failed'}")
+        if done:
+            self.message_user(request, f"Webhook deleted for {done} bot(s).", level=admin.constants.SUCCESS)
+        for msg in errors:
+            self.message_user(request, msg, level=admin.constants.ERROR)
+
+    @admin.action(description='Check Webhook Status')
+    def check_webhook_status_action(self, request, queryset):
+        from core.services.telegram_client import get_webhook_info
+        lines = []
+        for bot in queryset:
+            token = bot.get_decrypted_token()
+            if not token:
+                lines.append(f"{bot.name}: No token")
+                continue
+            success, info, err = get_webhook_info(token)
+            if not success:
+                lines.append(f"{bot.name}: {err or 'getWebhookInfo failed'}")
+                continue
+            url = (info or {}).get("url") or "(not set)"
+            pending = (info or {}).get("pending_update_count", 0)
+            lines.append(f"{bot.name}: url={url}, pending_updates={pending}")
+        if lines:
+            self.message_user(request, " | ".join(lines), level=admin.constants.SUCCESS)
 
 
 @admin.register(TelegramSession)

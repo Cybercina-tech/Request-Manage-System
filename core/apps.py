@@ -64,12 +64,15 @@ class CoreConfig(AppConfig):
         if is_management_cmd:
             return
 
-        # ترد تأخیری برای health-check اولیه (فقط در وب/ربات، نه در collectstatic و ...)
-        threading.Thread(target=_run_deferred_startup, daemon=True).start()
+        telegram_mode = getattr(settings, "TELEGRAM_MODE", "webhook").lower()
+        # Webhook mode: do nothing. View handles requests; no threads (cPanel-safe).
+        if telegram_mode == "webhook":
+            return
 
-        # runserver: فقط در پروسهٔ اصلی (RUN_MAIN)، و در حالت polling
+        # Polling mode: deferred health-check thread, then start supervisor only when
+        # runserver is used (not in WSGI/gunicorn/cPanel — avoids signal: 9 kills).
+        threading.Thread(target=_run_deferred_startup, daemon=True).start()
         if "runserver" in argv and os.environ.get("RUN_MAIN") != "true":
             return
-        if getattr(settings, "TELEGRAM_MODE", "webhook").lower() == "polling":
-            from core.services.bot_runner import start_auto_bot_runner
-            start_auto_bot_runner()
+        from core.services.bot_runner import start_auto_bot_runner
+        start_auto_bot_runner()

@@ -77,6 +77,14 @@ class SiteConfiguration(models.Model):
         verbose_name = 'Site Configuration'
         verbose_name_plural = 'Site Configuration'
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        url = (self.production_base_url or "").strip()
+        if url and not url.startswith("https://"):
+            raise ValidationError({
+                "production_base_url": "Must be HTTPS (e.g. https://iraniu.ir). Required for Telegram webhook.",
+            })
+
     def save(self, *args, **kwargs):
         if not self.pk and SiteConfiguration.objects.exists():
             return SiteConfiguration.objects.first()
@@ -368,6 +376,8 @@ class TelegramBot(models.Model):
         return mask_token(self.get_decrypted_token())
 
     def save(self, *args, **kwargs):
+        if not self.webhook_secret_token:
+            self.webhook_secret_token = uuid.uuid4()
         if self.is_default:
             TelegramBot.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
