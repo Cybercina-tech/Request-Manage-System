@@ -10,15 +10,18 @@
 
 ## Clean slate — Windows (PowerShell)
 
-Run from the **project root** (`Request-Manage-System-1`):
+Run from the **project root** (`Request-Manage-System-1`). Use this exact sequence for a clean slate:
 
 ```powershell
-# 1. Stop the Django server if it's running (Ctrl+C in that terminal).
+# 1. Stop the Django server and any runbots process (Ctrl+C in those terminals).
 
-# 2. Run the reset script (removes db, runs migrate)
+# 2. Reset SQLite (removes db + WAL files, then runs migrate)
 .\scripts\reset_sqlite_db.ps1
 
-# 3. Create a new superuser (interactive)
+# 3. If the script fails at migrate (e.g. unapplied migration core.0021), run migrate explicitly:
+python manage.py migrate
+
+# 4. Create a new superuser so you can log in again
 python manage.py createsuperuser
 ```
 

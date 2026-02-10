@@ -96,8 +96,33 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+# منبع فایل‌های استاتیک (collectstatic از این‌ها داخل STATIC_ROOT کپی می‌کند)
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # folder for collected static files
+# مقصد collectstatic؛ نباید داخل STATICFILES_DIRS باشد (حلقه بی‌نهایت و RecursionError)
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# فیوز ایمنی: STATIC_ROOT نباید با هیچ مسیر منبع تداخل داشته باشد
+_static_root_r = STATIC_ROOT.resolve()
+for _d in STATICFILES_DIRS:
+    _dr = Path(_d).resolve()
+    if _static_root_r == _dr:
+        raise ValueError("STATIC_ROOT must not equal any STATICFILES_DIRS entry.")
+    try:
+        # Python 3.9+: روش مستقیم
+        if _static_root_r.is_relative_to(_dr) or _dr.is_relative_to(_static_root_r):
+            raise ValueError("STATIC_ROOT must not be inside STATICFILES_DIRS or vice versa.")
+    except AttributeError:
+        # Python < 3.9: با relative_to تست می‌کنیم
+        try:
+            _static_root_r.relative_to(_dr)
+            raise ValueError("STATIC_ROOT must not be inside STATICFILES_DIRS.")
+        except ValueError:
+            try:
+                _dr.relative_to(_static_root_r)
+                raise ValueError("STATICFILES_DIRS entry must not be inside STATIC_ROOT.")
+            except ValueError:
+                pass
+
 # Avoid manifest strictness in development: use plain storage when DEBUG so missing
 # manifest entries don't cause 500s. Production uses manifest; run collectstatic with
 # DEBUG=False (e.g. in deploy) to build staticfiles.json.

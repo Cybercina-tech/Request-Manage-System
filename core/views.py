@@ -47,7 +47,7 @@ from .services import (
 )
 from .services.dashboard import get_dashboard_context, get_pulse_data
 from .services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
-from .view_utils import get_request_payload, parse_request_json
+from .view_utils import get_request_payload
 
 logger = logging.getLogger(__name__)
 
@@ -344,9 +344,9 @@ def test_openai(request):
 def approve_ad(request):
     """Approve ad: delegate to ad_actions.approve_one_ad, return JSON."""
     try:
-        body = parse_request_json(request) or request.POST.dict()
-        ad_id = body.get('ad_id') or request.POST.get('ad_id')
-        edited_content = (body.get('content') or request.POST.get('content', '')).strip() or None
+        body = get_request_payload(request)
+        ad_id = body.get('ad_id')
+        edited_content = (body.get('content') or '').strip() or None
         if not ad_id:
             return JsonResponse({'status': 'error', 'message': 'Missing ad_id'}, status=400)
         ad = get_object_or_404(AdRequest, uuid=ad_id)
@@ -366,10 +366,10 @@ def reject_ad(request):
     Stored in rejection_reason; admin action logged. Validation ensures reason is chosen.
     """
     try:
-        body = parse_request_json(request) or request.POST.dict()
-        ad_id = body.get('ad_id') or request.POST.get('ad_id')
-        reason = (body.get('reason') or request.POST.get('reason', '')).strip()
-        comment = (body.get('comment') or request.POST.get('comment', '')).strip()
+        body = get_request_payload(request)
+        ad_id = body.get('ad_id')
+        reason = (body.get('reason') or '').strip()
+        comment = (body.get('comment') or '').strip()
         if not ad_id:
             return JsonResponse({'status': 'error', 'message': 'Missing ad_id'}, status=400)
         if not reason:
@@ -396,10 +396,10 @@ def reject_ad(request):
 @staff_member_required
 @require_http_methods(['POST'])
 def bulk_approve(request):
-    """Bulk approve: ad_ids list in JSON. Returns { status, approved_count }. """
+    """Bulk approve: ad_ids list in JSON or form. Returns { status, approved_count }. """
     try:
-        body = parse_request_json(request) or request.POST.dict()
-        ad_ids = body.get('ad_ids') or request.POST.getlist('ad_ids') or []
+        body = get_request_payload(request)
+        ad_ids = body.get('ad_ids') if isinstance(body.get('ad_ids'), list) else request.POST.getlist('ad_ids') or []
         if not ad_ids:
             return JsonResponse({'status': 'error', 'message': 'No ad_ids provided'}, status=400)
         approved_count = 0
@@ -422,9 +422,9 @@ def bulk_approve(request):
 def bulk_reject(request):
     """Bulk reject: ad_ids + single reason. Returns { status, rejected_count }. """
     try:
-        body = parse_request_json(request) or request.POST.dict()
-        ad_ids = body.get('ad_ids') or request.POST.getlist('ad_ids') or []
-        reason = (body.get('reason') or request.POST.get('reason') or '').strip()
+        body = get_request_payload(request)
+        ad_ids = body.get('ad_ids') if isinstance(body.get('ad_ids'), list) else request.POST.getlist('ad_ids') or []
+        reason = (body.get('reason') or '').strip()
         if not ad_ids:
             return JsonResponse({'status': 'error', 'message': 'No ad_ids provided'}, status=400)
         if not reason:
@@ -683,7 +683,7 @@ def submit_ad(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     try:
-        data = parse_request_json(request) or request.POST.dict()
+        data = get_request_payload(request)
         content = (data.get('content') or '').strip()
         if not content:
             return JsonResponse({'error': 'content is required'}, status=400)
@@ -719,9 +719,9 @@ def submit_ad(request):
 @staff_member_required
 @require_http_methods(['POST'])
 def import_config(request):
-    """Import configuration from JSON (merge non-secret fields)."""
+    """Import configuration from JSON or form (merge non-secret fields)."""
     try:
-        data = parse_request_json(request)
+        data = get_request_payload(request)
         if not data:
             return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
         config = SiteConfiguration.get_config()
@@ -1126,7 +1126,7 @@ def api_instagram_post(request):
     """
     from core.services.instagram import InstagramService
 
-    data = parse_request_json(request) or request.POST.dict()
+    data = get_request_payload(request)
     image_url = (data.get('image_url') or '').strip()
     caption = (data.get('caption') or '').strip()
     message_text = (data.get('message_text') or '').strip()

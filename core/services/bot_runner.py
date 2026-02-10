@@ -426,7 +426,12 @@ def _should_skip_auto_bots():
     if "Phusion_Passenger" in (os.environ.get("SERVER_SOFTWARE") or ""):
         return True
     argv = getattr(sys, "argv", []) or []
-    skip_commands = ("test", "migrate", "makemigrations", "shell", "shell_plus", "flush", "loaddata", "dumpdata")
+    skip_commands = (
+        "test", "migrate", "makemigrations", "shell", "shell_plus",
+        "flush", "loaddata", "dumpdata",
+        "collectstatic", "check", "diffsettings", "showmigrations",
+        "sqlmigrate", "squashmigrations",
+    )
     if any(c in argv for c in skip_commands):
         return True
     if "runserver" in argv and os.environ.get("RUN_MAIN") != "true":

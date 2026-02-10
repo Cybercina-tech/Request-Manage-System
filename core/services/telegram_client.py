@@ -16,6 +16,10 @@ from enum import Enum
 from typing import Optional, Tuple, Dict, Any
 
 import certifi
+
+# Rate-limit 401/Unauthorized logs to avoid flooding when polling with invalid token
+_LAST_401_LOG: Dict[str, float] = {}
+_401_LOG_INTERVAL_SEC = 300   # 5 minutes
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
@@ -127,12 +131,22 @@ def _make_request(
                 return True, data.get("result"), None
             else:
                 error_desc = data.get("description", "Unknown Telegram API error")
-                # Invalid token (ok:false, description "Unauthorized"): log at DEBUG to avoid flooding
+                # Invalid token (ok:false, description "Unauthorized"): rate-limit log to avoid flooding
                 if error_desc and "unauthorized" in error_desc.lower():
-                    logger.debug(
-                        "Telegram API Unauthorized endpoint=%s token=%s (invalid token; update in Bots page)",
-                        endpoint, masked_token,
-                    )
+                    key = f"{masked_token}:{endpoint}"
+                    now = time.monotonic()
+                    last = _LAST_401_LOG.get(key, 0)
+                    if now - last >= _401_LOG_INTERVAL_SEC:
+                        _LAST_401_LOG[key] = now
+                        logger.warning(
+                            "Telegram API Unauthorized endpoint=%s token=%s (invalid token; update in Bots page)",
+                            endpoint, masked_token,
+                        )
+                    else:
+                        logger.debug(
+                            "Telegram API Unauthorized endpoint=%s token=%s (invalid token; update in Bots page)",
+                            endpoint, masked_token,
+                        )
                 else:
                     logger.warning(
                         "Telegram API error endpoint=%s token=%s: %s",
@@ -140,7 +154,7 @@ def _make_request(
                     )
                 return False, None, error_desc
 
-        # Non-200 status: 401 = invalid token, log at DEBUG to avoid log flood
+        # Non-200 status: 401 = invalid token; rate-limit log to avoid flood
         is_401 = response.status_code == 401
         try:
             resp_json = response.json() if response.text else {}
@@ -148,10 +162,20 @@ def _make_request(
         except Exception:
             desc = (response.text or "")[:200]
         if is_401:
-            logger.debug(
-                "Telegram API HTTP 401 endpoint=%s token=%s (invalid token; update in Bots page)",
-                endpoint, masked_token,
-            )
+            key = f"{masked_token}:{endpoint}"
+            now = time.monotonic()
+            last = _LAST_401_LOG.get(key, 0)
+            if now - last >= _401_LOG_INTERVAL_SEC:
+                _LAST_401_LOG[key] = now
+                logger.warning(
+                    "Telegram API HTTP 401 endpoint=%s token=%s (invalid token; update in Bots page)",
+                    endpoint, masked_token,
+                )
+            else:
+                logger.debug(
+                    "Telegram API HTTP 401 endpoint=%s token=%s (invalid token; update in Bots page)",
+                    endpoint, masked_token,
+                )
         else:
             logger.warning(
                 "Telegram API HTTP %s endpoint=%s token=%s: %s",

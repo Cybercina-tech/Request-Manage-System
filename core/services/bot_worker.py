@@ -174,6 +174,19 @@ class BotWorker:
                     break
                 if not success:
                     err_str = (error or "") if error else ""
+                    # 401/Unauthorized = invalid token; exit loop to avoid flooding logs
+                    is_401 = "401" in err_str or "unauthorized" in err_str.lower()
+                    if is_401:
+                        bot_log.warning(
+                            "Bot %s: invalid token (401 Unauthorized). Update token in Bots page and restart.",
+                            self.bot_id,
+                        )
+                        _update_error(
+                            self.bot_id,
+                            "Invalid or expired token (401 Unauthorized). Update token in Bots page.",
+                            TelegramBot.Status.ERROR,
+                        )
+                        break
                     is_409 = "409" in err_str or "conflict" in err_str.lower()
                     if is_409:
                         delay_sec = CONFLICT_BACKOFF_SEC[min(conflict_backoff_index, CONFLICT_BACKOFF_MAX_INDEX)]

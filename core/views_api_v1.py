@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 
 from core.models import AdRequest, Category, SiteConfiguration
-from core.view_utils import parse_request_json
+from core.view_utils import get_request_payload
 from core.services import clean_ad_text, run_ai_moderation
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def api_v1_submit(request):
     if not getattr(request, 'api_client', None):
         return JsonResponse({'error': 'Unauthorized', 'message': 'Invalid or missing API key.'}, status=401)
     try:
-        data = parse_request_json(request) or request.POST.dict()
+        data = get_request_payload(request)
         content = (data.get('content') or '').strip()
         if not content:
             return JsonResponse({'error': 'Validation error', 'message': 'content is required.'}, status=400)

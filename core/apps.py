@@ -36,6 +36,15 @@ class CoreConfig(AppConfig):
     verbose_name = 'Iraniu'
 
     def ready(self):
+        import sys
+        argv = getattr(sys, "argv", []) or []
+        # دستورات مدیریتی که نباید ترد/ربات را راه بیندازند (collectstatic، migrate، test، ...)
+        skip_cmds = (
+            "collectstatic", "test", "migrate", "makemigrations", "shell", "shell_plus",
+            "flush", "loaddata", "dumpdata", "check", "diffsettings", "showmigrations",
+        )
+        is_management_cmd = any(c in argv for c in skip_cmds)
+
         connection_created.connect(_setup_sqlite_pragmas)
         from core import signals  # noqa: F401 — register post_save on AdRequest for admin notifications
         from django.db.models.signals import post_migrate
@@ -46,19 +55,21 @@ class CoreConfig(AppConfig):
                 try:
                     from core.services.bot_manager import ensure_default_bot
                     ensure_default_bot()
-                    # Do NOT call health_check_default_bot here — no Telegram API during migrations.
                 except Exception:
                     pass
 
         post_migrate.connect(_ensure_default_bot, sender=self)
-        # Deferred thread: only place that does initial connectivity check (avoids RuntimeWarning).
+
+        # در دستورات مدیریتی فقط سیگنال‌ها/PRAGMA ثبت می‌شوند؛ نه ترد و نه supervisor ربات
+        if is_management_cmd:
+            return
+
+        # ترد تأخیری برای health-check اولیه (فقط در وب/ربات، نه در collectstatic و ...)
         threading.Thread(target=_run_deferred_startup, daemon=True).start()
-        # Start bot supervisor only when running the runbots command, NOT runserver (avoids DB access
-        # during app init and prevents multiple instances / 409 Conflict when runserver is used).
-        import sys
-        argv = getattr(sys, "argv", []) or []
-        if "runserver" in argv:
-            pass
-        elif getattr(settings, "TELEGRAM_MODE", "webhook").lower() == "polling":
+
+        # runserver: فقط در پروسهٔ اصلی (RUN_MAIN)، و در حالت polling
+        if "runserver" in argv and os.environ.get("RUN_MAIN") != "true":
+            return
+        if getattr(settings, "TELEGRAM_MODE", "webhook").lower() == "polling":
             from core.services.bot_runner import start_auto_bot_runner
             start_auto_bot_runner()
