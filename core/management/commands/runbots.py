@@ -145,6 +145,9 @@ class Command(BaseCommand):
                         self.stdout.write(self.style.WARNING("Interrupted"))
                         if manager_ref.get("manager"):
                             manager_ref["manager"].shutdown()
+            except Exception:
+                # Re-raise exceptions; finally block will handle cleanup
+                raise
         finally:
             # Release lock
             cache.delete(LOCK_KEY)
