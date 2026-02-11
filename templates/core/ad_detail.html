@@ -1,8 +1,18 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static iraniu_tags %}
 {# Request Detail: ad info, client info (read-only), approve/reject via dedicated confirmation pages. #}
 
 {% block title %}Request {{ ad.uuid }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'ad_list' %}">Requests</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Request {{ ad.uuid|truncatechars:8 }}</li>
+  </ol>
+</nav>
+{% endblock %}
 
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
@@ -32,7 +42,7 @@
   <div class="col-lg-7">
     <div class="card-soul h-100">
       <h5 class="text-muted mb-3"><i class="fa-solid fa-file-lines icon" aria-hidden="true"></i> Ad content</h5>
-      <div class="ad-content-box bg-dark border border-secondary rounded p-3" style="max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{ ad.content }}</div>
+      <div class="ad-content-box bg-dark border border-secondary rounded p-3" style="max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{ ad.content|persian_display }}</div>
       {% if ad.ai_suggested_reason %}
       <div class="alert alert-warning border border-warning mt-3 mb-0">
         <strong><i class="fa-solid fa-robot icon" aria-hidden="true"></i> AI suggested rejection:</strong>
@@ -71,20 +81,20 @@
   </div>
 </div>
 
-{# —— Post to Instagram —— #}
+{# —— Distribute (Preview & Publish) — only for approved ads #}
+{% if ad.status == 'approved' %}
 <div class="card-soul mt-4">
-  <h5 class="text-muted mb-3"><i class="fa-brands fa-instagram icon" aria-hidden="true"></i> Post to Instagram</h5>
-  <p class="text-muted small mb-2">Generate image from this request and post to Feed or Story.</p>
-  <div class="d-flex flex-wrap gap-2">
-    <button type="button" class="btn btn-soul px-3" id="btnPostFeed" data-url="{% url 'post_to_instagram' ad.uuid 'feed' %}" data-target="feed">
-      📸 Post to Feed
-    </button>
-    <button type="button" class="btn btn-soul px-3" id="btnPostStory" data-url="{% url 'post_to_instagram' ad.uuid 'story' %}" data-target="story">
-      📱 Post to Story
-    </button>
-    <span id="instagramResult" class="align-self-center ms-2 small"></span>
-  </div>
+  <h5 class="text-muted mb-3"><i class="fa-solid fa-paper-plane icon" aria-hidden="true"></i> Distribute</h5>
+  <p class="text-muted small mb-3">Preview the generated image and caption, then send to Telegram and Instagram (Feed + Story).</p>
+  <a href="{% url 'preview_publish' ad.uuid %}" class="btn btn-soul px-4">
+    <i class="fa-solid fa-eye icon me-1" aria-hidden="true"></i> Preview & Publish
+  </a>
+  <span class="ms-2 text-muted small">or post only:</span>
+  <button type="button" class="btn btn-outline-secondary btn-sm ms-2" id="btnPostFeed" data-url="{% url 'post_to_instagram' ad.uuid 'feed' %}" data-target="feed">Feed</button>
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="btnPostStory" data-url="{% url 'post_to_instagram' ad.uuid 'story' %}" data-target="story">Story</button>
+  <span id="instagramResult" class="align-self-center ms-2 small"></span>
 </div>
+{% endif %}
 
 {# —— Metadata (UUID) —— #}
 <div class="card-soul mt-3">

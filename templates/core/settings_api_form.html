@@ -37,45 +37,4 @@
     <a href="{% url 'settings_api' %}" class="btn btn-outline-secondary">Cancel</a>
   </div>
 </form>
-<div id="formResult" class="mt-2 small"></div>
-<div id="newKeyModal" class="modal fade" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content bg-dark border-secondary">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title">API key (copy now)</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-warning small">This key will not be shown again. Store it securely.</p>
-        <input type="text" class="form-control font-monospace" id="newKeyValue" readonly>
-      </div>
-    </div>
-  </div>
-</div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-document.getElementById('apiForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  var resultEl = document.getElementById('formResult');
-  resultEl.textContent = '';
-  fetch(this.action, { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: new FormData(this) })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.status === 'success') {
-        if (d.new_key) {
-          var modalEl = document.getElementById('newKeyModal');
-          document.getElementById('newKeyValue').value = d.new_key;
-          bootstrap.Modal.getOrCreateInstance(modalEl).show();
-          modalEl.addEventListener('hidden.bs.modal', function() { window.location.href = d.redirect; }, { once: true });
-        } else {
-          resultEl.className = 'mt-2 small text-success'; resultEl.textContent = 'Saved.';
-          if (d.redirect) window.location.href = d.redirect;
-        }
-      } else { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = d.message || 'Error'; }
-    })
-    .catch(function() { resultEl.className = 'mt-2 small text-danger'; resultEl.textContent = 'Request failed'; });
-});
-</script>
 {% endblock %}

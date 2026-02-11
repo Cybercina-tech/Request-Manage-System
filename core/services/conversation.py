@@ -8,8 +8,15 @@ import logging
 import uuid as uuid_module
 from django.utils import timezone
 
+try:
+    import emoji
+except ImportError:
+    emoji = None
+
+from django.urls import reverse
+
 from core.i18n import get_message
-from core.models import TelegramSession, TelegramBot, AdRequest, Category, TelegramUser
+from core.models import TelegramSession, TelegramBot, AdRequest, Category, TelegramUser, SiteConfiguration
 from core.services.submit_ad_service import SubmitAdService
 from core.services.users import update_contact_info
 
@@ -43,6 +50,15 @@ def _get_category_display(cat_slug: str, lang: str | None) -> str:
     return get_message(key, lang)
 
 
+def contains_emoji(text: str) -> bool:
+    """Return True if the string contains any emoji. Uses the emoji library if available."""
+    if not text or not isinstance(text, str):
+        return False
+    if emoji is None:
+        return False
+    return bool(emoji.emoji_list(text))
+
+
 class ConversationEngine:
     """
     State machine for Telegram conversation.
@@ -69,6 +85,8 @@ class ConversationEngine:
         message_id: int | None = None,
         contact_phone: str | None = None,
         contact_user_id: int | None = None,
+        has_animation: bool = False,
+        has_sticker: bool = False,
     ) -> dict:
         """
         Process user input. Returns dict with keys: text, reply_markup (optional),
@@ -121,7 +139,9 @@ class ConversationEngine:
                 return self._reply_main_menu(session, edit_previous, message_id)
             if callback_data == "about_us":
                 return self._reply_about_us(session, edit_previous, message_id)
-            if callback_data == "my_ads":
+            my_ads_en = (get_message("btn_my_ads", "en") or "").strip()
+            my_ads_fa = (get_message("btn_my_ads", "fa") or "").strip()
+            if callback_data == "my_ads" or (text and (text.strip() == my_ads_en or text.strip() == my_ads_fa)):
                 session.state = TelegramSession.State.MY_ADS
                 session.save(update_fields=["state", "last_activity"])
                 logger.info("conversation state session_id=%s MAIN_MENU → MY_ADS", session.pk)
@@ -150,6 +170,68 @@ class ConversationEngine:
                 session.state = TelegramSession.State.MAIN_MENU
                 session.save(update_fields=["state", "last_activity"])
                 return self._reply_main_menu(session, edit_previous, message_id)
+            if callback_data == "list_ads":
+                return self._reply_my_ads(session, edit_previous, message_id)
+            if callback_data and callback_data.startswith("manage_ad:"):
+                try:
+                    ad_id = int(callback_data.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    return self._reply_my_ads(session, edit_previous, message_id)
+                return self._reply_ad_detail(session, ad_id, edit_previous, message_id)
+            if callback_data and callback_data.startswith("delete_ad:"):
+                try:
+                    ad_id = int(callback_data.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    return self._reply_my_ads(session, edit_previous, message_id)
+                return self._reply_delete_confirm(session, ad_id, edit_previous, message_id)
+            if callback_data and callback_data.startswith("confirm_delete:yes:"):
+                try:
+                    ad_id = int(callback_data.split(":", 2)[2])
+                except (ValueError, IndexError):
+                    return self._reply_my_ads(session, edit_previous, message_id)
+                ad = self._get_user_ad(session, ad_id)
+                if ad:
+                    try:
+                        ad.delete()
+                    except Exception as e:
+                        logger.exception("delete ad pk=%s: %s", ad_id, e)
+                lang = session.language or "en"
+                deleted_msg = get_message("ad_deleted", lang)
+                out = self._reply_my_ads(session, edit_previous, message_id)
+                out["text"] = deleted_msg + "\n\n" + (out.get("text") or "")
+                return out
+            if callback_data and callback_data.startswith("confirm_delete:no:"):
+                try:
+                    ad_id = int(callback_data.split(":", 2)[2])
+                except (ValueError, IndexError):
+                    return self._reply_my_ads(session, edit_previous, message_id)
+                return self._reply_ad_detail(session, ad_id, edit_previous, message_id)
+            if callback_data and callback_data.startswith("edit_ad:"):
+                try:
+                    ad_id = int(callback_data.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    return self._reply_my_ads(session, edit_previous, message_id)
+                ad = self._get_user_ad(session, ad_id)
+                lang = session.language or "en"
+                if not ad:
+                    text = get_message("ad_not_found", lang)
+                    reply_markup = {"inline_keyboard": [[{"text": get_message("btn_back_to_list", lang), "callback_data": "list_ads"}]]}
+                    return {"text": text, "reply_markup": reply_markup, "edit_previous": edit_previous, "message_id": message_id}
+                config = SiteConfiguration.get_config()
+                base = (config.production_base_url or "").strip().rstrip("/")
+                if base:
+                    path = reverse("request_detail", kwargs={"uuid": ad.uuid})
+                    url = base + path
+                else:
+                    url = "(Set production_base_url in Settings)"
+                text = get_message("edit_ad_link_msg", lang).format(url=url)
+                back_btn = get_message("btn_back_to_list", lang)
+                reply_markup = {"inline_keyboard": [[{"text": back_btn, "callback_data": "list_ads"}]]}
+                out = {"text": text, "reply_markup": reply_markup}
+                if edit_previous and message_id is not None:
+                    out["edit_previous"] = True
+                    out["message_id"] = message_id
+                return out
             return self._reply_my_ads(session, edit_previous, message_id)
 
         if session.state == TelegramSession.State.SELECT_CATEGORY:
@@ -176,8 +258,12 @@ class ConversationEngine:
                 session.context = {}
                 session.save(update_fields=["state", "context", "last_activity"])
                 return self._reply_main_menu(session, edit_previous, message_id)
+            if has_animation or has_sticker:
+                return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=True)
             if not text or not text.strip():
                 return self._reply_enter_content(session, edit_previous=edit_previous, message_id=message_id)
+            if contains_emoji(text):
+                return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=True)
             session.context["content"] = text.strip()[:4000]
             session.state = TelegramSession.State.CONFIRM
             session.save(update_fields=["state", "context", "last_activity"])
@@ -222,10 +308,13 @@ class ConversationEngine:
                     session.state = TelegramSession.State.SELECT_CATEGORY
                     session.save(update_fields=["state", "last_activity"])
                     logger.info("conversation state session_id=%s ASK_CONTACT → SELECT_CATEGORY (phone verified)", session.pk)
-                    return self._reply_select_category(session, edit_previous, message_id)
+                    out = self._reply_select_category(session, edit_previous, message_id)
+                    out["remove_keyboard_first"] = {"text": get_message("phone_number_saved", session.language or "en")}
+                    return out
                 except ValueError:
                     return self._reply_invalid_phone(session)
-            # Mandatory phone: no skip; re-prompt
+            if text and text.strip():
+                return self._reply_ask_contact_use_button(session)
             return self._reply_ask_contact(session)
 
         if session.state == TelegramSession.State.ENTER_EMAIL:
@@ -255,7 +344,11 @@ class ConversationEngine:
             return self._reply_ask_email(session, after_contact=False)
 
         if session.state == TelegramSession.State.RESUBMIT_EDIT:
+            if has_animation or has_sticker:
+                return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=False)
             if text and text.strip():
+                if contains_emoji(text):
+                    return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=False)
                 session.context["content"] = text.strip()[:4000]
                 session.state = TelegramSession.State.RESUBMIT_CONFIRM
                 session.save(update_fields=["state", "context", "last_activity"])
@@ -427,6 +520,17 @@ class ConversationEngine:
             out["message_id"] = message_id
         return out
 
+    def _get_user_ad(self, session: TelegramSession, ad_id: int):
+        """Return AdRequest if it belongs to this user (telegram_user_id), else None. Security: owner only."""
+        try:
+            ad = AdRequest.objects.filter(
+                pk=ad_id,
+                telegram_user_id=session.telegram_user_id,
+            ).first()
+            return ad
+        except (ValueError, TypeError):
+            return None
+
     def _reply_my_ads(self, session: TelegramSession, edit_previous: bool = False, message_id: int | None = None) -> dict:
         lang = session.language or "en"
         try:
@@ -439,10 +543,10 @@ class ConversationEngine:
         intro = get_message("my_ads_intro", lang)
         if not ads:
             text = get_message("my_ads_empty", lang)
+            keyboard = [[{"text": get_message("btn_back_to_home", lang), "callback_data": "back_to_home"}]]
         else:
             status_key = {
                 AdRequest.Status.APPROVED: "ad_status_approved",
-                AdRequest.Status.PENDING: "ad_status_pending",
                 AdRequest.Status.PENDING_AI: "ad_status_pending",
                 AdRequest.Status.PENDING_MANUAL: "ad_status_pending",
                 AdRequest.Status.NEEDS_REVISION: "ad_status_needs_revision",
@@ -452,6 +556,8 @@ class ConversationEngine:
             }
             reason_label = get_message("rejection_reason_label", lang)
             lines = [intro]
+            keyboard = []
+            manage_label = get_message("my_ads_btn_manage", lang)
             for ad in ads:
                 try:
                     st = status_key.get(ad.status, "ad_status_pending")
@@ -463,13 +569,95 @@ class ConversationEngine:
                         reason = (getattr(ad, "rejection_reason", None) or "")[:200]
                         if reason:
                             lines.append(f"  {reason_label}{reason}\n")
+                    btn_title = f"{manage_label} • {(preview[:35] + '…') if len(preview) > 35 else preview}"
+                    keyboard.append([{"text": btn_title, "callback_data": f"manage_ad:{ad.pk}"}])
                 except Exception as e:
                     logger.debug("_reply_my_ads ad format skip: %s", e)
             text = "".join(lines).strip()
             if len(text) > 4090:
                 text = text[:4087] + "…"
-        back_label = get_message("btn_back_to_home", lang)
-        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+            back_label = get_message("btn_back_to_home", lang)
+            keyboard.append([{"text": back_label, "callback_data": "back_to_home"}])
+        reply_markup = {"inline_keyboard": keyboard}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_ad_detail(
+        self,
+        session: TelegramSession,
+        ad_id: int,
+        edit_previous: bool = False,
+        message_id: int | None = None,
+    ) -> dict:
+        """Show one ad's details (category, text, phone) with Edit / Delete / Back to List. Owner-only."""
+        ad = self._get_user_ad(session, ad_id)
+        lang = session.language or "en"
+        if not ad:
+            text = get_message("ad_not_found", lang)
+            reply_markup = {"inline_keyboard": [[{"text": get_message("btn_back_to_list", lang), "callback_data": "list_ads"}]]}
+        else:
+            cat_name = ad.get_category_display() if ad.category else get_message("category_other", lang)
+            content = (ad.content or "")[:1500] + ("…" if len(ad.content or "") > 1500 else "")
+            contact = ad.contact_snapshot or {}
+            phone = (contact.get("phone") or "") if isinstance(contact, dict) else "—"
+            status_key = {
+                AdRequest.Status.APPROVED: "ad_status_approved",
+                AdRequest.Status.PENDING_AI: "ad_status_pending",
+                AdRequest.Status.PENDING_MANUAL: "ad_status_pending",
+                AdRequest.Status.NEEDS_REVISION: "ad_status_needs_revision",
+                AdRequest.Status.REJECTED: "ad_status_rejected",
+                AdRequest.Status.SOLVED: "ad_status_approved",
+                AdRequest.Status.EXPIRED: "ad_status_rejected",
+            }
+            status_text = get_message(status_key.get(ad.status, "ad_status_pending"), lang)
+            text = (
+                f"{get_message('ad_detail_category', lang)} {cat_name}\n"
+                f"{get_message('ad_detail_status', lang)} {status_text}\n\n"
+                f"{get_message('ad_detail_text', lang)}\n{content}\n\n"
+                f"{get_message('ad_detail_phone', lang)} {phone}"
+            )
+            if len(text) > 4090:
+                text = text[:4087] + "…"
+            edit_btn = get_message("btn_edit_ad", lang)
+            delete_btn = get_message("btn_delete_ad", lang)
+            back_btn = get_message("btn_back_to_list", lang)
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": edit_btn, "callback_data": f"edit_ad:{ad.pk}"}, {"text": delete_btn, "callback_data": f"delete_ad:{ad.pk}"}],
+                    [{"text": back_btn, "callback_data": "list_ads"}],
+                ]
+            }
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_delete_confirm(
+        self,
+        session: TelegramSession,
+        ad_id: int,
+        edit_previous: bool = False,
+        message_id: int | None = None,
+    ) -> dict:
+        """Ask 'Are you sure you want to delete this ad?' with Yes / Cancel. Owner-only."""
+        ad = self._get_user_ad(session, ad_id)
+        lang = session.language or "en"
+        if not ad:
+            text = get_message("ad_not_found", lang)
+            reply_markup = {"inline_keyboard": [[{"text": get_message("btn_back_to_list", lang), "callback_data": "list_ads"}]]}
+        else:
+            text = get_message("delete_confirm_text", lang)
+            yes_btn = get_message("delete_confirm_yes", lang)
+            cancel_btn = get_message("delete_confirm_cancel", lang)
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": yes_btn, "callback_data": f"confirm_delete:yes:{ad.pk}"}, {"text": cancel_btn, "callback_data": f"confirm_delete:no:{ad.pk}"}],
+                ]
+            }
         out = {"text": text, "reply_markup": reply_markup}
         if edit_previous and message_id is not None:
             out["edit_previous"] = True
@@ -505,6 +693,28 @@ class ConversationEngine:
         text = get_message("enter_ad_text_detailed", lang).format(category_name=category_name)
         if old_content:
             text = f"{text}\n\n———\n{old_content[:500]}\n———"
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_ad_content_validation_error(
+        self,
+        session: TelegramSession,
+        edit_previous: bool = False,
+        message_id: int | None = None,
+        *,
+        state_enter_content: bool = True,
+    ) -> dict:
+        """
+        Send warning that emojis/stickers/GIFs are not allowed. Does not advance state;
+        user stays in ENTER_CONTENT or RESUBMIT_EDIT so their next message is treated as a retry.
+        """
+        lang = session.language or "en"
+        text = get_message("ad_content_validation_error", lang)
         back_label = get_message("btn_back_to_home", lang)
         reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
         out = {"text": text, "reply_markup": reply_markup}
@@ -556,9 +766,20 @@ class ConversationEngine:
         return out
 
     def _reply_ask_contact(self, session: TelegramSession) -> dict:
-        """Ask for phone via Telegram contact share. reply_keyboard = ReplyKeyboardMarkup with request_contact."""
+        """Ask for phone via ReplyKeyboardMarkup with single button: Share Phone Number (request_contact=True)."""
         lang = session.language or "en"
         text = get_message("ask_contact", lang)
+        reply_markup = {
+            "keyboard": [[{"text": get_message("share_contact_btn", lang), "request_contact": True}]],
+            "one_time_keyboard": True,
+            "resize_keyboard": True,
+        }
+        return {"text": text, "reply_markup": reply_markup}
+
+    def _reply_ask_contact_use_button(self, session: TelegramSession) -> dict:
+        """User sent text instead of contact: ask them to use the share button. Same keyboard so button stays visible."""
+        lang = session.language or "en"
+        text = get_message("ask_contact_use_button", lang)
         reply_markup = {
             "keyboard": [[{"text": get_message("share_contact_btn", lang), "request_contact": True}]],
             "one_time_keyboard": True,
@@ -604,7 +825,9 @@ class ConversationEngine:
     def _reply_submitted(self, session: TelegramSession) -> dict:
         lang = session.language or "en"
         text = get_message("submitted", lang) + "\n\n" + get_message("thank_you_emoji", lang)
-        return {"text": text}
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        return {"text": text, "reply_markup": reply_markup}
 
     def _reply_error_generic(self, session: TelegramSession) -> dict:
         lang = session.language or "en"
@@ -640,7 +863,9 @@ class ConversationEngine:
     def _reply_resubmit_success(self, session: TelegramSession) -> dict:
         lang = session.language or "en"
         text = get_message("resubmit_success", lang) + "\n\n" + get_message("thank_you_emoji", lang)
-        return {"text": text}
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        return {"text": text, "reply_markup": reply_markup}
 
     def _reply_resubmit_error(self, session: TelegramSession, error_key: str) -> dict:
         lang = session.language or "en"

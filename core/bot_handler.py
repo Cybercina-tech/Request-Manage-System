@@ -123,6 +123,7 @@ def send_message_to_chat(telegram_id: str, text: str) -> Tuple[bool, Optional[st
         the Telegram API description when available (e.g. "Forbidden: bot was blocked by the user")
         so the UI can display it.
     """
+    from django.conf import settings
     from core.models import TelegramBot
     from core.services.telegram_client import send_message
 
@@ -136,10 +137,18 @@ def send_message_to_chat(telegram_id: str, text: str) -> Tuple[bool, Optional[st
         logger.warning("send_message_to_chat: invalid telegram_id after normalize %r", telegram_id)
         return False, "Invalid telegram_id (must be numeric)"
 
-    default_bot = TelegramBot.objects.filter(is_default=True, is_active=True).first()
+    env = getattr(settings, "ENVIRONMENT", "PROD")
+    default_bot = (
+        TelegramBot.objects.filter(environment=env, is_active=True)
+        .order_by("-is_default")
+        .first()
+    )
     if not default_bot:
-        logger.critical("No active default bot found for notifications. Set is_default=True and is_active=True on a bot.")
-        return False, "No active default bot found for notifications."
+        logger.critical(
+            "No active bot found for environment [%s]. Add a TelegramBot with environment=%s and is_active=True.",
+            env, env,
+        )
+        return False, f"No active bot found for environment [{env}]."
 
     try:
         token = default_bot.get_decrypted_token()

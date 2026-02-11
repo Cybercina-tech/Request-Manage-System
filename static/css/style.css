@@ -1,0 +1,16 @@
+/**
+ * Professional Light Theme — Blue/Green/Grey palette (low eye strain)
+ * Load before iraniu.css. Applied when <body class="theme-light">.
+ */
+
+.theme-light {
+  --bg-body: #F4F6F9;
+  --bg-card: #FFFFFF;
+  --text-primary: #2C3E50;
+  --text-secondary: #64748B;
+  --primary-color: #3B82F6;
+  --primary-hover: #2563EB;
+  --success-color: #10B981;
+  --border-color: #E2E8F0;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}

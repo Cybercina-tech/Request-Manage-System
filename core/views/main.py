@@ -7,6 +7,8 @@ import os
 import signal
 import subprocess
 import sys
+import uuid
+from urllib.parse import quote
 from datetime import timedelta
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import get_user_model
-from django.http import JsonResponse, HttpResponseForbidden
+from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -24,10 +26,12 @@ from django.core.paginator import Paginator
 
 from core.models import (
     AdRequest,
+    AdTemplate,
     AdminProfile,
     Category,
     SiteConfiguration,
     TelegramBot,
+    TelegramChannel,
     TelegramUser,
     InstagramConfiguration,
     ApiClient,
@@ -41,6 +45,7 @@ from core.services import (
     run_ai_moderation,
     test_telegram_connection,
     test_openai_connection,
+    validate_ad_content,
     get_webhook_info,
     set_webhook,
     delete_webhook,
@@ -48,8 +53,12 @@ from core.services import (
 from core.services.dashboard import get_dashboard_context, get_pulse_data
 from core.services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
 from core.view_utils import get_request_payload
+from core.forms import AdTemplateCreateForm, TemplateTesterForm, ChannelForm
 
 logger = logging.getLogger(__name__)
+
+# Session key for passing uploaded test background to Coordinate Lab
+COORD_LAB_TEMP_BACKGROUND_KEY = "coord_lab_temp_background_path"
 
 
 def landing(request):
@@ -259,6 +268,63 @@ def confirm_request_revision(request, uuid):
 
 
 @staff_member_required
+@require_http_methods(['GET', 'POST'])
+def preview_publish(request, uuid):
+    """
+    Final Preview & Publish: show generated image, Instagram caption and Telegram preview,
+    then "Confirm & Distribute" to run post_manager.distribute_ad.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    if ad.status != AdRequest.Status.APPROVED:
+        messages.warning(request, 'Only approved ads can be distributed.')
+        return redirect('ad_detail', uuid=ad.uuid)
+
+    if request.method == 'POST':
+        from core.services.post_manager import distribute_ad
+        ok = distribute_ad(ad)
+        if ok:
+            messages.success(request, 'Ad distributed to Telegram and Instagram.')
+        else:
+            messages.error(request, 'Distribution failed. Check logs and channel/bot configuration.')
+        return redirect('ad_detail', uuid=ad.uuid)
+
+    # GET: build preview data (same logic as post_manager.distribute_ad)
+    from core.services.image_engine import create_ad_image
+    from core.services.instagram_api import _path_to_public_url
+    from core.services.instagram import InstagramService
+    from core.services.post_manager import get_default_channel
+
+    category = ad.get_category_display() if hasattr(ad, 'get_category_display') else (ad.category.name if ad.category else 'Other')
+    text = (ad.content or '').strip()
+    contact = getattr(ad, 'contact_snapshot', None) or {}
+    phone = (contact.get('phone') or '').strip() if isinstance(contact, dict) else ''
+    if not phone and getattr(ad, 'user_id', None) and ad.user:
+        phone = (ad.user.phone_number or '').strip()
+
+    preview_image_url = None
+    template = AdTemplate.objects.filter(is_active=True).first()
+    if template:
+        feed_path = create_ad_image(template.pk, category, text, phone)
+        preview_image_url = _path_to_public_url(feed_path) if feed_path else None
+
+    caption_preview = InstagramService.format_caption(ad, lang='fa')
+    telegram_caption = f"{category}\n\n{text}"
+    if phone:
+        telegram_caption += f"\n\n📱 {phone}"
+    telegram_preview = telegram_caption[:1024]
+
+    channel = get_default_channel()
+    context = {
+        'ad': ad,
+        'preview_image_url': preview_image_url,
+        'caption_preview': caption_preview,
+        'telegram_preview': telegram_preview,
+        'default_channel': channel,
+    }
+    return render(request, 'core/preview_publish.html', context)
+
+
+@staff_member_required
 @require_http_methods(['POST'])
 def post_to_instagram_view(request, uuid, target):
     """
@@ -290,10 +356,57 @@ def post_to_instagram_view(request, uuid, target):
 @staff_member_required
 @require_http_methods(['GET'])
 def settings_view(request):
-    """Settings page: tabs for AI, Telegram, Maintenance."""
+    """Settings Hub: vertical tabs — General, API & Integrations, Delivery, Team & Security, Channels, Appearance."""
+    from core.forms import ChannelForm
+    from django.conf import settings as django_settings
     config = SiteConfiguration.get_config()
-    context = {'config': config}
-    return render(request, 'core/settings.html', context)
+    env = getattr(django_settings, 'ENVIRONMENT', 'PROD')
+    active_tab = (request.GET.get('tab') or 'general').strip().lower()
+    if active_tab not in ('general', 'api', 'delivery', 'team', 'channels', 'appearance'):
+        active_tab = 'general'
+
+    # Channels (for Channel Manager tab)
+    channels = (
+        TelegramChannel.objects.filter(bot_connection__environment=env)
+        .select_related('bot_connection')
+        .order_by('-is_default', 'title')
+    )
+    channel_form = ChannelForm()
+
+    # Admins (for Team & Security tab)
+    admins = AdminProfile.objects.select_related('user').order_by('user__username') if request.user.is_superuser else []
+
+    # Recent delivery logs (compact for Delivery tab)
+    delivery_qs = DeliveryLog.objects.select_related('ad').order_by('-created_at')[:25]
+    delivery_channel = request.GET.get('delivery_channel', '').strip()
+    delivery_status = request.GET.get('delivery_status', '').strip()
+    if delivery_channel and delivery_channel in dict(DeliveryLog.Channel.choices):
+        delivery_qs = delivery_qs.filter(channel=delivery_channel)
+    if delivery_status and delivery_status in dict(DeliveryLog.DeliveryStatus.choices):
+        delivery_qs = delivery_qs.filter(status=delivery_status)
+    delivery_logs = list(delivery_qs)
+
+    # API clients & Instagram configs (for API & Integrations tab)
+    api_clients = ApiClient.objects.all().order_by('name')
+    instagram_configs = InstagramConfiguration.objects.all().order_by('username')
+    bots = TelegramBot.objects.filter(environment=env).order_by('-is_default', 'name')
+
+    context = {
+        'config': config,
+        'active_tab': active_tab,
+        'channels': channels,
+        'channel_form': channel_form,
+        'admins': admins,
+        'delivery_logs': delivery_logs,
+        'channel_choices': DeliveryLog.Channel.choices,
+        'status_choices': DeliveryLog.DeliveryStatus.choices,
+        'delivery_filters': {'channel': delivery_channel, 'status': delivery_status},
+        'api_clients': api_clients,
+        'instagram_configs': instagram_configs,
+        'bots': bots,
+        'theme_preference': getattr(config, 'theme_preference', 'light') or 'light',
+    }
+    return render(request, 'core/settings_hub.html', context)
 
 
 @staff_member_required
@@ -319,6 +432,51 @@ def settings_save(request):
         config.set_facebook_access_token(fb_token)
     config.save()
     return JsonResponse({'status': 'success'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def settings_change_password(request):
+    """Change password for current user. Returns JSON for Settings Hub toast."""
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    User = get_user_model()
+    old = (request.POST.get('old_password') or '').strip()
+    new1 = (request.POST.get('new_password1') or '').strip()
+    new2 = (request.POST.get('new_password2') or '').strip()
+    if not old:
+        return JsonResponse({'status': 'error', 'message': 'Current password is required.'}, status=400)
+    if not request.user.check_password(old):
+        return JsonResponse({'status': 'error', 'message': 'Current password is incorrect.'}, status=400)
+    if new1 != new2:
+        return JsonResponse({'status': 'error', 'message': 'New passwords do not match.'}, status=400)
+    if not new1:
+        return JsonResponse({'status': 'error', 'message': 'New password is required.'}, status=400)
+    try:
+        validate_password(new1, request.user)
+    except DjangoValidationError as e:
+        return JsonResponse({'status': 'error', 'message': '; '.join(e.messages)}, status=400)
+    request.user.set_password(new1)
+    request.user.save(update_fields=['password'])
+    return JsonResponse({'status': 'success', 'message': 'Password changed successfully.'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def theme_save(request):
+    """Save theme preference (light/dark) via AJAX; invalidates config cache."""
+    theme = (request.POST.get('theme') or '').strip().lower()
+    if theme not in ('light', 'dark'):
+        return JsonResponse({'status': 'error', 'message': 'Invalid theme'}, status=400)
+    config = SiteConfiguration.get_config()
+    config.theme_preference = theme
+    config.save()
+    try:
+        from django.core.cache import cache
+        cache.delete('site_config_singleton')
+    except Exception:
+        pass
+    return JsonResponse({'status': 'success', 'theme': theme})
 
 
 @staff_member_required
@@ -442,6 +600,70 @@ def bulk_reject(request):
         return JsonResponse({'status': 'success', 'rejected_count': rejected_count})
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+def _bulk_reject_ads(ad_ids, reason, rejected_by):
+    """Shared logic: reject up to 50 ads with one reason. Returns rejected_count."""
+    rejected_count = 0
+    for ad_id in ad_ids[:50]:
+        try:
+            ad = AdRequest.objects.get(uuid=ad_id)
+            if ad.status not in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
+                continue
+            reject_one_ad(ad, reason, rejected_by=rejected_by)
+            rejected_count += 1
+        except AdRequest.DoesNotExist:
+            pass
+    return rejected_count
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def bulk_reject_page(request):
+    """Standalone page: bulk reject with reason. GET: form with ids in query; POST: reject and redirect to ad list."""
+    ids_param = request.GET.get('ids', '') if request.method == 'GET' else (request.POST.get('ids') or '')
+    ad_ids = [x.strip() for x in ids_param.split(',') if x.strip()]
+    # Validate UUIDs and only keep actionable ads for display
+    ads_to_show = []
+    valid_ids = []
+    for uid in ad_ids[:50]:
+        try:
+            ad = AdRequest.objects.get(uuid=uid)
+            if ad.status in (AdRequest.Status.PENDING_AI, AdRequest.Status.PENDING_MANUAL):
+                valid_ids.append(uid)
+                ads_to_show.append(ad)
+        except (AdRequest.DoesNotExist, ValueError):
+            pass
+
+    if request.method == 'POST':
+        reason = (request.POST.get('reason') or '').strip()
+        post_ids = request.POST.getlist('ad_ids') or [x.strip() for x in (request.POST.get('ids') or '').split(',') if x.strip()]
+        if not post_ids:
+            messages.error(request, 'No ads selected.')
+            return redirect('ad_list')
+        if not reason:
+            messages.error(request, 'Rejection reason is required.')
+            context = {
+                'ad_ids': post_ids,
+                'ads': AdRequest.objects.filter(uuid__in=post_ids[:50]),
+                'reason': reason,
+                'rejection_reasons': REJECTION_REASONS,
+            }
+            return render(request, 'core/bulk_reject.html', context)
+        rejected_count = _bulk_reject_ads(post_ids, reason, rejected_by=request.user)
+        messages.success(request, f'Rejected {rejected_count} ad(s).')
+        return redirect('ad_list')
+
+    if not valid_ids:
+        messages.warning(request, 'No pending ads selected. Select ads from the Requests list first.')
+        return redirect('ad_list')
+
+    context = {
+        'ad_ids': valid_ids,
+        'ads': ads_to_show,
+        'rejection_reasons': REJECTION_REASONS,
+    }
+    return render(request, 'core/bulk_reject.html', context)
 
 
 # ---------- Category Management ----------
@@ -640,9 +862,15 @@ def admin_test_notification(request, pk):
     tid = (profile.telegram_id or "").strip()
     if not tid:
         return JsonResponse({"success": False, "message": "No Telegram ID set for this admin."}, status=400)
+    from django.conf import settings
     from core.models import TelegramBot
     from core.bot_handler import send_message_to_chat
-    default_bot = TelegramBot.objects.filter(is_default=True, is_active=True).first()
+    env = getattr(settings, "ENVIRONMENT", "PROD")
+    default_bot = (
+        TelegramBot.objects.filter(environment=env, is_active=True)
+        .order_by("-is_default")
+        .first()
+    )
     bot_mention = f"@{default_bot.username}" if default_bot and (default_bot.username or "").strip() else "the bot"
     test_text = (
         "🔔 Ping — اعلان تست از پنل مدیریت. اگر این پیام را می‌بینید، شناسه تلگرام درست است.\n\n"
@@ -754,9 +982,17 @@ def import_config(request):
 @staff_member_required
 @require_http_methods(['GET'])
 def bot_list(request):
-    """List all bots. Default bot in System Core card; others in table."""
-    default_bot = TelegramBot.objects.filter(is_default=True).first()
-    other_bots = TelegramBot.objects.exclude(is_default=True).order_by('name')
+    """List all bots. Default bot for current environment in System Core card; others in table."""
+    from django.conf import settings
+    env = getattr(settings, "ENVIRONMENT", "PROD")
+    default_bot = (
+        TelegramBot.objects.filter(environment=env).order_by("-is_default").first()
+    )
+    other_bots = (
+        TelegramBot.objects.exclude(pk=default_bot.pk).order_by("name")
+        if default_bot
+        else TelegramBot.objects.order_by("name")
+    )
     default_bot_pulse_state = None
     default_bot_pulse_label = None
     if default_bot:
@@ -1185,9 +1421,22 @@ def settings_api(request):
 
 
 @staff_member_required
+@require_http_methods(['GET'])
+def settings_api_key_display(request):
+    """One-time display of new API key (after create or regenerate). Key stored in session; cleared after show."""
+    new_key = request.session.pop('api_new_key', None)
+    client_name = request.session.pop('api_new_key_client_name', None)
+    if not new_key:
+        messages.info(request, 'No new key to display. Create or regenerate an API client to see a key here.')
+        return redirect('settings_api')
+    context = {'new_key': new_key, 'client_name': client_name or 'API client'}
+    return render(request, 'core/settings_api_key_display.html', context)
+
+
+@staff_member_required
 @require_http_methods(['GET', 'POST'])
 def settings_api_edit(request, pk=None):
-    """Create or edit API client. New key shown once on create."""
+    """Create or edit API client. On create/regenerate, redirects to key-display page with key in session."""
     from core.encryption import hash_api_key
     import secrets
 
@@ -1196,7 +1445,8 @@ def settings_api_edit(request, pk=None):
     if request.method == 'POST':
         name = (request.POST.get('name') or '').strip()
         if not name:
-            return JsonResponse({'status': 'error', 'message': 'Name is required'}, status=400)
+            messages.error(request, 'Name is required.')
+            return render(request, 'core/settings_api_form.html', {'client': client, 'is_create': client is None})
         if not client:
             new_key_plain = secrets.token_urlsafe(32)
             client = ApiClient(name=name, api_key_hashed=hash_api_key(new_key_plain))
@@ -1209,13 +1459,12 @@ def settings_api_edit(request, pk=None):
             client.api_key_hashed = hash_api_key(new_key_plain)
         client.save()
         if new_key_plain:
-            return JsonResponse({
-                'status': 'success',
-                'redirect': reverse('settings_api'),
-                'new_key': new_key_plain,
-                'message': 'Save successful. Copy the API key now; it will not be shown again.',
-            })
-        return JsonResponse({'status': 'success', 'redirect': reverse('settings_api')})
+            request.session['api_new_key'] = new_key_plain
+            request.session['api_new_key_client_name'] = client.name
+            messages.success(request, 'API client saved. Copy the key below; it will not be shown again.')
+            return redirect('settings_api_key_display')
+        messages.success(request, 'API client saved.')
+        return redirect('settings_api')
     return render(request, 'core/settings_api_form.html', {'client': client, 'is_create': client is None})
 
 
@@ -1253,3 +1502,249 @@ def delivery_retry(request, pk):
         return JsonResponse({'status': 'error', 'message': 'Only failed deliveries can be retried'}, status=400)
     ok = DeliveryService.send(log.ad, log.channel)
     return JsonResponse({'status': 'success', 'delivery_ok': ok})
+
+
+# --- Template Tester (Ad image generation) ---
+
+
+def _save_temp_test_background(uploaded_file) -> str | None:
+    """Save uploaded image to temp_test_backgrounds and return absolute path. Caller can store in session for Coordinate Lab."""
+    if not uploaded_file:
+        return None
+    media_root = Path(getattr(settings, 'MEDIA_ROOT', None) or settings.BASE_DIR / 'media')
+    temp_dir = media_root / 'temp_test_backgrounds'
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(uploaded_file.name).suffix or '.png'
+    if ext.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+        ext = '.png'
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = temp_dir / name
+    try:
+        with open(path, 'wb') as f:
+            for chunk in uploaded_file.chunks():
+                f.write(chunk)
+        return str(path.resolve())
+    except Exception as e:
+        logger.warning("Failed to save temp test background: %s", e)
+        return None
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def template_create(request):
+    """Create a new AdTemplate (name, background_image, font_file). Redirects to Coordinate Lab for the new template."""
+    from django.urls import reverse
+    form = AdTemplateCreateForm(request.POST or None, request.FILES or None)
+    if request.method == 'POST' and form.is_valid():
+        template = form.save(commit=False)
+        # coordinates use model default (default_adtemplate_coordinates)
+        template.save()
+        messages.success(request, f'Template "{template.name}" created. Position labels in the Coordinate Lab.')
+        return redirect(reverse('admin:core_adtemplate_coordinate_lab', args=[template.pk]))
+    return render(request, 'core/template_create.html', {'form': form})
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def template_tester(request):
+    """Preview ad image: select template, dummy text, and optional custom background. POST generates with optional upload."""
+    templates = AdTemplate.objects.filter(is_active=True).order_by('name')
+    template = None
+    preview_url = None
+    validation_error = None
+    used_custom_background = False
+    form = TemplateTesterForm(templates=templates)
+
+    if request.method == 'POST':
+        form = TemplateTesterForm(request.POST, request.FILES, templates=templates)
+        if form.is_valid():
+            template_id = form.cleaned_data['template_id']
+            category_text = form.cleaned_data['category_text']
+            ad_text = form.cleaned_data['ad_text']
+            phone_number = form.cleaned_data.get('phone_number') or '+98 912 345 6789'
+            valid, err = validate_ad_content(ad_text)
+            if not valid:
+                validation_error = err
+            else:
+                template = get_object_or_404(AdTemplate, pk=template_id)
+                background_file = None
+                temp_bg_path = None
+                uploaded = request.FILES.get('test_background')
+                if uploaded:
+                    temp_bg_path = _save_temp_test_background(uploaded)
+                    if temp_bg_path:
+                        background_file = temp_bg_path
+                        used_custom_background = True
+                        request.session[COORD_LAB_TEMP_BACKGROUND_KEY] = temp_bg_path
+
+                from core.services.image_engine import create_ad_image
+                path_str = create_ad_image(
+                    int(template_id),
+                    category_text,
+                    ad_text,
+                    phone_number,
+                    background_file=background_file,
+                )
+                if path_str:
+                    media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
+                    rel = Path(path_str).name
+                    preview_url = f"{request.scheme}://{request.get_host()}{media_url}/generated_ads/{rel}"
+                else:
+                    validation_error = "Image generation failed. Check template background and coordinates."
+        else:
+            validation_error = "Please fix the form errors."
+            if form.cleaned_data.get('template_id'):
+                template = AdTemplate.objects.filter(pk=form.cleaned_data['template_id']).first()
+    else:
+        # GET: optional query params to prefill form and show preview via GET (no file)
+        template_id = request.GET.get('template_id')
+        if template_id:
+            template = AdTemplate.objects.filter(pk=template_id).first()
+            if template:
+                form = TemplateTesterForm(
+                    initial={
+                        'template_id': template_id,
+                        'category_text': request.GET.get('category_text', 'Category Heading'),
+                        'ad_text': request.GET.get('ad_text', 'Sample ad text for preview. Change this in the form.'),
+                        'phone_number': request.GET.get('phone_number', '+98 912 345 6789'),
+                    },
+                    templates=templates,
+                )
+                ad_text = request.GET.get('ad_text', '')
+                valid, err = validate_ad_content(ad_text)
+                if not valid:
+                    validation_error = err
+                else:
+                    preview_url = (
+                        reverse('template_tester_preview')
+                        + f'?template_id={template.pk}'
+                        + f'&category_text={quote(request.GET.get('category_text', 'Category Heading'))}'
+                        + f'&ad_text={quote(request.GET.get('ad_text', 'Sample ad text for preview.'))}'
+                        + f'&phone_number={quote(request.GET.get('phone_number', '+98 912 345 6789'))}'
+                    )
+
+    try:
+        from core.services.post_manager import get_default_channel
+        default_channel = get_default_channel()
+    except Exception:
+        default_channel = None
+
+    context = {
+        'form': form,
+        'templates': templates,
+        'template': template,
+        'preview_url': preview_url,
+        'default_channel': default_channel,
+        'validation_error': validation_error,
+        'used_custom_background': used_custom_background,
+    }
+    return render(request, 'core/template_tester.html', context)
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def template_tester_preview(request):
+    """Return generated ad image for template + dummy text (uses image_engine.create_ad_image)."""
+    from core.services.image_engine import create_ad_image
+
+    template_id = request.GET.get('template_id')
+    if not template_id:
+        return HttpResponse(status=400)
+    template = get_object_or_404(AdTemplate, pk=template_id)
+    category_text = request.GET.get('category_text', 'Category')
+    ad_text = request.GET.get('ad_text', 'Ad text')
+    phone_number = request.GET.get('phone_number', '')
+
+    path_str = create_ad_image(int(template_id), category_text, ad_text, phone_number)
+    if not path_str:
+        return HttpResponse(status=500)
+    with open(path_str, 'rb') as f:
+        return HttpResponse(f.read(), content_type='image/png')
+
+
+# ---------- Channel Manager (dashboard/channels/) ----------
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def channel_list(request):
+    """
+    List all Telegram channels and add new one. Staff/superuser only.
+    POST: create channel; GET: list + form.
+    """
+    from django.conf import settings
+    env = getattr(settings, "ENVIRONMENT", "PROD")
+    channels = (
+        TelegramChannel.objects.filter(bot_connection__environment=env)
+        .select_related("bot_connection")
+        .order_by("-is_default", "title")
+    )
+    form = ChannelForm()
+    if request.method == "POST":
+        form = ChannelForm(request.POST)
+        if form.is_valid():
+            channel = form.save(commit=False)
+            channel.site_config_id = SiteConfiguration.get_config().pk
+            channel.save()
+            messages.success(request, f'Channel "{channel.title}" added successfully.')
+            next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+            if next_url:
+                return redirect(next_url)
+            return redirect("channel_list")
+        else:
+            messages.error(request, "Please correct the errors below.")
+    context = {
+        "channels": channels,
+        "form": form,
+    }
+    return render(request, "dashboard/channels.html", context)
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def channel_delete(request, pk):
+    """Delete a channel. Staff only. Redirects to channel_list with message."""
+    channel = get_object_or_404(TelegramChannel, pk=pk)
+    title = channel.title
+    channel.delete()
+    messages.success(request, f'Channel "{title}" has been deleted.')
+    return redirect("channel_list")
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def channel_set_default(request, pk):
+    """Set this channel as the default (only one default at a time). Staff only."""
+    channel = get_object_or_404(TelegramChannel, pk=pk)
+    TelegramChannel.objects.filter(is_default=True).exclude(pk=pk).update(is_default=False)
+    channel.is_default = True
+    channel.save(update_fields=["is_default"])
+    messages.success(request, f'"{channel.title}" is now the default channel.')
+    return redirect("channel_list")
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def channel_test_connection(request, pk):
+    """Send a test message to the channel to verify bot admin rights. Returns JSON or redirect."""
+    from core.services.telegram_client import send_message
+    channel = get_object_or_404(TelegramChannel, pk=pk)
+    try:
+        token = channel.bot_connection.get_decrypted_token()
+    except Exception:
+        messages.error(request, "Could not get bot token.")
+        return redirect("channel_list")
+    if not token:
+        messages.error(request, "Bot has no token configured.")
+        return redirect("channel_list")
+    try:
+        chat_id = int(channel.channel_id.strip())
+    except (ValueError, TypeError):
+        messages.error(request, "Invalid channel ID.")
+        return redirect("channel_list")
+    text = "🔔 Test message from Iraniu Channel Manager — if you see this, the bot has admin rights."
+    success, _, api_error = send_message(token, chat_id, text)
+    if success:
+        messages.success(request, f'Test message sent to "{channel.title}".')
+    else:
+        messages.error(request, api_error or "Failed to send test message. Check bot admin rights and channel ID.")
+    return redirect("channel_list")

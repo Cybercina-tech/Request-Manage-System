@@ -12,7 +12,7 @@ Submodules:
   from core.services.otp import ...
 """
 
-from .ai_moderation import clean_ad_text, run_ai_moderation, test_openai_connection
+from .ai_moderation import clean_ad_text, run_ai_moderation, test_openai_connection, validate_ad_content
 from .telegram import (
     delete_webhook,
     edit_message_text_via_bot,
@@ -30,6 +30,7 @@ __all__ = [
     'clean_ad_text',
     'run_ai_moderation',
     'test_openai_connection',
+    'validate_ad_content',
     'send_telegram_message',
     'send_telegram_message_via_bot',
     'edit_message_text_via_bot',

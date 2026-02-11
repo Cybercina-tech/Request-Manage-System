@@ -3,6 +3,15 @@
 
 {% block title %}Requests{% endblock %}
 
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Requests</li>
+  </ol>
+</nav>
+{% endblock %}
+
 {% block content %}
 <h1 class="mb-2" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
   New Requests
@@ -206,10 +215,10 @@
     <i class="fa-solid fa-check icon" aria-hidden="true"></i>
     Approve selected
   </button>
-  <button type="button" class="btn btn-hot" id="bulkRejectBtn">
+  <a href="#" class="btn btn-hot" id="bulkRejectLink">
     <i class="fa-solid fa-xmark icon" aria-hidden="true"></i>
     Reject selected
-  </button>
+  </a>
   <button type="button" class="btn btn-secondary btn-sm" id="bulkClearBtn">Clear</button>
 </div>
 
@@ -228,26 +237,6 @@
 </nav>
 {% endif %}
 
-<!-- Bulk Reject Modal -->
-<div class="modal modal-soul fade" id="bulkRejectModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title text-danger">Reject selected ads</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted mb-3">One reason will be sent to all selected users.</p>
-        <label class="form-label small">Rejection reason (required)</label>
-        <textarea id="bulkRejectReason" class="form-control" rows="3" placeholder="Required"></textarea>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-hot" id="bulkRejectConfirm">Reject all</button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_css %}
@@ -533,15 +522,7 @@
   const bulkBar = document.getElementById('bulkBar');
   const bulkCountEl = document.getElementById('bulkCount');
   const selectAll = document.getElementById('selectAll');
-  const bulkRejectModal = document.getElementById('bulkRejectModal');
-  const bulkRejectReason = document.getElementById('bulkRejectReason');
-
-  function safeHideModal(el) {
-    try {
-      var inst = bootstrap.Modal.getInstance(el);
-      if (inst) inst.hide();
-    } catch (e) { /* noop */ }
-  }
+  const bulkRejectLink = document.getElementById('bulkRejectLink');
 
   function getSelectedIds() {
     return Array.from(document.querySelectorAll('.ad-select:checked')).map(cb => cb.value);
@@ -596,37 +577,15 @@
     .catch(() => alert('Request failed'));
   });
 
-  document.getElementById('bulkRejectBtn').addEventListener('click', function() {
-    if (getSelectedIds().length === 0) { alert('Select at least one ad.'); return; }
-    bulkRejectReason.value = '';
-    bootstrap.Modal.getOrCreateInstance(bulkRejectModal).show();
-  });
-
-  document.getElementById('bulkRejectConfirm').addEventListener('click', function() {
-    const reason = bulkRejectReason.value.trim();
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
-    const ids = getSelectedIds();
-    safeHideModal(bulkRejectModal);
-    fetch('{% url "bulk_reject" %}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ ad_ids: ids, reason: reason })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.status === 'success') {
-        ids.forEach(id => {
-          const row = document.querySelector('.ad-main-row[data-ad-id="' + id + '"]');
-          if (row) { row.classList.add('row-slide-out'); setTimeout(() => { row.nextElementSibling?.remove(); row.remove(); }, 350); }
-        });
-        document.querySelectorAll('.ad-select:checked').forEach(cb => { cb.checked = false; });
-        if (selectAll) selectAll.checked = false;
-        updateBulkBar();
-        alert('Rejected ' + data.rejected_count + ' ad(s).');
-      } else alert(data.message || 'Error');
-    })
-    .catch(() => alert('Request failed'));
-  });
+  if (bulkRejectLink) {
+    bulkRejectLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      const ids = getSelectedIds();
+      if (ids.length === 0) { alert('Select at least one ad.'); return; }
+      var url = '{% url "bulk_reject_page" %}?ids=' + ids.join(',');
+      window.location.href = url;
+    });
+  }
 })();
 </script>
 {% endblock %}

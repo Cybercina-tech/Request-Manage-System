@@ -94,7 +94,11 @@ class Command(BaseCommand):
                 )
             )
             
-            qs = TelegramBot.objects.filter(is_active=True, mode=TelegramBot.Mode.POLLING)
+            from django.conf import settings
+            env = getattr(settings, "ENVIRONMENT", "PROD")
+            qs = TelegramBot.objects.filter(
+                environment=env, is_active=True, mode=TelegramBot.Mode.POLLING
+            )
             if bot_ids is not None:
                 qs = qs.filter(pk__in=bot_ids)
             bots = list(qs.values_list("pk", "username"))

@@ -35,8 +35,9 @@ def _ensure_pillow():
 
 
 def _find_font(ImageFont, size: int, prefer_persian: bool = True):
-    """Find best font: Vazir/Samim for Persian, else DejaVu/Arial."""
+    """Find best font: Persian.ttf (default), then Vazir/Samim for Persian, else DejaVu/Arial."""
     persian_paths = [
+        str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Persian.ttf'),
         '/usr/share/fonts/truetype/vazir/Vazir.ttf',
         '/usr/share/fonts/truetype/vazir/Vazir-Bold.ttf',
         '/usr/share/fonts/truetype/samim/Samim.ttf',

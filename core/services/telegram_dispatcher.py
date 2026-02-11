@@ -65,8 +65,8 @@ def _get_telegram_user_id(body: dict) -> int:
 
 def _parse_update(body: dict) -> tuple:
     """
-    Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id).
-    chat_id None if nothing to process.
+    Returns (chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id, has_animation, has_sticker).
+    chat_id None if nothing to process. has_animation/has_sticker True when message contains GIF or sticker.
     """
     message = body.get("message")
     if message:
@@ -83,13 +83,17 @@ def _parse_update(body: dict) -> tuple:
                 contact_user_id = int(contact.get("user_id")) if contact.get("user_id") is not None else None
             except (TypeError, ValueError):
                 pass
-        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None, contact_user_id)
+        has_animation = bool(message.get("animation"))
+        has_sticker = bool(message.get("sticker"))
+        return (chat_id, text or None, None, message.get("message_id"), None, contact_phone or None, contact_user_id, has_animation, has_sticker)
 
     edited = body.get("edited_message")
     if edited:
         chat_id = edited.get("chat", {}).get("id")
         text = (edited.get("text") or "").strip()
-        return (chat_id, text or None, None, edited.get("message_id"), None, None, None)
+        has_animation = bool(edited.get("animation"))
+        has_sticker = bool(edited.get("sticker"))
+        return (chat_id, text or None, None, edited.get("message_id"), None, None, None, has_animation, has_sticker)
 
     callback = body.get("callback_query")
     if callback:
@@ -98,9 +102,9 @@ def _parse_update(body: dict) -> tuple:
         message_id = msg.get("message_id")
         data = (callback.get("data") or "").strip()
         callback_query_id = callback.get("id")
-        return (chat_id, None, data or None, message_id, callback_query_id, None, None)
+        return (chat_id, None, data or None, message_id, callback_query_id, None, None, False, False)
 
-    return (None, None, None, None, None, None, None)
+    return (None, None, None, None, None, None, None, False, False)
 
 
 def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
@@ -121,7 +125,7 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
         logger.debug("process_update_payload bot_id=%s update_id=%s: no user id", bot_id, update_id)
         return
 
-    chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id = _parse_update(
+    chat_id, text, callback_data, message_id, callback_query_id, contact_phone, contact_user_id, has_animation, has_sticker = _parse_update(
         update_dict
     )
     if chat_id is None:
@@ -171,6 +175,8 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
             message_id=message_id,
             contact_phone=contact_phone,
             contact_user_id=contact_user_id,
+            has_animation=has_animation,
+            has_sticker=has_sticker,
         )
     except Exception as e:
         logger.exception(
@@ -187,6 +193,7 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
     text_out = response.get("text")
     reply_markup = response.get("reply_markup")
     edit_previous = response.get("edit_previous") and response.get("message_id") is not None
+    remove_keyboard_first = response.get("remove_keyboard_first")
 
     if callback_query_id:
         try:
@@ -195,6 +202,15 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
             logger.debug("process_update_payload answer_callback_query: %s", e)
 
     sent_message_id = None
+    if remove_keyboard_first:
+        try:
+            first_text = remove_keyboard_first.get("text") or "✅"
+            send_telegram_message_via_bot(
+                chat_id, first_text, bot, reply_markup={"remove_keyboard": True}
+            )
+        except Exception as e:
+            logger.debug("process_update_payload remove_keyboard_first send: %s", e)
+
     if text_out:
         try:
             if edit_previous:

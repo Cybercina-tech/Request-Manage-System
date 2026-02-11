@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Create New Template — Iraniu{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'template_tester' %}">Template Manager</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Create New Template</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="template-create-page">
+  <div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+      <div class="card card-soul shadow-sm" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;">
+        <div class="card-header custom-card-header" style="background: var(--bg-card); color: var(--text-primary); border-bottom: 1px solid var(--border-color);">
+          <h2 class="h5 mb-0 fw-semibold">Create New Template</h2>
+        </div>
+        <div class="card-body p-4">
+          <p class="text-muted small mb-4">Add a new ad template with a background image. After saving, you’ll open the Coordinate Lab to position Category, Text, and Phone labels.</p>
+          <form method="post" action="{% url 'template_create' %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label for="id_name" class="form-label">Template name</label>
+              <input type="text" name="name" id="id_name" class="form-control" maxlength="128" placeholder="e.g. Standard 1080x1080" value="{{ form.name.value|default:'' }}" required style="border-color: var(--border-color);">
+              {% if form.name.errors %}<div class="invalid-feedback d-block">{{ form.name.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="mb-3">
+              <label for="id_background_image" class="form-label">Background image</label>
+              <input type="file" name="background_image" id="id_background_image" class="form-control" accept="image/*" required style="border-color: var(--border-color);">
+              <small class="text-muted">Required. Used as the base image for the ad.</small>
+              {% if form.background_image.errors %}<div class="invalid-feedback d-block">{{ form.background_image.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="mb-4">
+              <label for="id_font_file" class="form-label">Font file (optional)</label>
+              <input type="file" name="font_file" id="id_font_file" class="form-control" accept=".ttf,.otf" style="border-color: var(--border-color);">
+              <small class="text-muted">.ttf or .otf. Leave empty to use system default.</small>
+              {% if form.font_file.errors %}<div class="invalid-feedback d-block">{{ form.font_file.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="submit" class="btn btn-soul">Save & open Coordinate Lab</button>
+              <a href="{% url 'template_tester' %}" class="btn btn-secondary" style="background: var(--border-color); color: var(--text-primary); border: 1px solid var(--border-color);">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

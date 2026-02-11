@@ -28,7 +28,9 @@ def site_config(request):
             cache.set(SITE_CONFIG_CACHE_KEY, config, timeout=SITE_CONFIG_CACHE_TIMEOUT)
         except Exception:
             pass
-    return {'config': config}
+    environment = getattr(settings, 'ENVIRONMENT', 'PROD')
+    theme_preference = getattr(config, 'theme_preference', 'light') or 'light'
+    return {'config': config, 'environment': environment, 'theme_preference': theme_preference}
 
 
 def static_version(request):
@@ -41,11 +43,17 @@ def webhook_health(request):
     if not getattr(request, 'user', None) or not request.user.is_authenticated:
         return {}
     try:
+        from django.conf import settings
+        env = getattr(settings, "ENVIRONMENT", "PROD")
         last = (
-            TelegramBot.objects.filter(mode=TelegramBot.Mode.WEBHOOK, is_active=True)
+            TelegramBot.objects.filter(
+                mode=TelegramBot.Mode.WEBHOOK,
+                is_active=True,
+                environment=env,
+            )
             .exclude(last_webhook_received__isnull=True)
-            .order_by('-last_webhook_received')
-            .values_list('last_webhook_received', flat=True)
+            .order_by("-last_webhook_received")
+            .values_list("last_webhook_received", flat=True)
             .first()
         )
     except Exception:

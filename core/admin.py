@@ -3,16 +3,19 @@ Iraniu — Django admin registration.
 Privacy: mask email/phone in list; full data only in detail. Never log contact info.
 """
 
+from django import forms
 from django.contrib import admin
 from django.utils import timezone
 from django.utils.html import format_html
 from datetime import timedelta
 from .models import (
     SiteConfiguration,
+    AdTemplate,
     Category,
     AdRequest,
     AdminProfile,
     TelegramBot,
+    TelegramChannel,
     TelegramSession,
     TelegramMessageLog,
     TelegramUser,
@@ -48,9 +51,39 @@ class ActiveUserFilter(admin.SimpleListFilter):
         return queryset
 
 
+class TelegramChannelInline(admin.TabularInline):
+    model = TelegramChannel
+    fk_name = 'site_config'
+    extra = 0
+    fields = ['title', 'channel_id', 'bot_connection', 'is_default', 'is_active']
+    raw_id_fields = ['bot_connection']
+    ordering = ['title']
+
+
 @admin.register(SiteConfiguration)
 class SiteConfigurationAdmin(admin.ModelAdmin):
-    list_display = ['pk', 'is_ai_enabled', 'use_webhook', 'updated_at']
+    list_display = ['pk', 'is_ai_enabled', 'is_channel_active', 'use_webhook', 'updated_at']
+    fieldsets = (
+        ('AI', {
+            'fields': ('is_ai_enabled', 'openai_api_key', 'openai_model', 'ai_system_prompt'),
+        }),
+        ('Telegram (legacy / webhook)', {
+            'fields': ('telegram_bot_token', 'telegram_bot_username', 'telegram_webhook_url', 'use_webhook', 'production_base_url'),
+        }),
+        ('Default Telegram channel (ads)', {
+            'fields': ('telegram_channel_id', 'telegram_channel_title', 'is_channel_active', 'default_telegram_bot'),
+            'description': 'Approved ads are posted here when "Channel active" is checked. Bot must have admin rights in the channel.',
+        }),
+        ('Messaging', {
+            'fields': ('approval_message_template', 'rejection_message_template', 'submission_ack_message'),
+        }),
+        ('Instagram', {
+            'fields': ('instagram_business_id', 'facebook_access_token_encrypted'),
+        }),
+    )
+    filter_horizontal = ()
+    raw_id_fields = ['default_telegram_bot']
+    inlines = [TelegramChannelInline]
 
 
 class AdRequestInline(admin.TabularInline):
@@ -131,20 +164,48 @@ class AdRequestAdmin(admin.ModelAdmin):
     readonly_fields = ['uuid', 'created_at', 'updated_at', 'raw_telegram_json']
 
 
+class TelegramBotAdminForm(forms.ModelForm):
+    """Allow editing the bot token via a 'New token' field; stored encrypted in bot_token_encrypted."""
+    new_token = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(attrs={"placeholder": "Leave blank to keep current token", "autocomplete": "new-password"}),
+        label="New token",
+        help_text="Set a new Telegram bot token. Leave blank to keep the current token (required when creating a new bot).",
+    )
+
+    class Meta:
+        model = TelegramBot
+        exclude = ["bot_token_encrypted"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            self.fields["new_token"].required = True
+            self.fields["new_token"].help_text = "Telegram bot token from @BotFather."
+
+    def save(self, commit=True):
+        obj = super().save(commit=commit)
+        if commit and self.cleaned_data.get("new_token"):
+            obj.set_token(self.cleaned_data["new_token"])
+            obj.save(update_fields=["bot_token_encrypted"])
+        return obj
+
+
 @admin.register(TelegramBot)
 class TelegramBotAdmin(admin.ModelAdmin):
+    form = TelegramBotAdminForm
     list_display = [
-        'name', 'username', 'is_default', 'is_active', 'status', 'mode', 'worker_pid',
+        'name', 'username', 'environment', 'is_default', 'is_active', 'status', 'mode', 'worker_pid',
         'last_heartbeat', 'last_webhook_received', 'last_error_short', 'updated_at',
     ]
-    list_filter = ['is_active', 'is_default', 'status', 'mode']
+    list_filter = ['environment', 'is_active', 'is_default', 'status', 'mode']
     search_fields = ['name', 'username']
     readonly_fields = [
         'created_at', 'updated_at', 'last_heartbeat', 'last_webhook_received',
         'worker_pid', 'worker_started_at', 'last_error', 'status', 'webhook_secret_token',
     ]
-    exclude = ['bot_token_encrypted']  # Never show in admin; use set_token in code only
-    actions = ['activate_webhook_mode', 'delete_webhook_action', 'check_webhook_status_action']
+    exclude = ['bot_token_encrypted']
+    actions = ['activate_webhook_mode', 'delete_webhook_action', 'check_webhook_status_action', 'add_dev_bot_action']
 
     def last_error_short(self, obj):
         if not obj.last_error:
@@ -216,6 +277,54 @@ class TelegramBotAdmin(admin.ModelAdmin):
         if lines:
             self.message_user(request, " | ".join(lines), level=admin.constants.SUCCESS)
 
+    @admin.action(description='Add Dev Bot (Iraniu_dev_bot)')
+    def add_dev_bot_action(self, request, queryset):
+        """Create the Dev Bot if it does not exist (username Iraniu_dev_bot, environment DEV)."""
+        if TelegramBot.objects.filter(environment=TelegramBot.Environment.DEV, username="Iraniu_dev_bot").exists():
+            self.message_user(request, "Dev Bot (@Iraniu_dev_bot) already exists.", level=admin.constants.WARNING)
+            return
+        bot = TelegramBot(
+            name="Dev Bot",
+            username="Iraniu_dev_bot",
+            environment=TelegramBot.Environment.DEV,
+            is_active=True,
+            status=TelegramBot.Status.OFFLINE,
+            mode=TelegramBot.Mode.POLLING,
+        )
+        bot.set_token("8576459250:AAH61NFfBZMqzYJMBPZt3nx-24w53g8zXzM")
+        bot.save()
+        self.message_user(
+            request,
+            "Dev Bot (@Iraniu_dev_bot) created. Set a Dev Channel linked to this bot for testing.",
+            level=admin.constants.SUCCESS,
+        )
+
+
+@admin.register(TelegramChannel)
+class TelegramChannelAdmin(admin.ModelAdmin):
+    list_display = ['title', 'channel_id', 'bot_environment', 'is_default', 'is_active', 'bot_connection', 'updated_at']
+    list_filter = ['is_active', 'is_default', 'bot_connection__environment']
+
+    def bot_environment(self, obj):
+        return getattr(obj.bot_connection, "environment", "—") if obj.bot_connection else "—"
+    bot_environment.short_description = "Environment"
+    search_fields = ['title', 'channel_id']
+    list_editable = ['is_active']
+    raw_id_fields = ['bot_connection']
+    readonly_fields = ['created_at', 'updated_at']
+    actions = ['set_as_default_action']
+
+    @admin.action(description='Set as Default')
+    def set_as_default_action(self, request, queryset):
+        chosen = queryset.first()
+        if not chosen:
+            self.message_user(request, 'No channel selected.', level=admin.constants.WARNING)
+            return
+        TelegramChannel.objects.filter(is_default=True).exclude(pk=chosen.pk).update(is_default=False)
+        chosen.is_default = True
+        chosen.save(update_fields=['is_default'])
+        self.message_user(request, f'"{chosen.title}" is now the default channel.', level=admin.constants.SUCCESS)
+
 
 @admin.register(TelegramSession)
 class TelegramSessionAdmin(admin.ModelAdmin):
@@ -275,3 +384,151 @@ class AdminProfileAdmin(admin.ModelAdmin):
     list_filter = ['is_notified']
     search_fields = ['user__username', 'admin_nickname', 'telegram_id']
     raw_id_fields = ['user']
+
+
+@admin.register(AdTemplate)
+class AdTemplateAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active']
+    search_fields = ['name']
+    readonly_fields = ['created_at', 'updated_at']
+    actions = ['open_coordinate_lab_action']
+
+    def get_urls(self):
+        from django.urls import path
+
+        urls = super().get_urls()
+        extra = [
+            path(
+                '<int:object_id>/template-coordinate-lab/',
+                self.admin_site.admin_view(self.template_coordinate_lab_view),
+                name='core_adtemplate_coordinate_lab',
+            ),
+        ]
+        return extra + urls
+
+    def template_coordinate_lab_view(self, request, object_id):
+        from django.http import JsonResponse
+        from django.shortcuts import get_object_or_404, render
+        import json
+
+        tpl = get_object_or_404(AdTemplate, pk=object_id)
+
+        if request.method == 'POST':
+            action = request.POST.get('action') or request.headers.get('X-Action')
+            if action == 'save':
+                try:
+                    raw = request.body.decode('utf-8') if request.body else '{}'
+                    if request.POST.get('coordinates'):
+                        coords = json.loads(request.POST.get('coordinates'))
+                    else:
+                        coords = json.loads(raw) if raw.strip() else {}
+                    if coords:
+                        existing = dict(tpl.coordinates or {})
+                        for key in ('category', 'description', 'phone'):
+                            if key in coords and isinstance(coords[key], dict):
+                                existing[key] = {**(existing.get(key) or {}), **coords[key]}
+                        tpl.coordinates = existing
+                        tpl.save(update_fields=['coordinates', 'updated_at'])
+                    return JsonResponse({'success': True})
+                except Exception as e:
+                    return JsonResponse({'success': False, 'message': str(e)}, status=400)
+            if action == 'preview':
+                from core.services.image_engine import create_ad_image
+                from django.conf import settings
+                from pathlib import Path
+
+                category = request.POST.get('category', 'Category')
+                text = request.POST.get('text', 'Sample ad text')
+                phone = request.POST.get('phone', '+98 912 345 6789')
+                bg_file = request.session.get('coord_lab_temp_background_path')
+                if bg_file and Path(bg_file).exists():
+                    path_str = create_ad_image(tpl.pk, category, text, phone, background_file=bg_file)
+                else:
+                    path_str = create_ad_image(tpl.pk, category, text, phone)
+                if not path_str:
+                    return JsonResponse({'success': False, 'message': 'Image generation failed'}, status=500)
+                media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or settings.BASE_DIR / 'media')
+                media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
+                try:
+                    rel = Path(path_str).resolve().relative_to(Path(media_root).resolve())
+                    url = f'{request.scheme}://{request.get_host()}{media_url}/{rel.as_posix()}'
+                except ValueError:
+                    url = f'{media_url}/generated_ads/{Path(path_str).name}'
+                return JsonResponse({'success': True, 'url': url})
+            return JsonResponse({'success': False, 'message': 'Unknown action'}, status=400)
+
+        # GET: show lab (optionally use temp background from Template Tester upload)
+        from pathlib import Path
+        from django.conf import settings as django_settings
+
+        background_url = ''
+        img_width, img_height = 1080, 1080
+        use_temp = request.GET.get('use_temp_background') and request.session.get('coord_lab_temp_background_path')
+        temp_path = request.session.get('coord_lab_temp_background_path') if use_temp else None
+
+        if use_temp and temp_path:
+            path = Path(temp_path)
+            if path.exists():
+                try:
+                    media_root = Path(getattr(django_settings, 'MEDIA_ROOT', '') or django_settings.BASE_DIR / 'media')
+                    rel = path.resolve().relative_to(media_root.resolve())
+                    media_url = (getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
+                    background_url = f'{request.scheme}://{request.get_host()}{media_url}/{rel.as_posix()}'
+                    from PIL import Image
+                    with open(path, 'rb') as fh:
+                        img = Image.open(fh)
+                        img_width, img_height = img.size
+                except Exception:
+                    pass
+        if not background_url and tpl.background_image:
+            try:
+                background_url = tpl.background_image.url
+                from PIL import Image
+                with tpl.background_image.open('rb') as fh:
+                    img = Image.open(fh)
+                    img_width, img_height = img.size
+            except Exception:
+                background_url = ''
+        if not background_url:
+            # Use default template image (static/images/default_template/Template.png)
+            default_rel = "static/images/default_template/Template.png"
+            default_path = Path(django_settings.BASE_DIR) / default_rel
+            if default_path.exists():
+                try:
+                    from django.templatetags.static import static
+                    static_url = static('images/default_template/Template.png')
+                    if static_url:
+                        background_url = request.build_absolute_uri(static_url)
+                    from PIL import Image
+                    with open(default_path, 'rb') as fh:
+                        img = Image.open(fh)
+                        img_width, img_height = img.size
+                except Exception:
+                    pass
+
+        coords = tpl.coordinates or {}
+        context = {
+            **self.admin_site.each_context(request),
+            'title': f'Coordinate Lab — {tpl.name}',
+            'template': tpl,
+            'template_id': tpl.pk,
+            'background_url': background_url,
+            'image_width': img_width,
+            'image_height': img_height,
+            'coordinates': coords,
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/core/adtemplate/coordinate_lab.html', context)
+
+    @admin.action(description='Open Coordinate Lab')
+    def open_coordinate_lab_action(self, request, queryset):
+        from django.shortcuts import redirect
+        from django.urls import reverse
+        first = queryset.first()
+        if not first:
+            self.message_user(request, 'Select at least one template.', level=admin.constants.WARNING)
+            return
+        url = reverse('admin:core_adtemplate_coordinate_lab', args=[first.pk])
+        return redirect(url)
+

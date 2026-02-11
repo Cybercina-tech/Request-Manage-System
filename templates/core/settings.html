@@ -4,10 +4,18 @@
 {% block title %}Settings{% endblock %}
 
 {% block content %}
-<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-  Settings
-</h1>
-<p class="text-muted mb-4">Global configuration — AI, Telegram, and maintenance.</p>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <div>
+    <h1 class="mb-1" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+      Settings
+    </h1>
+    <p class="text-muted mb-0">Global configuration — AI, Telegram, and maintenance.</p>
+  </div>
+  <button type="button" class="theme-switcher-btn border rounded p-2" id="themeSwitcherSettings" title="Toggle theme" aria-label="Toggle light/dark theme" data-theme-toggle>
+    <i class="fa-solid fa-sun icon theme-icon-light" aria-hidden="true" style="display: {% if theme_preference == 'dark' %}inline-block{% else %}none{% endif %};"></i>
+    <i class="fa-solid fa-moon icon theme-icon-dark" aria-hidden="true" style="display: {% if theme_preference == 'light' %}inline-block{% else %}none{% endif %};"></i>
+  </button>
+</div>
 
 <div class="d-flex gap-4 flex-wrap">
   <ul class="nav nav-tabs-vertical flex-column mb-0" style="width:200px; flex-shrink:0">

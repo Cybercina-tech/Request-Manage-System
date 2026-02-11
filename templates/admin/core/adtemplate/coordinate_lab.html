@@ -1,0 +1,269 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{{ title }} — {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  /* Full-screen Coordinate Lab experience */
+  body { min-height: 100vh; }
+  .coord-lab-container {
+    min-height: calc(100vh - 120px);
+    max-width: none;
+    padding: 1rem;
+  }
+  .coord-lab-canvas {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  }
+  .coord-lab-canvas img { display: block; max-width: 100%; height: auto; vertical-align: top; }
+  .coord-label {
+    position: absolute;
+    padding: 4px 8px;
+    border: 2px solid #fff;
+    border-radius: 4px;
+    cursor: move;
+    user-select: none;
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+  .coord-label.category { background: rgba(124, 77, 255, 0.85); color: #fff; }
+  .coord-label.description { background: rgba(33, 150, 243, 0.85); color: #fff; }
+  .coord-label.phone { background: rgba(255, 193, 7, 0.9); color: #111; }
+  .coord-lab-actions { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .coord-lab-actions button { padding: 0.5rem 1rem; cursor: pointer; }
+  /* Inline preview — Professional Light Theme palette (easy on eyes) */
+  .coord-preview-inline {
+    margin-top: 2rem;
+    padding: 1rem;
+    background: #F4F6F9;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    max-width: 100%;
+  }
+  .coord-preview-inline h3 { margin-bottom: 0.5rem; font-size: 1rem; color: #2C3E50; }
+  .coord-preview-inline img { max-width: 100%; height: auto; display: block; border-radius: 4px; }
+  .coord-preview-inline .preview-placeholder { color: #64748B; padding: 2rem; text-align: center; }
+  .coord-preview-inline:not(.has-preview) .preview-image-wrap { display: none; }
+  .coord-preview-inline.has-preview .preview-placeholder { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="coord-lab-container">
+  <h1>{{ title }}</h1>
+  <p class="coord-lab-nav">
+    <a href="{% url 'admin:core_adtemplate_changelist' %}" class="back-link">← Back to Template Manager</a>
+    <span style="margin: 0 0.5rem;">|</span>
+    <a href="{% url 'template_tester' %}?template_id={{ template_id }}">Template Tester (preview with Persian text)</a>
+  </p>
+
+  {% if not background_url %}
+  <p class="errornote">This template has no background image. Upload one in the template edit form first.</p>
+  {% else %}
+  <div class="coord-lab-canvas" id="coordCanvas" style="width: 600px;">
+    <img id="bgImage" src="{{ background_url }}" alt="Background" crossorigin="anonymous" data-width="{{ image_width }}" data-height="{{ image_height }}">
+    <div id="labelCategory" class="coord-label category" data-key="category" style="left: 50px; top: 50px;">Category</div>
+    <div id="labelDescription" class="coord-label description" data-key="description" style="left: 50px; top: 140px;">Text</div>
+    <div id="labelPhone" class="coord-label phone" data-key="phone" style="left: 50px; top: 420px;">Phone</div>
+  </div>
+
+  <div class="coord-lab-actions">
+    <button type="button" id="btnSave" class="button default">Save coordinates</button>
+    <button type="button" id="btnPreview" class="button">Preview</button>
+    <a href="{% url 'template_tester' %}?template_id={{ template_id }}" class="button" style="text-decoration: none;">Template Tester</a>
+    <span id="saveStatus" style="margin-left: 0.5rem;"></span>
+  </div>
+
+  <div id="previewInline" class="coord-preview-inline">
+    <h3>Preview</h3>
+    <div class="preview-placeholder">Click "Preview" to generate the image with current coordinates.</div>
+    <div class="preview-image-wrap" style="display: none;">
+      <img id="previewImage" src="" alt="Preview">
+    </div>
+  </div>
+
+  {{ coordinates|json_script:"coordsData" }}
+  {% endif %}
+</div>
+
+<script>
+(function() {
+  if (!document.getElementById('coordCanvas')) return;
+
+  var canvas = document.getElementById('coordCanvas');
+  var bgImage = document.getElementById('bgImage');
+  var labels = {
+    category: document.getElementById('labelCategory'),
+    description: document.getElementById('labelDescription'),
+    phone: document.getElementById('labelPhone')
+  };
+  var coordsEl = document.getElementById('coordsData');
+  var coords = coordsEl ? JSON.parse(coordsEl.textContent) : {};
+  var templateId = {{ template_id }};
+  var imageWidth = parseInt(bgImage.getAttribute('data-width'), 10) || 1080;
+  var imageHeight = parseInt(bgImage.getAttribute('data-height'), 10) || 1080;
+
+  function getScale() {
+    var w = bgImage.offsetWidth || 600;
+    return w / imageWidth;
+  }
+
+  function positionLabels() {
+    var scale = getScale();
+    ['category', 'description', 'phone'].forEach(function(key) {
+      var el = labels[key];
+      var c = (coords[key] || {});
+      var x = parseInt(c.x, 10) || 0;
+      var y = parseInt(c.y, 10) || 0;
+      el.style.left = (x * scale) + 'px';
+      el.style.top = (y * scale) + 'px';
+    });
+  }
+
+  function initFromCoords() {
+    var scale = getScale();
+    ['category', 'description', 'phone'].forEach(function(key) {
+      var el = labels[key];
+      var c = (coords[key] || {});
+      var x = parseInt(c.x, 10) || 0;
+      var y = parseInt(c.y, 10) || 0;
+      el.style.left = (x * scale) + 'px';
+      el.style.top = (y * scale) + 'px';
+    });
+  }
+
+  bgImage.addEventListener('load', function() {
+    var scale = getScale();
+    ['category', 'description', 'phone'].forEach(function(key) {
+      var el = labels[key];
+      var c = (coords[key] || {});
+      var x = parseInt(c.x, 10) || 0;
+      var y = parseInt(c.y, 10) || 0;
+      el.style.left = (x * scale) + 'px';
+      el.style.top = (y * scale) + 'px';
+    });
+  });
+  if (bgImage.complete) positionLabels();
+  else initFromCoords();
+
+  function makeDraggable(el, key) {
+    var dragging = false, startX, startY, startLeft, startTop;
+    el.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = parseFloat(el.style.left) || 0;
+      startTop = parseFloat(el.style.top) || 0;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+      el.style.left = (startLeft + dx) + 'px';
+      el.style.top = (startTop + dy) + 'px';
+    });
+    document.addEventListener('mouseup', function() {
+      if (dragging) {
+        dragging = false;
+        var scale = getScale();
+        var left = parseFloat(el.style.left) || 0;
+        var top = parseFloat(el.style.top) || 0;
+        coords[key] = coords[key] || {};
+        coords[key].x = Math.round(left / scale);
+        coords[key].y = Math.round(top / scale);
+      }
+    });
+  }
+  Object.keys(labels).forEach(function(k) { makeDraggable(labels[k], k); });
+
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  document.getElementById('btnSave').addEventListener('click', function() {
+    var scale = getScale();
+    ['category', 'description', 'phone'].forEach(function(key) {
+      var el = labels[key];
+      var left = parseFloat(el.style.left) || 0;
+      var top = parseFloat(el.style.top) || 0;
+      coords[key] = coords[key] || {};
+      coords[key].x = Math.round(left / scale);
+      coords[key].y = Math.round(top / scale);
+    });
+
+    var status = document.getElementById('saveStatus');
+    status.textContent = 'Saving…';
+    var formData = new FormData();
+    formData.append('action', 'save');
+    formData.append('coordinates', JSON.stringify(coords));
+    formData.append('csrfmiddlewaretoken', getCookie('csrftoken'));
+
+    var req = new XMLHttpRequest();
+    req.open('POST', window.location.href);
+    req.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+    req.onload = function() {
+      var res = {};
+      try { res = JSON.parse(req.responseText); } catch (e) {}
+      if (req.status === 200 && res.success) {
+        status.textContent = 'Saved.';
+        setTimeout(function() { status.textContent = ''; }, 2000);
+      } else {
+        status.textContent = 'Error: ' + (res.message || req.statusText);
+      }
+    };
+    req.onerror = function() { status.textContent = 'Network error.'; };
+    req.send(formData);
+  });
+
+  document.getElementById('btnPreview').addEventListener('click', function() {
+    var btn = this;
+    var imgEl = document.getElementById('previewImage');
+    var wrap = document.getElementById('previewInline');
+    var placeholder = wrap ? wrap.querySelector('.preview-placeholder') : null;
+    var imageWrap = wrap ? wrap.querySelector('.preview-image-wrap') : null;
+    btn.disabled = true;
+    if (placeholder) placeholder.textContent = 'Generating preview…';
+
+    var formData = new FormData();
+    formData.append('action', 'preview');
+    formData.append('category', 'Category');
+    formData.append('text', 'Sample ad text for preview.');
+    formData.append('phone', '+98 912 345 6789');
+    formData.append('csrfmiddlewaretoken', getCookie('csrftoken'));
+
+    var req = new XMLHttpRequest();
+    req.open('POST', window.location.href);
+    req.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+    req.onload = function() {
+      btn.disabled = false;
+      var res = {};
+      try { res = JSON.parse(req.responseText); } catch (e) {}
+      if (req.status === 200 && res.success && res.url) {
+        imgEl.src = res.url;
+        if (imageWrap) imageWrap.style.display = 'block';
+        if (placeholder) placeholder.style.display = 'none';
+        if (wrap) wrap.classList.add('has-preview');
+      } else {
+        if (placeholder) { placeholder.textContent = 'Preview failed: ' + (res.message || req.statusText); placeholder.style.display = ''; }
+        if (imageWrap) imageWrap.style.display = 'none';
+        if (wrap) wrap.classList.remove('has-preview');
+      }
+    };
+    req.onerror = function() {
+      btn.disabled = false;
+      if (placeholder) { placeholder.textContent = 'Network error.'; placeholder.style.display = ''; }
+    };
+    req.send(formData);
+  });
+})();
+</script>
+{% endblock %}

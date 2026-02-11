@@ -291,6 +291,40 @@ def send_message(
     return False, None, error
 
 
+def send_photo(
+    token: str,
+    chat_id: int,
+    photo: str,
+    caption: Optional[str] = None,
+    max_retries: int = MAX_RETRIES,
+) -> Tuple[bool, Optional[int], Optional[str]]:
+    """
+    Send a photo to a chat/channel via Telegram Bot API.
+    photo: HTTP URL of the image or file_id of existing Telegram file.
+    Returns (success, message_id, error_message).
+    """
+    if not token or not chat_id or not photo:
+        logger.warning("send_photo: missing token, chat_id, or photo")
+        return False, None, "Missing token, chat_id, or photo"
+    session = _create_session()
+    payload = {"chat_id": chat_id, "photo": (photo or "").strip()}
+    if caption is not None:
+        payload["caption"] = caption[:1024]
+    for attempt in range(max_retries + 1):
+        success, result, error = _make_request(
+            session, "POST", "sendPhoto", token, json_data=payload
+        )
+        if success and result is not None:
+            message_id = result.get("message_id") if isinstance(result, dict) else None
+            return True, message_id, None
+        if attempt < max_retries:
+            wait_time = BACKOFF_FACTOR * (2 ** attempt)
+            logger.debug("send_photo retry %s/%s: %s", attempt + 1, max_retries, error)
+            time.sleep(wait_time)
+    logger.warning("send_photo failed after %s attempts: %s", max_retries + 1, error)
+    return False, None, error
+
+
 def edit_message_text(
     token: str,
     chat_id: int,

@@ -18,6 +18,22 @@ def clean_ad_text(text):
     return text.strip()
 
 
+def validate_ad_content(text: str) -> tuple[bool, str]:
+    """
+    Validate ad content for no emoji/GIF/sticker (plain text only).
+    Returns (is_valid, error_message). Use across forms that accept ad text.
+    """
+    if not text or not isinstance(text, str):
+        return True, ''
+    try:
+        from core.services.conversation import contains_emoji
+        if contains_emoji(text):
+            return False, 'Emojis, stickers, and GIFs are not allowed in ad text. Please use plain text only.'
+    except ImportError:
+        pass
+    return True, ''
+
+
 def run_ai_moderation(content, config):
     """
     Send content to OpenAI for moderation.

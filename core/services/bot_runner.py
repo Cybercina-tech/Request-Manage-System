@@ -29,13 +29,23 @@ HEARTBEAT_CHECK_INTERVAL = 30
 OFFLINE_THRESHOLD_SEC = 90
 DEFAULT_LOG_DIR = "logs"
 
+# Only bots for this environment are started (PROD on cPanel, DEV locally).
+CURRENT_ENVIRONMENT = getattr(settings, "ENVIRONMENT", "PROD")
+
+
+def _active_bots_qs(mode=None):
+    """Bots that match current ENVIRONMENT and are active; optionally filter by mode."""
+    qs = TelegramBot.objects.filter(environment=CURRENT_ENVIRONMENT, is_active=True)
+    if mode is not None:
+        qs = qs.filter(mode=mode)
+    return qs
+
 
 def _mark_stale_offline():
-    """Mark bots offline if last_heartbeat > OFFLINE_THRESHOLD_SEC."""
+    """Mark bots offline if last_heartbeat > OFFLINE_THRESHOLD_SEC (only current env bots)."""
     try:
         threshold = timezone.now() - timezone.timedelta(seconds=OFFLINE_THRESHOLD_SEC)
-        count = TelegramBot.objects.filter(
-            is_active=True,
+        count = _active_bots_qs().filter(
             status=TelegramBot.Status.ONLINE,
             last_heartbeat__lt=threshold,
         ).update(status=TelegramBot.Status.OFFLINE, worker_pid=None, worker_started_at=None)
@@ -128,6 +138,9 @@ class BotRunnerManager:
         except TelegramBot.DoesNotExist:
             logger.warning("start_bot: bot_id=%s not found", bot_id)
             return False
+        if getattr(bot, "environment", "PROD") != CURRENT_ENVIRONMENT:
+            logger.info("start_bot: bot_id=%s environment=%s != current %s, skip", bot_id, getattr(bot, "environment", "?"), CURRENT_ENVIRONMENT)
+            return False
         if bot.mode != TelegramBot.Mode.POLLING:
             logger.info(
                 "start_bot: bot_id=%s mode=%s, skip polling", bot_id, bot.mode
@@ -201,13 +214,10 @@ class BotRunnerManager:
         Check workers; apply requested_action; restart dead; mark stale offline.
         """
         _mark_stale_offline()
-        # Only POLLING bots: WEBHOOK bots are never spawned as polling workers.
+        # Only POLLING bots for current environment
         try:
             bots = list(
-                TelegramBot.objects.filter(
-                    is_active=True,
-                    mode=TelegramBot.Mode.POLLING,
-                ).values_list("pk", "worker_pid", "requested_action")
+                _active_bots_qs(mode=TelegramBot.Mode.POLLING).values_list("pk", "worker_pid", "requested_action")
             )
         except Exception as e:
             logger.exception("supervisor_tick load bots: %s", e)
@@ -251,7 +261,7 @@ class BotRunnerManager:
                 return
             try:
                 b = TelegramBot.objects.filter(pk=bot_id).first()
-                if not b or not b.is_active or b.mode != TelegramBot.Mode.POLLING:
+                if not b or not b.is_active or b.mode != TelegramBot.Mode.POLLING or getattr(b, "environment", "PROD") != CURRENT_ENVIRONMENT:
                     self._stop_bot_process(bot_id)
             except Exception:
                 self._stop_bot_process(bot_id)
@@ -267,14 +277,18 @@ class BotRunnerManager:
             self._telegram_mode,
             self.log_dir,
         )
-        # Always start polling workers for bots that are set to Polling in DB
+        # Start polling workers for bots in current environment that are set to Polling
         try:
-            qs = TelegramBot.objects.filter(
-                is_active=True, mode=TelegramBot.Mode.POLLING
-            )
+            qs = _active_bots_qs(mode=TelegramBot.Mode.POLLING)
             if bot_ids is not None:
                 qs = qs.filter(pk__in=bot_ids)
-            for bot in qs:
+            bots_list = list(qs)
+            if not bots_list:
+                logger.error(
+                    "No active bot found for environment [%s]. Add a TelegramBot with environment=%s and is_active=True.",
+                    CURRENT_ENVIRONMENT, CURRENT_ENVIRONMENT,
+                )
+            for bot in bots_list:
                 if self._shutdown:
                     break
                 self.start_bot(bot.pk, debug=debug)
@@ -289,9 +303,7 @@ class BotRunnerManager:
                 now = time.time()
                 if now - last_webhook_check >= HEARTBEAT_CHECK_INTERVAL:
                     last_webhook_check = now
-                    wqs = TelegramBot.objects.filter(
-                        is_active=True, mode=TelegramBot.Mode.WEBHOOK
-                    )
+                    wqs = _active_bots_qs(mode=TelegramBot.Mode.WEBHOOK)
                     if bot_ids is not None:
                         wqs = wqs.filter(pk__in=bot_ids)
                     for bot in wqs:
@@ -300,15 +312,16 @@ class BotRunnerManager:
                         _run_webhook_health_check(bot)
 
     def _run_webhook_loop(self, bot_ids: list = None) -> None:
-        """Webhook mode: health check only, no polling workers."""
-        qs = TelegramBot.objects.filter(
-            is_active=True, mode=TelegramBot.Mode.WEBHOOK
-        )
+        """Webhook mode: health check only, no polling workers (current environment only)."""
+        qs = _active_bots_qs(mode=TelegramBot.Mode.WEBHOOK)
         if bot_ids is not None:
             qs = qs.filter(pk__in=bot_ids)
         bots = list(qs)
         if not bots:
-            logger.info("No webhook bots to monitor")
+            logger.error(
+                "No active bot found for environment [%s]. Add a TelegramBot with environment=%s, mode=WEBHOOK, is_active=True.",
+                CURRENT_ENVIRONMENT, CURRENT_ENVIRONMENT,
+            )
             return
         last_check = 0
         while not self._shutdown:
@@ -322,23 +335,25 @@ class BotRunnerManager:
             time.sleep(SUPERVISOR_INTERVAL)
 
     def run_once(self, bot_ids: list = None, debug: bool = False) -> None:
-        """Single tick: start polling workers for POLLING bots, run webhook health check if webhook mode, then tick."""
-        logger.info("Supervisor run_once mode=%s", self._telegram_mode)
+        """Single tick: start polling workers for POLLING bots (current env), webhook health check if webhook mode, then tick."""
+        logger.info("Supervisor run_once mode=%s env=%s", self._telegram_mode, CURRENT_ENVIRONMENT)
         _mark_stale_offline()
         try:
-            qs = TelegramBot.objects.filter(
-                is_active=True, mode=TelegramBot.Mode.POLLING
-            )
+            qs = _active_bots_qs(mode=TelegramBot.Mode.POLLING)
             if bot_ids is not None:
                 qs = qs.filter(pk__in=bot_ids)
-            for bot in qs:
+            bots_list = list(qs)
+            if not bots_list:
+                logger.error(
+                    "No active bot found for environment [%s]. Add a TelegramBot with environment=%s and is_active=True.",
+                    CURRENT_ENVIRONMENT, CURRENT_ENVIRONMENT,
+                )
+            for bot in bots_list:
                 self.start_bot(bot.pk, debug=debug)
         except Exception as e:
             logger.exception("run_once start: %s", e)
         if self._telegram_mode == "webhook":
-            wqs = TelegramBot.objects.filter(
-                is_active=True, mode=TelegramBot.Mode.WEBHOOK
-            )
+            wqs = _active_bots_qs(mode=TelegramBot.Mode.WEBHOOK)
             if bot_ids is not None:
                 wqs = wqs.filter(pk__in=bot_ids)
             for bot in wqs:

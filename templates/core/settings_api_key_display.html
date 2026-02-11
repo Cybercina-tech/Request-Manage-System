@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}API key — Iraniu{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  API key for {{ client_name }}
+</h1>
+
+<div class="alert alert-warning mb-4">
+  This key will not be shown again. Store it securely.
+</div>
+
+<div class="card card-soul mb-4" style="max-width: 560px;">
+  <div class="card-body">
+    <label class="form-label small text-muted">API key</label>
+    <div class="input-group">
+      <input type="text" id="apiKeyValue" class="form-control font-monospace" value="{{ new_key }}" readonly>
+      <button type="button" class="btn btn-soul" id="copyKeyBtn">
+        <i class="fa-solid fa-copy icon me-1" aria-hidden="true"></i>
+        Copy
+      </button>
+    </div>
+  </div>
+</div>
+
+<a href="{% url 'settings_api' %}" class="btn btn-soul">Back to API clients</a>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var input = document.getElementById('apiKeyValue');
+  var btn = document.getElementById('copyKeyBtn');
+  if (btn && input) {
+    btn.addEventListener('click', function() {
+      input.select();
+      input.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(input.value).then(function() {
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check icon me-1"></i> Copied';
+        setTimeout(function() { btn.innerHTML = orig; }, 2000);
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

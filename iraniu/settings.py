@@ -166,6 +166,13 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
+# Environment: PROD (cPanel/live) or DEV (local). Used to select which Telegram bot(s) run and which channel to post to.
+_ENV_RAW = (os.environ.get('ENVIRONMENT') or '').strip().upper()
+if _ENV_RAW in ('PROD', 'DEV'):
+    ENVIRONMENT = _ENV_RAW
+else:
+    ENVIRONMENT = 'PROD' if not DEBUG else 'DEV'
+
 # Telegram Bot Runner
 # polling (default): runbots starts getUpdates workers. webhook: use setWebhook + HTTPS; runbots still starts polling workers for bots with mode=Polling in DB.
 TELEGRAM_MODE = os.environ.get('TELEGRAM_MODE', 'polling').lower()

@@ -1,0 +1,10 @@
+{% extends "admin/index.html" %}
+{% load i18n %}
+
+{% block content %}
+<p class="app-core" style="margin-bottom: 1em;">
+  <a href="{% url 'admin:core_siteconfiguration_changelist' %}" class="button">⚙️ Settings (Site Configuration)</a>
+  <a href="{% url 'admin:core_adtemplate_changelist' %}" class="button">🖼 Template Manager</a>
+</p>
+{{ block.super }}
+{% endblock %}

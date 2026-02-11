@@ -60,6 +60,29 @@ class SiteConfiguration(models.Model):
         max_length=512,
         help_text='Base URL of the site (e.g. https://iraniu.ir). Used to build webhook URL.',
     )
+    # Default Telegram channel (singleton): used by distribute_ad when is_channel_active.
+    telegram_channel_id = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text='Telegram Chat ID for the default ads channel (e.g. -100123456789).',
+    )
+    telegram_channel_title = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text='Display name for the default channel (e.g. "Live Ads Channel").',
+    )
+    is_channel_active = models.BooleanField(
+        default=False,
+        help_text='When True, approved ads are posted to the channel above using the bot below.',
+    )
+    default_telegram_bot = models.ForeignKey(
+        'TelegramBot',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        help_text='Bot used to post to the default channel above (must have admin rights in that channel).',
+    )
     # Instagram Business (for Post to Feed/Story; fallback if no InstagramConfiguration)
     instagram_business_id = models.CharField(
         max_length=64,
@@ -69,6 +92,13 @@ class SiteConfiguration(models.Model):
     facebook_access_token_encrypted = models.TextField(
         blank=True,
         help_text='Long-lived Facebook/Instagram access token (encrypted at rest).',
+    )
+    # UI — Professional Light Theme (default) or Dark
+    theme_preference = models.CharField(
+        max_length=16,
+        choices=[('light', 'Light'), ('dark', 'Dark')],
+        default='light',
+        help_text='Global UI theme: Light (easy on eyes) or Dark.',
     )
     # Maintenance
     updated_at = models.DateTimeField(auto_now=True)
@@ -282,8 +312,8 @@ class AdRequest(models.Model):
 class TelegramBot(models.Model):
     """
     Multi-bot support: one project can manage multiple bots.
-    Fields: mode (Webhook/Polling), bot_token_encrypted (token at rest), is_active.
-    Only active bots send/receive. Token is validated via getMe on update; use Reset Bot Connection to clear webhook and re-sync.
+    Fields: mode (Webhook/Polling), bot_token_encrypted (token at rest), is_active, environment (PROD/DEV).
+    Only active bots for the current ENVIRONMENT are started. Token is validated via getMe; use Reset Bot Connection to clear webhook.
     """
 
     class Status(models.TextChoices):
@@ -300,10 +330,21 @@ class TelegramBot(models.Model):
         STOP = 'stop', 'Stop'
         RESTART = 'restart', 'Restart'
 
-    name = models.CharField(max_length=128, help_text='Human-readable name')
+    class Environment(models.TextChoices):
+        PROD = 'PROD', 'Production'
+        DEV = 'DEV', 'Development'
+
+    name = models.CharField(max_length=128, help_text='Human-readable name (e.g. Production Bot, Dev Bot)')
     bot_token_encrypted = models.TextField(blank=True)  # Encrypted at rest; never expose in templates
     username = models.CharField(max_length=64, blank=True, help_text='Bot username without @')
     is_active = models.BooleanField(default=True)
+    environment = models.CharField(
+        max_length=8,
+        choices=Environment.choices,
+        default=Environment.PROD,
+        db_index=True,
+        help_text='PROD: cPanel/live. DEV: local/testing. Only bots matching settings.ENVIRONMENT are started.',
+    )
     is_default = models.BooleanField(
         default=False,
         db_index=True,
@@ -380,6 +421,61 @@ class TelegramBot(models.Model):
             self.webhook_secret_token = uuid.uuid4()
         if self.is_default:
             TelegramBot.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class TelegramChannel(models.Model):
+    """
+    Telegram channel (group/supergroup) for automated ad posts.
+    Can be linked to Site Configuration (site_config) to manage from Settings; bot_connection must have admin rights.
+    """
+
+    site_config = models.ForeignKey(
+        'SiteConfiguration',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='telegram_channels',
+        help_text='Link to Site Configuration to manage this channel from Settings.',
+    )
+    title = models.CharField(
+        max_length=128,
+        help_text='Internal name for this channel (e.g. "Main Ads Channel")',
+    )
+    channel_id = models.CharField(
+        max_length=32,
+        help_text='Telegram Chat ID (e.g. -100123456789 for supergroups)',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text='When disabled, this channel is excluded from automated posts.',
+    )
+    is_default = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text='Primary channel for automated ads (when not using Site Configuration default).',
+    )
+    bot_connection = models.ForeignKey(
+        TelegramBot,
+        on_delete=models.CASCADE,
+        related_name='telegram_channels',
+        help_text='Bot that has admin rights in this channel (used to send messages).',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['title']
+        verbose_name = 'Telegram Channel'
+        verbose_name_plural = 'Channel Manager'
+
+    def __str__(self):
+        return f'{self.title} ({self.channel_id})'
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            TelegramChannel.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
 
 
@@ -620,6 +716,80 @@ class DeliveryLog(models.Model):
 
     def __str__(self):
         return f'{self.ad_id} {self.channel} {self.status}'
+
+
+def default_adtemplate_coordinates():
+    """
+    Default coordinates JSON for AdTemplate.
+    Keys:
+      - category: {x, y, size, color, font_path}
+      - description: {x, y, size, color, font_path, max_width}
+      - phone: {x, y, size, color, font_path}
+    """
+    return {
+        'category': {
+            'x': 50,
+            'y': 50,
+            'size': 48,
+            'color': '#FFFFFF',
+            'font_path': '',
+        },
+        'description': {
+            'x': 50,
+            'y': 140,
+            'size': 32,
+            'color': '#FFFFFF',
+            'font_path': '',
+            'max_width': 800,
+        },
+        'phone': {
+            'x': 50,
+            'y': 420,
+            'size': 28,
+            'color': '#FFFF00',
+            'font_path': '',
+        },
+    }
+
+
+class AdTemplate(models.Model):
+    """
+    Template for automated ad image generation.
+    Background image + font + JSON-based coordinates for Category, Description, and Phone.
+    """
+
+    name = models.CharField(max_length=128, help_text='Template name')
+    background_image = models.ImageField(
+        upload_to='ad_templates/backgrounds/',
+        help_text='Background image for the ad',
+    )
+    font_file = models.FileField(
+        upload_to='ad_templates/fonts/',
+        help_text='Default TrueType font (.ttf) for text overlay',
+        blank=True,
+        null=True,
+    )
+    coordinates = models.JSONField(
+        default=default_adtemplate_coordinates,
+        blank=True,
+        help_text=(
+            'JSON with keys: category, description, phone. '
+            'Each contains x, y, size, color, font_path; description also has max_width.'
+        ),
+    )
+    is_active = models.BooleanField(default=True, help_text='Active templates are eligible for auto-selection.')
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Ad Template'
+        # Show as "Template Manager" label in Django admin sidebar
+        verbose_name_plural = 'Template Manager'
+
+    def __str__(self):
+        return self.name
 
 
 # Common rejection reasons for quick-select in UI (list and detail)

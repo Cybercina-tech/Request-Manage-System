@@ -45,13 +45,18 @@ def activate_webhook(bot: TelegramBot):
 
 def health_check_default_bot():
     """
-    Run a health check for the default bot: test connection and update status/last_heartbeat.
-    Call on startup (e.g. from apps.ready or post_migrate) or periodically.
+    Run a health check for the default bot in the current environment.
     """
+    from django.conf import settings
     from django.utils import timezone
     from core.services.telegram import test_telegram_connection
 
-    bot = TelegramBot.objects.filter(is_default=True).first()
+    env = getattr(settings, "ENVIRONMENT", "PROD")
+    bot = (
+        TelegramBot.objects.filter(environment=env, is_active=True)
+        .order_by("-is_default")
+        .first()
+    )
     if not bot:
         return
     token = bot.get_decrypted_token()

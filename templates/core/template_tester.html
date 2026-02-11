@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Template Tester — Iraniu{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Template Tester</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4 template-tester-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Ad Template Tester</h1>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{% url 'template_create' %}" class="btn btn-soul btn-sm">
+        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i> Create New Template
+      </a>
+      <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+    </div>
+  </div>
+
+  {% if default_channel %}
+  <div class="alert alert-info py-2 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>📢 Automated/test posts will go to: <strong>{{ default_channel.title }}</strong> <code>{{ default_channel.channel_id }}</code></span>
+    <a href="{% url 'admin:core_siteconfiguration_changelist' %}" class="btn btn-outline-primary btn-sm">Settings</a>
+  </div>
+  {% endif %}
+
+  {% if messages %}
+    {% for message in messages %}
+      <div class="alert alert-{{ message.tags }} mb-3">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+  {% if validation_error %}
+    <div class="alert alert-warning mb-3">{{ validation_error }}</div>
+  {% endif %}
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card card-soul mb-3">
+        <div class="card-header custom-card-header">1. Select Template & Dummy Text</div>
+        <div class="card-body">
+          <form method="post" action="{% url 'template_tester' %}" enctype="multipart/form-data" id="testerForm">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label" for="id_template_id">Template</label>
+              {{ form.template_id }}
+              {% if form.template_id.errors %}<div class="invalid-feedback d-block">{{ form.template_id.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="id_category_text">Category text</label>
+              {{ form.category_text }}
+              {% if form.category_text.errors %}<div class="invalid-feedback d-block">{{ form.category_text.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="id_ad_text">Ad text</label>
+              {{ form.ad_text }}
+              {% if form.ad_text.errors %}<div class="invalid-feedback d-block">{{ form.ad_text.errors.0 }}</div>{% endif %}
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="id_phone_number">Phone number</label>
+              {{ form.phone_number }}
+            </div>
+
+            <div class="mb-4">
+              <label class="form-label" for="id_test_background">Upload temporary background</label>
+              {{ form.test_background }}
+              {% if form.test_background.help_text %}<div class="form-text">{{ form.test_background.help_text }}</div>{% endif %}
+              {% if form.test_background.errors %}<div class="invalid-feedback d-block">{{ form.test_background.errors.0 }}</div>{% endif %}
+              <div id="testBackgroundPreview" class="mt-2 text-center" style="display: none;">
+                <p class="small text-muted mb-1">Preview:</p>
+                <img id="testBackgroundThumb" src="" alt="Upload preview" class="rounded border" style="max-width: 100%; max-height: 120px; object-fit: contain;">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-soul rounded-3" id="btnGenerate">Generate</button>
+          </form>
+        </div>
+      </div>
+
+      {% if template %}
+      <div class="card card-soul">
+        <div class="card-header custom-card-header">2. Edit layout</div>
+        <div class="card-body">
+          <p class="text-muted mb-2">Position Category, Text, and Phone labels on the template.</p>
+          <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}" class="btn btn-soul btn-sm rounded-3">
+            <i class="fa-solid fa-crosshairs me-1" aria-hidden="true"></i> Edit this Template Layout
+          </a>
+          {% if used_custom_background %}
+          <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}?use_temp_background=1" class="btn btn-outline-primary btn-sm rounded-3 ms-2">Use this background in Coordinate Lab</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card card-soul h-100">
+        <div class="card-header custom-card-header">Preview</div>
+        <div class="card-body d-flex align-items-center justify-content-center position-relative min-height-preview">
+          {% if preview_url %}
+            <img src="{{ preview_url }}" alt="Ad preview" class="img-fluid border rounded shadow-sm template-preview-img" id="templatePreviewImg">
+            <div class="position-absolute top-50 start-50 translate-middle text-muted template-preview-loading" id="templatePreviewLoading">
+              <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div>
+              <p class="mt-2 small mb-0">Generating image…</p>
+            </div>
+          {% else %}
+            <p class="text-muted mb-0">Select a template and click Generate to see the ad image. Optionally upload a custom background.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.min-height-preview { min-height: 220px; }
+.template-preview-loading { z-index: 1; }
+.template-preview-img { opacity: 0; transition: opacity 0.3s ease; }
+.template-preview-img.loaded { opacity: 1; }
+.template-preview-img.loaded ~ .template-preview-loading { display: none !important; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var previewImg = document.getElementById('templatePreviewImg');
+  var loading = document.getElementById('templatePreviewLoading');
+  if (previewImg) {
+    previewImg.addEventListener('load', function() { previewImg.classList.add('loaded'); });
+    previewImg.addEventListener('error', function() { if (loading) loading.innerHTML = '<p class="text-danger small mb-0">Failed to load preview</p>'; });
+    if (previewImg.complete && previewImg.naturalWidth) previewImg.classList.add('loaded');
+  }
+
+  var fileInput = document.getElementById('id_test_background');
+  var thumbWrap = document.getElementById('testBackgroundPreview');
+  var thumb = document.getElementById('testBackgroundThumb');
+  if (fileInput && thumbWrap && thumb) {
+    fileInput.addEventListener('change', function() {
+      var file = this.files && this.files[0];
+      if (file && file.type.indexOf('image/') === 0) {
+        var r = new FileReader();
+        r.onload = function() { thumb.src = r.result; thumbWrap.style.display = 'block'; };
+        r.readAsDataURL(file);
+      } else {
+        thumb.src = ''; thumbWrap.style.display = 'none';
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}
+

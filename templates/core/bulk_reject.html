@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Bulk reject — Iraniu{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'ad_list' %}">Requests</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Bulk reject</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+  Reject selected ads
+</h1>
+
+<p class="text-muted mb-3">One reason will be sent to all selected users.</p>
+
+<form method="post" action="{% url 'bulk_reject_page' %}" class="form-soul card-soul" style="max-width: 560px;">
+  {% csrf_token %}
+  {% for uid in ad_ids %}
+  <input type="hidden" name="ad_ids" value="{{ uid }}">
+  {% endfor %}
+  <input type="hidden" name="ids" value="{{ ad_ids|join:',' }}">
+  <div class="mb-3">
+    <label class="form-label" for="id_reason">Rejection reason (required)</label>
+    <textarea name="reason" id="id_reason" class="form-control" rows="4" required placeholder="Enter reason for rejection">{{ reason|default:'' }}</textarea>
+  </div>
+  {% if rejection_reasons %}
+  <div class="mb-3">
+    <label class="form-label small text-muted">Quick select</label>
+    <div class="d-flex flex-wrap gap-2">
+      {% for value, label in rejection_reasons %}
+      <button type="button" class="btn btn-outline-secondary btn-sm quick-reason" data-reason="{{ label }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="d-flex gap-2 flex-wrap">
+    <button type="submit" class="btn btn-hot">
+      <i class="fa-solid fa-xmark icon me-1" aria-hidden="true"></i>
+      Reject {{ ad_ids|length }} ad(s)
+    </button>
+    <a href="{% url 'ad_list' %}" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+
+{% if ads %}
+<div class="mt-4">
+  <h2 class="h6 text-muted mb-2">Selected ({{ ads|length }})</h2>
+  <ul class="list-unstyled small">
+    {% for ad in ads %}
+    <li class="mb-1"><span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display }}</span> {{ ad.content|truncatewords:12 }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var ta = document.getElementById('id_reason');
+  document.querySelectorAll('.quick-reason').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (ta) ta.value = this.getAttribute('data-reason');
+    });
+  });
+})();
+</script>
+{% endblock %}

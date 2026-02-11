@@ -121,6 +121,10 @@ MESSAGES = {
         "en": "✍️ Now send your ad text (one message).",
         "fa": "✍️ حالا متن آگهی را بفرستید (یک پیام).",
     },
+    "ad_content_validation_error": {
+        "en": "⚠️ Emojis, stickers, and GIFs are not allowed in ad messages. Please send a plain text description.",
+        "fa": "⚠️ استفاده از ایموجی، استیکر و گیف در متن آگهی مجاز نیست. لطفاً فقط متن ساده بفرستید.",
+    },
     "enter_ad_text_detailed": {
         "en": "✍️ **Write your ad — Category: {category_name}**\n\n"
         "Please send your ad in **one message**. We'll review it and publish if it meets our guidelines.\n\n"
@@ -180,12 +184,20 @@ MESSAGES = {
         "en": "📱 To create ads, we need to verify your phone number. Tap the button below to share it.",
         "fa": "📱 برای ثبت آگهی باید شماره تلفن شما تأیید شود. دکمه زیر را بزنید.",
     },
+    "ask_contact_use_button": {
+        "en": "⚠️ Please use the button below to share your phone number for verification.",
+        "fa": "⚠️ لطفاً برای تأیید شماره تلفن، از دکمه زیر استفاده کنید.",
+    },
+    "phone_number_saved": {
+        "en": "✅ Phone number saved.",
+        "fa": "✅ شماره تلفن ذخیره شد.",
+    },
     "contact_not_verified": {
         "en": "❌ The shared contact does not belong to your account. Please share your own phone number.",
         "fa": "❌ شماره به‌اشتراک‌گذاری‌شده متعلق به حساب شما نیست. لطفاً شماره خودتان را ارسال کنید.",
     },
     "share_contact_btn": {
-        "en": "📲 Share my phone number",
+        "en": "📱 Share Phone Number",
         "fa": "📲 اشتراک‌گذاری شماره من",
     },
     "contact_skip": {
@@ -285,6 +297,30 @@ MESSAGES = {
     "notification_needs_revision": {
         "en": "📝 Your ad in 📂 {category} needs revision.\n\nPlease edit and resubmit using the button below. Thank you for using Iraniu.",
         "fa": "📝 آگهی شما در دسته 📂 {category} نیاز به اصلاح دارد.\n\nلطفاً با دکمه زیر ویرایش و ارسال مجدد کنید. از اینکه از ایرانيو استفاده می‌کنید متشکریم.",
+    },
+    # ——— My Ads: View / Manage / Delete / Edit ———
+    "my_ads_btn_manage": {"en": "View/Manage", "fa": "مشاهده/مدیریت"},
+    "ad_detail_category": {"en": "📂 Category:", "fa": "📂 دسته:"},
+    "ad_detail_text": {"en": "📝 Text:", "fa": "📝 متن:"},
+    "ad_detail_phone": {"en": "📱 Phone:", "fa": "📱 تلفن:"},
+    "ad_detail_status": {"en": "Status:", "fa": "وضعیت:"},
+    "btn_edit_ad": {"en": "✏️ Edit", "fa": "✏️ ویرایش"},
+    "btn_delete_ad": {"en": "❌ Delete", "fa": "❌ حذف"},
+    "btn_back_to_list": {"en": "⬅️ Back to List", "fa": "⬅️ بازگشت به لیست"},
+    "delete_confirm_text": {
+        "en": "Are you sure you want to delete this ad?",
+        "fa": "آیا مطمئن هستید که می‌خواهید این آگهی را حذف کنید؟",
+    },
+    "delete_confirm_yes": {"en": "✅ Yes, Delete", "fa": "✅ بله، حذف شود"},
+    "delete_confirm_cancel": {"en": "🚫 Cancel", "fa": "🚫 انصراف"},
+    "ad_deleted": {"en": "✅ Ad deleted.", "fa": "✅ آگهی حذف شد."},
+    "ad_not_found": {
+        "en": "❌ This ad was not found or has already been deleted.",
+        "fa": "❌ این آگهی یافت نشد یا قبلاً حذف شده است.",
+    },
+    "edit_ad_link_msg": {
+        "en": "✏️ Edit this ad in your browser:\n{url}",
+        "fa": "✏️ این آگهی را در مرورگر ویرایش کنید:\n{url}",
     },
     # ——— Errors (generic) ———
     "error_generic": {
