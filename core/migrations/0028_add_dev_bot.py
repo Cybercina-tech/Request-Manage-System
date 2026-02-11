@@ -17,9 +17,7 @@ def add_dev_bot(apps, schema_editor):
         status="offline",
         mode="polling",
     )
-    bot.bot_token_encrypted = encrypt_token(
-        "8576459250:AAH61NFfBZMqzYJMBPZt3nx-24w53g8zXzM"
-    )
+    bot.bot_token_encrypted = encrypt_token("")
     bot.save()
 
 

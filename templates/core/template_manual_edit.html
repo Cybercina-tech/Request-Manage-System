@@ -1,443 +1,480 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Manual Coordinate Editor — {{ template.name }}{% endblock %}
+{% block title %}Manual Template Editor — {{ template.name }}{% endblock %}
 
 {% block breadcrumbs %}
 <nav aria-label="breadcrumb" class="mb-3">
   <ol class="breadcrumb breadcrumb-soul mb-0">
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="{% url 'template_tester' %}">Template Manager</a></li>
-    <li class="breadcrumb-item active" aria-current="page">Manual Coordinate Editor — {{ template.name }}</li>
+    <li class="breadcrumb-item active" aria-current="page">Manual Editor — {{ template.name }}</li>
   </ol>
 </nav>
 {% endblock %}
 
 {% block extra_css %}
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-.manual-editor-page {
+.manual-workspace {
   background: var(--bg-body);
-  padding: 1.5rem;
   border-radius: 12px;
 }
-.manual-editor-form-card {
+.manual-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 40%) minmax(0, 60%);
+  gap: 1rem;
+}
+.control-panel {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow-sm);
-  padding: 1.5rem;
-  max-height: calc(100vh - 200px);
-  overflow-y: auto;
-}
-.manual-editor-form-card h5 {
-  color: var(--text-primary);
-  font-weight: 600;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
-}
-.manual-editor-form-card .form-label {
-  color: var(--text-primary);
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-.manual-editor-form-card .form-control,
-.manual-editor-form-card input[type="color"] {
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-}
-.manual-editor-form-card .form-control:focus {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-  outline: none;
-}
-.preview-container {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - 210px);
+  overflow: auto;
   padding: 1rem;
+}
+.preview-panel {
   position: sticky;
   top: 1rem;
-}
-.preview-image-wrapper {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.preview-image-wrapper img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-.preview-marker {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid #dc2626;
-  background: rgba(220, 38, 38, 0.3);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  transition: all 0.2s ease;
-}
-.preview-marker.category { border-color: #7C4DFF; background: rgba(124, 77, 255, 0.3); }
-.preview-marker.description { border-color: #2196F3; background: rgba(33, 150, 243, 0.3); }
-.preview-marker.phone { border-color: #FFC107; background: rgba(255, 193, 7, 0.3); }
-.preview-label {
-  position: absolute;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff;
-  white-space: nowrap;
-  transform: translate(-50%, -100%);
-  margin-top: -4px;
-  pointer-events: none;
-}
-.preview-label.category { background: #7C4DFF; }
-.preview-label.description { background: #2196F3; }
-.preview-label.phone { background: #FFC107; color: #000; }
-.test-image-result {
-  margin-top: 1rem;
-  padding: 1rem;
+  align-self: start;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-.test-image-result img {
-  max-width: 100%;
-  border-radius: 4px;
-}
-/* Preview Content section — dual theme */
-.preview-content-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow-sm);
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
+  padding: 1rem;
 }
-.preview-content-card .form-label {
-  color: var(--text-primary);
-  font-weight: 500;
+.preview-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .75rem;
+  align-items: center;
+  margin-bottom: .8rem;
 }
-.preview-content-card .form-control,
-.preview-content-card textarea {
-  background: var(--bg-body);
+.preview-stage {
   border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: auto;
+  background: #0f172a;
+  max-height: 74vh;
+}
+#liveCanvas {
+  display: block;
+  max-width: none;
+}
+.layer-controls .accordion-item {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: .6rem;
+  background: var(--bg-card);
+}
+.layer-controls .accordion-button {
+  background: var(--bg-card);
   color: var(--text-primary);
+  font-weight: 600;
+}
+.layer-controls .accordion-button:not(.collapsed) {
+  color: var(--text-primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+.layer-controls .form-label {
+  color: var(--text-primary);
+  font-size: .85rem;
+  margin-bottom: .3rem;
+}
+.layer-controls .form-control,
+.layer-controls .form-select {
+  border-color: var(--border-color);
   border-radius: 6px;
 }
-.preview-content-card .form-control:focus,
-.preview-content-card textarea:focus {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-  outline: none;
+.input-step-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: .25rem;
 }
-/* Coordinate input warning when out of bounds */
-.coord-input-out-of-bounds {
-  border-color: #dc2626 !important;
-  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
+.step-btn {
+  width: 2rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-body);
+  color: var(--text-primary);
+  border-radius: 6px;
+  line-height: 1;
 }
-.theme-light .coord-input-out-of-bounds { border-color: #dc2626 !important; }
-/* Live canvas preview overlay — text overlays with RTL */
-.preview-canvas-wrapper {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-  line-height: 0;
+.coord-warn {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25) !important;
 }
-.preview-canvas-wrapper img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  vertical-align: top;
+.sticky-save-footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: .8rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: .75rem;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.1);
+  z-index: 9;
 }
-.preview-text-overlay {
-  position: absolute;
-  font-family: 'Vazirmatn', 'Vazir', 'Tahoma', sans-serif;
-  direction: rtl;
-  text-align: right;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  pointer-events: none;
-  line-height: 1.4;
+.status-box {
+  margin-top: .75rem;
 }
-.preview-text-overlay.desc-overlay {
-  border: 1px dashed rgba(59, 130, 246, 0.5);
-  box-sizing: border-box;
+@media (max-width: 1100px) {
+  .manual-grid { grid-template-columns: 1fr; }
+  .preview-panel { position: static; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="manual-editor-page">
-  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+<section class="manual-workspace">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
     <div>
-      <h1 class="mb-1" style="color: var(--text-primary); font-weight: 600;">Manual Coordinate Editor</h1>
-      <p class="text-muted mb-0">{{ template.name }} — Pixel-perfect control with numeric inputs</p>
+      <h1 class="mb-1" style="color: var(--text-primary); font-weight: 600;">High-Precision Manual Editor</h1>
+      <p class="text-muted mb-0">{{ template.name }} — Numeric control with zero-latency live canvas preview.</p>
     </div>
-    <a href="{% url 'template_tester' %}" class="btn btn-secondary">Back to Template Manager</a>
+    <a href="{% url 'template_tester' %}" class="btn btn-outline-secondary">Back to Template Manager</a>
   </div>
 
-  <div id="saveStatus" class="alert alert-success d-none mb-3" role="alert"></div>
-  <div id="errorStatus" class="alert alert-danger d-none mb-3" role="alert"></div>
+  <div class="manual-grid">
+    <form id="manualEditorForm" class="control-panel">
+      {% csrf_token %}
+      <input type="hidden" name="action" id="formAction" value="save">
+      <input type="hidden" name="preview_category" id="preview_category_hidden" value="">
+      <input type="hidden" name="preview_description" id="preview_description_hidden" value="">
+      <input type="hidden" name="preview_phone" id="preview_phone_hidden" value="">
+      <input type="hidden" name="preview_price" id="preview_price_hidden" value="">
 
-  <div class="row g-4">
-    <!-- Left: Control Panel (40% width) -->
-    <div class="col-lg-5">
-      <!-- Preview Content (test data only — not saved) -->
-      <div class="preview-content-card">
-        <h5 class="mb-3" style="color: var(--text-primary); font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">Preview Content</h5>
-        <p class="small text-muted mb-3">Test data for live preview. These values are not saved.</p>
-        <div class="mb-3">
-          <label class="form-label" for="testCategory">Test Category</label>
-          <input type="text" class="form-control" id="testCategory" value="شغل" placeholder="شغل" maxlength="200" data-preview-content>
-        </div>
-        <div class="mb-3">
-          <label class="form-label" for="testDescription">Test Description</label>
-          <textarea class="form-control" id="testDescription" rows="3" placeholder="متن آزمایشی" data-preview-content>این یک متن آزمایشی برای بررسی چیدمان آگهی است.</textarea>
-        </div>
-        <div class="mb-0">
-          <label class="form-label" for="testPhone">Test Phone</label>
-          <input type="text" class="form-control" id="testPhone" value="09123456789" placeholder="09123456789" maxlength="60" data-preview-content>
+      <div class="mb-3">
+        <h5 style="color: var(--text-primary); font-weight: 600;">Preview Content</h5>
+        <p class="text-muted small mb-2">This is test-only content for live preview; it does not overwrite real ads.</p>
+        <div class="row g-2">
+          <div class="col-12">
+            <label class="form-label">Category (Farsi)</label>
+            <input type="text" id="preview_category" class="form-control preview-content-input" value="فروش ویژه" dir="rtl">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Description (Farsi)</label>
+            <textarea id="preview_description" class="form-control preview-content-input" rows="3" dir="rtl">این یک متن نمونه برای پیش‌نمایش زنده است. موقعیت و اندازه را به‌صورت عددی تنظیم کنید.</textarea>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Phone</label>
+            <input type="text" id="preview_phone" class="form-control preview-content-input" value="09123456789">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Price</label>
+            <input type="text" id="preview_price" class="form-control preview-content-input" value="۱۲,۰۰۰,۰۰۰ تومان" dir="rtl">
+          </div>
         </div>
       </div>
 
-      <form id="manualEditorForm" class="manual-editor-form-card">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="save">
-        
-        <!-- Category Settings -->
-        <div class="mb-4">
-          <h5>Category Settings</h5>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">X Position</label>
-              <input type="number" class="form-control" name="cat_x" id="cat_x" value="{{ cat.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="category" data-coord="x" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Y Position</label>
-              <input type="number" class="form-control" name="cat_y" id="cat_y" value="{{ cat.y|default:50 }}" min="0" max="{{ img_height }}" data-preview="category" data-coord="y" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Font Size</label>
-              <input type="number" class="form-control" name="cat_size" id="cat_size" value="{{ cat.size|default:48 }}" min="8" max="200" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Color</label>
-              <input type="color" class="form-control form-control-color" name="cat_color" id="cat_color" value="{{ cat.color|default:'#FFFFFF' }}" title="Category text color">
+      <div class="mb-3 d-flex flex-wrap align-items-end gap-2">
+        <div>
+          <label class="form-label">Apply Source Layer to All</label>
+          <select class="form-select" id="applySourceLayer">
+            <option value="cat">Category</option>
+            <option value="desc">Description</option>
+            <option value="phone">Phone</option>
+            <option value="price">Price</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-outline-primary" id="btnApplyToAll">Apply to All</button>
+        <button type="button" class="btn btn-outline-warning" id="btnResetDefaults">Reset to Defaults</button>
+      </div>
+
+      <div class="layer-controls accordion" id="layerAccordion">
+        {% with c=cat d=desc p=phone_coord pr=price_coord %}
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#layerCategory">Category Layer</button>
+          </h2>
+          <div id="layerCategory" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+              {% include "core/partials/layer_controls.html" with prefix="cat" title="Category" x=c.x|default:0 y=c.y|default:0 size=c.size|default:48 color=c.color|default:"#FFFFFF" max_width=c.max_width|default:700 align=c.align|default:"right" %}
             </div>
           </div>
         </div>
 
-        <!-- Description/Text Settings -->
-        <div class="mb-4">
-          <h5>Description / Text Settings</h5>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">X Position</label>
-              <input type="number" class="form-control" name="desc_x" id="desc_x" value="{{ desc.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="description" data-coord="x" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Y Position</label>
-              <input type="number" class="form-control" name="desc_y" id="desc_y" value="{{ desc.y|default:140 }}" min="0" max="{{ img_height }}" data-preview="description" data-coord="y" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Font Size</label>
-              <input type="number" class="form-control" name="desc_size" id="desc_size" value="{{ desc.size|default:32 }}" min="8" max="200" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Max Width</label>
-              <input type="number" class="form-control" name="desc_max_width" id="desc_max_width" value="{{ desc.max_width|default:800 }}" min="100" max="{{ img_width }}" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Color</label>
-              <input type="color" class="form-control form-control-color" name="desc_color" id="desc_color" value="{{ desc.color|default:'#FFFFFF' }}" title="Description text color">
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#layerDescription">Description Layer</button>
+          </h2>
+          <div id="layerDescription" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              {% include "core/partials/layer_controls.html" with prefix="desc" title="Description" x=d.x|default:0 y=d.y|default:0 size=d.size|default:32 color=d.color|default:"#FFFFFF" max_width=d.max_width|default:800 align=d.align|default:"right" %}
             </div>
           </div>
         </div>
 
-        <!-- Phone Settings -->
-        <div class="mb-4">
-          <h5>Phone Settings</h5>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">X Position</label>
-              <input type="number" class="form-control" name="phone_x" id="phone_x" value="{{ phone_coord.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="phone" data-coord="x" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Y Position</label>
-              <input type="number" class="form-control" name="phone_y" id="phone_y" value="{{ phone_coord.y|default:420 }}" min="0" max="{{ img_height }}" data-preview="phone" data-coord="y" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Font Size</label>
-              <input type="number" class="form-control" name="phone_size" id="phone_size" value="{{ phone_coord.size|default:28 }}" min="8" max="200" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Color</label>
-              <input type="color" class="form-control form-control-color" name="phone_color" id="phone_color" value="{{ phone_coord.color|default:'#FFFF00' }}" title="Phone text color">
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#layerPhone">Phone Layer</button>
+          </h2>
+          <div id="layerPhone" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              {% include "core/partials/layer_controls.html" with prefix="phone" title="Phone" x=p.x|default:0 y=p.y|default:0 size=p.size|default:28 color=p.color|default:"#FFFF00" max_width=p.max_width|default:550 align=p.align|default:"right" %}
             </div>
           </div>
         </div>
 
-        <div class="d-flex flex-wrap gap-2 mt-4">
-          <button type="submit" class="btn btn-primary" id="btnSave" style="background: var(--primary-color); border-color: var(--primary-color); color: #fff;">
-            <i class="fa-solid fa-save me-1"></i> Save Coordinates
-          </button>
-          <button type="button" class="btn btn-secondary" id="btnSaveAndTest" style="background: var(--border-color); color: var(--text-primary); border-color: var(--border-color);">
-            <i class="fa-solid fa-image me-1"></i> Generate Test
-          </button>
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#layerPrice">Price Layer</button>
+          </h2>
+          <div id="layerPrice" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              {% include "core/partials/layer_controls.html" with prefix="price" title="Price" x=pr.x|default:0 y=pr.y|default:0 size=pr.size|default:30 color=pr.color|default:"#00E5FF" max_width=pr.max_width|default:550 align=pr.align|default:"right" %}
+            </div>
+          </div>
         </div>
-      </form>
-    </div>
+        {% endwith %}
+      </div>
 
-    <!-- Right: Sticky Preview (60% width) -->
-    <div class="col-lg-7">
-      <div class="preview-container">
-        <h5 class="mb-3" style="color: var(--text-primary); font-weight: 600;">Live Preview</h5>
+      <div class="sticky-save-footer">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
+          <span class="small text-muted">Tip: use <code>Shift + Arrow</code> in numeric inputs for 10px jumps.</span>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary" id="btnSave">Save Changes</button>
+            <button type="button" class="btn btn-outline-secondary" id="btnSaveTest">Save + Test Render</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-box">
+        <div id="saveStatus" class="alert alert-success d-none mb-0"></div>
+        <div id="errorStatus" class="alert alert-danger d-none mb-0"></div>
+      </div>
+    </form>
+
+    <aside class="preview-panel">
+      <div class="preview-toolbar">
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input" type="checkbox" id="gridToggle">
+          <label class="form-check-label" for="gridToggle">Grid Overlay (100px)</label>
+        </div>
+        <div style="min-width: 180px;">
+          <label class="form-label mb-1">Zoom <span id="zoomLabel">100%</span></label>
+          <input type="range" class="form-range" id="zoomRange" min="50" max="200" step="10" value="100">
+        </div>
+      </div>
+
+      <div class="preview-stage">
         {% if background_url %}
-        <div class="preview-canvas-wrapper" id="previewWrapper">
-          <img id="previewImage" src="{{ background_url }}" alt="Template background" crossorigin="anonymous">
-          <div class="preview-text-overlay" id="overlayCategory" dir="rtl" style="left: {{ cat.x|default:50 }}px; top: {{ cat.y|default:50 }}px; font-size: {{ cat.size|default:48 }}px; color: {{ cat.color|default:'#FFFFFF' }};"></div>
-          <div class="preview-text-overlay desc-overlay" id="overlayDescription" dir="rtl" style="left: {{ desc.x|default:50 }}px; top: {{ desc.y|default:140 }}px; font-size: {{ desc.size|default:32 }}px; color: {{ desc.color|default:'#FFFFFF' }}; max-width: {{ desc.max_width|default:800 }}px;"></div>
-          <div class="preview-text-overlay" id="overlayPhone" dir="rtl" style="left: {{ phone_coord.x|default:50 }}px; top: {{ phone_coord.y|default:420 }}px; font-size: {{ phone_coord.size|default:28 }}px; color: {{ phone_coord.color|default:'#FFFF00' }};"></div>
-        </div>
-        <p class="small text-muted mt-2 mb-0">Image size: {{ img_width }} × {{ img_height }}px. Preview shows test content at coordinates (RTL, Persian font).</p>
+        <canvas id="liveCanvas" width="{{ img_width }}" height="{{ img_height }}"></canvas>
         {% else %}
-        <p class="text-muted">No background image available for this template.</p>
+        <p class="text-muted p-3 mb-0">No background image is available for this template.</p>
         {% endif %}
-        <div id="testImageResult" class="test-image-result d-none">
-          <h6 class="mb-2" style="color: var(--text-primary);">Generated Test Image</h6>
-          <img id="testImage" src="" alt="Test image" style="max-width: 100%;">
-        </div>
       </div>
-    </div>
+      <p class="small text-muted mt-2 mb-0">Canvas: {{ img_width }} × {{ img_height }} px</p>
+
+      <div id="testImageResult" class="mt-3 d-none">
+        <h6 style="color: var(--text-primary);">Server Test Image</h6>
+        <img id="testImage" alt="Test image" style="max-width: 100%; border-radius: 8px; border: 1px solid var(--border-color);">
+      </div>
+    </aside>
   </div>
-</div>
+</section>
+
+{% if background_url %}
+<img id="bgSource" src="{{ background_url }}" alt="Background source" style="display:none;">
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function() {
   var form = document.getElementById('manualEditorForm');
-  var previewWrapper = document.getElementById('previewWrapper');
-  var previewImg = document.getElementById('previewImage');
-  var imgWidth = {{ img_width }};
-  var imgHeight = {{ img_height }};
-  var csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+  var canvas = document.getElementById('liveCanvas');
+  var bgImg = document.getElementById('bgSource');
+  var csrf = document.querySelector('#manualEditorForm [name=csrfmiddlewaretoken]') ? document.querySelector('#manualEditorForm [name=csrfmiddlewaretoken]').value : '';
+  var imgW = {{ img_width }};
+  var imgH = {{ img_height }};
+  var rafId = null;
 
-  var overlayIds = { cat: 'overlayCategory', desc: 'overlayDescription', phone: 'overlayPhone' };
-  var coordInputPrefixes = { category: 'cat', description: 'desc', phone: 'phone' };
+  var defaults = {{ default_coords|safe }};
 
-  function getNum(id, fallback) {
-    var el = document.getElementById(id);
-    return el ? (parseInt(el.value, 10) || fallback) : fallback;
+  function byId(id) { return document.getElementById(id); }
+  function getLayer(prefix) {
+    return {
+      x: parseFloat((byId(prefix + '_x') || {}).value || 0),
+      y: parseFloat((byId(prefix + '_y') || {}).value || 0),
+      size: parseFloat((byId(prefix + '_size') || {}).value || 24),
+      color: ((byId(prefix + '_color_hex') || {}).value || '#FFFFFF').trim(),
+      maxWidth: parseFloat((byId(prefix + '_max_width') || {}).value || imgW),
+      align: ((byId(prefix + '_align') || {}).value || 'right').toLowerCase()
+    };
   }
-  function getColor(id, fallback) {
-    var el = document.getElementById(id);
-    return (el && el.value) ? el.value : fallback;
+  function setLayer(prefix, cfg) {
+    if (byId(prefix + '_x')) byId(prefix + '_x').value = cfg.x;
+    if (byId(prefix + '_y')) byId(prefix + '_y').value = cfg.y;
+    if (byId(prefix + '_size')) byId(prefix + '_size').value = cfg.size;
+    if (byId(prefix + '_color_hex')) byId(prefix + '_color_hex').value = cfg.color;
+    if (byId(prefix + '_color_picker')) byId(prefix + '_color_picker').value = cfg.color;
+    if (byId(prefix + '_max_width')) byId(prefix + '_max_width').value = cfg.maxWidth;
+    if (byId(prefix + '_align')) byId(prefix + '_align').value = cfg.align;
   }
 
-  function updateLivePreview() {
-    if (!previewImg || !previewWrapper || previewImg.offsetWidth <= 0) return;
-    var scale = previewImg.offsetWidth / imgWidth;
-
-    var catX = getNum('cat_x', 50), catY = getNum('cat_y', 50), catSize = getNum('cat_size', 48), catColor = getColor('cat_color', '#FFFFFF');
-    var descX = getNum('desc_x', 50), descY = getNum('desc_y', 140), descSize = getNum('desc_size', 32), descMaxW = getNum('desc_max_width', 800), descColor = getColor('desc_color', '#FFFFFF');
-    var phoneX = getNum('phone_x', 50), phoneY = getNum('phone_y', 420), phoneSize = getNum('phone_size', 28), phoneColor = getColor('phone_color', '#FFFF00');
-
-    var testCat = (document.getElementById('testCategory') && document.getElementById('testCategory').value) || 'شغل';
-    var testDesc = (document.getElementById('testDescription') && document.getElementById('testDescription').value) || '';
-    var testPhone = (document.getElementById('testPhone') && document.getElementById('testPhone').value) || '09123456789';
-
-    function styleOverlay(prefix, x, y, size, color, text, maxWidthPx) {
-      var id = overlayIds[prefix];
-      var el = document.getElementById(id);
-      if (!el) return;
-      el.style.left = (x * scale) + 'px';
-      el.style.top = (y * scale) + 'px';
-      el.style.fontSize = (size * scale) + 'px';
-      el.style.color = color;
-      el.textContent = text || '';
-      if (maxWidthPx != null) el.style.maxWidth = (maxWidthPx * scale) + 'px';
-    }
-
-    styleOverlay('cat', catX, catY, catSize, catColor, testCat, null);
-    styleOverlay('desc', descX, descY, descSize, descColor, testDesc, descMaxW);
-    styleOverlay('phone', phoneX, phoneY, phoneSize, phoneColor, testPhone, null);
-
-    // Out-of-bounds: compare overlay rects to image rect (display coordinates)
-    var imgRect = previewImg.getBoundingClientRect();
-    function setOutOfBounds(prefix, isOut) {
-      var p = coordInputPrefixes[prefix];
-      var xIn = document.getElementById(p + '_x'), yIn = document.getElementById(p + '_y');
-      var sizeIn = prefix === 'desc' ? document.getElementById('desc_max_width') : null;
-      [xIn, yIn].filter(Boolean).forEach(function(inp) {
-        if (inp) inp.classList.toggle('coord-input-out-of-bounds', !!isOut);
+  function wrapRtlText(ctx, text, maxWidth, fontPx) {
+    if (!text) return [];
+    var lines = [];
+    var paragraphs = String(text).split('\n');
+    paragraphs.forEach(function(par) {
+      if (!par.trim()) { lines.push(''); return; }
+      var words = par.split(/\s+/);
+      var current = '';
+      words.forEach(function(w) {
+        var candidate = current ? (current + ' ' + w) : w;
+        var m = ctx.measureText(candidate).width;
+        if (m <= maxWidth || !current) {
+          current = candidate;
+        } else {
+          lines.push(current);
+          current = w;
+        }
       });
-      if (sizeIn) sizeIn.classList.toggle('coord-input-out-of-bounds', !!isOut);
+      if (current) lines.push(current);
+    });
+    return lines;
+  }
+
+  function drawLayer(ctx, cfg, text, isMultiLine) {
+    if (!text) return;
+    var safeSize = Number.isFinite(cfg.size) ? Math.max(1, cfg.size) : 24;
+    var safeX = Number.isFinite(cfg.x) ? cfg.x : 0;
+    var safeY = Number.isFinite(cfg.y) ? cfg.y : 0;
+    var safeMax = Number.isFinite(cfg.maxWidth) ? Math.max(1, cfg.maxWidth) : imgW;
+    var align = (cfg.align === 'left' || cfg.align === 'center' || cfg.align === 'right') ? cfg.align : 'right';
+    var color = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(cfg.color || '') ? cfg.color : '#FFFFFF';
+
+    ctx.font = safeSize + 'px VazirFallback, Vazirmatn, Vazir, Samim, Tahoma, sans-serif';
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'top';
+    ctx.direction = 'rtl';
+    ctx.textAlign = align === 'center' ? 'center' : (align === 'left' ? 'left' : 'right');
+
+    if (!isMultiLine) {
+      var anchorX = align === 'center' ? (safeX + safeMax / 2) : (align === 'left' ? (safeX + safeMax) : safeX);
+      ctx.fillText(text, anchorX, safeY, safeMax);
+      return;
     }
-    function checkOverlay(id) {
-      var ov = document.getElementById(id);
-      if (!ov || !ov.textContent.trim()) return false;
-      var r = ov.getBoundingClientRect();
-      return r.right > imgRect.right || r.left < imgRect.left || r.bottom > imgRect.bottom || r.top < imgRect.top;
+
+    var lines = wrapRtlText(ctx, text, safeMax, safeSize);
+    var lineHeight = Math.round(safeSize * 1.35);
+    var y = safeY;
+    for (var i = 0; i < lines.length; i++) {
+      var anchor = align === 'center' ? (safeX + safeMax / 2) : (align === 'left' ? (safeX + safeMax) : safeX);
+      ctx.fillText(lines[i], anchor, y, safeMax);
+      y += lineHeight;
     }
-    setOutOfBounds('category', checkOverlay('overlayCategory'));
-    setOutOfBounds('description', checkOverlay('overlayDescription'));
-    setOutOfBounds('phone', checkOverlay('overlayPhone'));
-    // Re-check out-of-bounds after layout (overlay size may have changed)
-    requestAnimationFrame(function() {
-      setOutOfBounds('category', checkOverlay('overlayCategory'));
-      setOutOfBounds('description', checkOverlay('overlayDescription'));
-      setOutOfBounds('phone', checkOverlay('overlayPhone'));
+  }
+
+  function applyWarnings() {
+    var layers = ['cat', 'desc', 'phone', 'price'];
+    layers.forEach(function(prefix) {
+      var l = getLayer(prefix);
+      var out = l.x < 0 || l.y < 0 || l.x > imgW || l.y > imgH;
+      ['x', 'y', 'max_width'].forEach(function(field) {
+        var input = byId(prefix + '_' + field);
+        if (input) input.classList.toggle('coord-warn', out);
+      });
     });
   }
 
-  function attachPreviewListeners() {
-    var inputs = form.querySelectorAll('input[type="number"], input[type="color"]');
-    inputs.forEach(function(inp) { inp.addEventListener('input', updateLivePreview); inp.addEventListener('change', updateLivePreview); });
-    document.querySelectorAll('[data-preview-content]').forEach(function(inp) {
-      inp.addEventListener('input', updateLivePreview);
-      inp.addEventListener('change', updateLivePreview);
+  function renderCanvas() {
+    if (!canvas || !bgImg) return;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bgImg, 0, 0, imgW, imgH);
+
+    if (byId('gridToggle') && byId('gridToggle').checked) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1;
+      for (var x = 100; x < imgW; x += 100) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, imgH); ctx.stroke();
+      }
+      for (var y = 100; y < imgH; y += 100) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(imgW, y); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    drawLayer(ctx, getLayer('cat'), (byId('preview_category') || {}).value || '', false);
+    drawLayer(ctx, getLayer('desc'), (byId('preview_description') || {}).value || '', true);
+    drawLayer(ctx, getLayer('phone'), (byId('preview_phone') || {}).value || '', false);
+    drawLayer(ctx, getLayer('price'), (byId('preview_price') || {}).value || '', false);
+
+    applyWarnings();
+  }
+
+  function queueRender() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(renderCanvas);
+  }
+
+  function syncPreviewHiddenFields() {
+    if (byId('preview_category_hidden')) byId('preview_category_hidden').value = (byId('preview_category') || {}).value || '';
+    if (byId('preview_description_hidden')) byId('preview_description_hidden').value = (byId('preview_description') || {}).value || '';
+    if (byId('preview_phone_hidden')) byId('preview_phone_hidden').value = (byId('preview_phone') || {}).value || '';
+    if (byId('preview_price_hidden')) byId('preview_price_hidden').value = (byId('preview_price') || {}).value || '';
+  }
+
+  function bindColorSync(prefix) {
+    var hex = byId(prefix + '_color_hex');
+    var picker = byId(prefix + '_color_picker');
+    if (!hex || !picker) return;
+    hex.addEventListener('input', function() {
+      if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(hex.value)) picker.value = hex.value;
+      queueRender();
+    });
+    picker.addEventListener('input', function() {
+      hex.value = picker.value;
+      queueRender();
     });
   }
 
-  if (previewImg) {
-    if (previewImg.complete) {
-      updateLivePreview();
-    } else {
-      previewImg.addEventListener('load', updateLivePreview);
-    }
-    window.addEventListener('resize', updateLivePreview);
+  function bindStepButtons() {
+    document.querySelectorAll('.step-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var target = byId(btn.getAttribute('data-target'));
+        var step = parseInt(btn.getAttribute('data-step') || '1', 10);
+        if (!target) return;
+        var v = parseInt(target.value || '0', 10);
+        if (btn.getAttribute('data-dir') === 'down') v -= step; else v += step;
+        target.value = v;
+        queueRender();
+      });
+    });
   }
-  attachPreviewListeners();
 
-  function showStatus(type, message) {
-    var el = document.getElementById(type === 'success' ? 'saveStatus' : 'errorStatus');
-    var other = document.getElementById(type === 'success' ? 'errorStatus' : 'saveStatus');
-    if (el) {
-      el.textContent = message;
-      el.classList.remove('d-none');
-      setTimeout(function() { el.classList.add('d-none'); }, 5000);
-    }
-    if (other) other.classList.add('d-none');
+  function bindKeyboardJump() {
+    document.querySelectorAll('input[type="number"]').forEach(function(inp) {
+      inp.addEventListener('keydown', function(e) {
+        if (!e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+        e.preventDefault();
+        var v = parseInt(inp.value || '0', 10);
+        inp.value = v + (e.key === 'ArrowUp' ? 10 : -10);
+        queueRender();
+      });
+    });
   }
-  
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var btn = document.getElementById('btnSave');
-    var origText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
-    
+
+  function showStatus(type, msg) {
+    var ok = byId('saveStatus');
+    var err = byId('errorStatus');
+    if (ok) ok.classList.add('d-none');
+    if (err) err.classList.add('d-none');
+    var el = type === 'success' ? ok : err;
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('d-none');
+  }
+
+  function submitForm(action) {
+    if (!form) return;
+    byId('formAction').value = action;
+    syncPreviewHiddenFields();
     var fd = new FormData(form);
     fetch('{% url "template_manual_edit" template.pk %}', {
       method: 'POST',
@@ -446,38 +483,92 @@
     })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        btn.disabled = false;
-        btn.innerHTML = origText;
         if (data.status === 'success') {
-          showStatus('success', data.message);
-          if (data.test_image_url) {
-            var resultDiv = document.getElementById('testImageResult');
-            var testImg = document.getElementById('testImage');
-            if (resultDiv && testImg) {
-              testImg.src = data.test_image_url;
-              resultDiv.classList.remove('d-none');
-            }
+          showStatus('success', data.message || 'Saved.');
+          if (data.test_image_url && byId('testImage')) {
+            byId('testImage').src = data.test_image_url;
+            if (byId('testImageResult')) byId('testImageResult').classList.remove('d-none');
           }
         } else {
-          showStatus('error', 'Error: ' + (data.errors ? data.errors.join(', ') : data.message || 'Unknown error'));
+          showStatus('error', (data.errors && data.errors.join(', ')) || data.message || 'Save failed.');
         }
       })
-      .catch(function(err) {
-        btn.disabled = false;
-        btn.innerHTML = origText;
-        showStatus('error', 'Request failed: ' + (err.message || 'Network error'));
+      .catch(function() { showStatus('error', 'Request failed.'); });
+  }
+
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      submitForm('save');
+    });
+  }
+  if (byId('btnSaveTest')) byId('btnSaveTest').addEventListener('click', function() { submitForm('save_test'); });
+
+  if (byId('btnApplyToAll')) {
+    byId('btnApplyToAll').addEventListener('click', function() {
+      var src = (byId('applySourceLayer') || {}).value || 'cat';
+      var cfg = getLayer(src);
+      ['cat', 'desc', 'phone', 'price'].forEach(function(prefix) {
+        if (prefix === src) return;
+        setLayer(prefix, cfg);
       });
+      queueRender();
+    });
+  }
+
+  if (byId('btnResetDefaults')) {
+    byId('btnResetDefaults').addEventListener('click', function() {
+      setLayer('cat', {
+        x: defaults.category.x || 0, y: defaults.category.y || 0, size: defaults.category.size || 48,
+        color: defaults.category.color || '#FFFFFF', maxWidth: defaults.category.max_width || 700, align: defaults.category.align || 'right'
+      });
+      setLayer('desc', {
+        x: defaults.description.x || 0, y: defaults.description.y || 0, size: defaults.description.size || 32,
+        color: defaults.description.color || '#FFFFFF', maxWidth: defaults.description.max_width || 800, align: defaults.description.align || 'right'
+      });
+      setLayer('phone', {
+        x: defaults.phone.x || 0, y: defaults.phone.y || 0, size: defaults.phone.size || 28,
+        color: defaults.phone.color || '#FFFF00', maxWidth: defaults.phone.max_width || 550, align: defaults.phone.align || 'right'
+      });
+      setLayer('price', {
+        x: defaults.price.x || 0, y: defaults.price.y || 0, size: defaults.price.size || 30,
+        color: defaults.price.color || '#00E5FF', maxWidth: defaults.price.max_width || 550, align: defaults.price.align || 'right'
+      });
+      queueRender();
+    });
+  }
+
+  if (byId('zoomRange') && canvas) {
+    byId('zoomRange').addEventListener('input', function() {
+      var zoom = parseInt(byId('zoomRange').value || '100', 10);
+      canvas.style.width = Math.round((imgW * zoom) / 100) + 'px';
+      canvas.style.height = Math.round((imgH * zoom) / 100) + 'px';
+      if (byId('zoomLabel')) byId('zoomLabel').textContent = zoom + '%';
+      queueRender();
+    });
+  }
+
+  ['cat', 'desc', 'phone', 'price'].forEach(bindColorSync);
+  bindStepButtons();
+  bindKeyboardJump();
+
+  document.querySelectorAll('input, select, textarea').forEach(function(el) {
+    if (el.id === 'formAction') return;
+    el.addEventListener('input', function() { syncPreviewHiddenFields(); queueRender(); });
+    el.addEventListener('change', function() { syncPreviewHiddenFields(); queueRender(); });
   });
-  
-  document.getElementById('btnSaveAndTest').addEventListener('click', function() {
-    var checkbox = document.createElement('input');
-    checkbox.type = 'hidden';
-    checkbox.name = 'generate_test';
-    checkbox.value = 'on';
-    form.appendChild(checkbox);
-    form.dispatchEvent(new Event('submit'));
-    form.removeChild(checkbox);
-  });
+
+  if (bgImg) {
+    if (bgImg.complete) {
+      syncPreviewHiddenFields();
+      queueRender();
+    } else {
+      bgImg.addEventListener('load', function() {
+        syncPreviewHiddenFields();
+        queueRender();
+      });
+    }
+  }
 })();
 </script>
 {% endblock %}

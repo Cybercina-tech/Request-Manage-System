@@ -6,12 +6,13 @@ Iraniu — Django signals.
 """
 
 import logging
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 
-from core.models import AdRequest, AdminProfile, SiteConfiguration
+from core.models import AdRequest, AdminProfile, SiteConfiguration, TelegramBot, TelegramChannel
 from core.services.admin_notifications import send_admin_notification
 from core.bot_handler import send_message_to_chat
+from core.services.activity_log import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -99,3 +100,51 @@ def on_ad_request_created(sender, instance, created, **kwargs):
         send_admin_notification(request_details)
     except Exception as e:
         logger.exception("on_ad_request_created: failed to send admin notification: %s", e)
+
+
+@receiver(post_save, sender=SiteConfiguration)
+def on_site_config_saved(sender, instance, created, **kwargs):
+    """Audit SiteConfiguration changes."""
+    log_activity(
+        action="Created site configuration" if created else "Updated site configuration",
+        object_type="SiteConfiguration",
+        object_repr=f"pk={instance.pk}",
+    )
+
+
+@receiver(post_save, sender=TelegramBot)
+def on_bot_saved(sender, instance, created, **kwargs):
+    """Audit Telegram bot changes."""
+    log_activity(
+        action="Created Telegram bot" if created else "Updated Telegram bot",
+        object_type="TelegramBot",
+        object_repr=f"{instance.name} (@{instance.username or '?'})",
+    )
+
+
+@receiver(post_save, sender=TelegramChannel)
+def on_channel_saved(sender, instance, created, **kwargs):
+    """Audit Telegram channel changes."""
+    log_activity(
+        action="Created Telegram channel" if created else "Updated Telegram channel",
+        object_type="TelegramChannel",
+        object_repr=f"{instance.title} ({instance.channel_id})",
+    )
+
+
+@receiver(post_delete, sender=TelegramBot)
+def on_bot_deleted(sender, instance, **kwargs):
+    log_activity(
+        action="Deleted Telegram bot",
+        object_type="TelegramBot",
+        object_repr=f"{instance.name} (@{instance.username or '?'})",
+    )
+
+
+@receiver(post_delete, sender=TelegramChannel)
+def on_channel_deleted(sender, instance, **kwargs):
+    log_activity(
+        action="Deleted Telegram channel",
+        object_type="TelegramChannel",
+        object_repr=f"{instance.title} ({instance.channel_id})",
+    )

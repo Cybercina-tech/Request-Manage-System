@@ -449,9 +449,9 @@ Templates support placeholders: `{ad_id}`, `{reason}`. Export/Import are JSON (n
 ## Security
 
 - **Staff-only:** Dashboard, Requests, Detail, Settings, and all approve/reject/pulse/export/import endpoints use `@staff_member_required`.
-- **CSRF:** All form and AJAX requests from the site use CSRF token. Submit API is `@csrf_exempt` for external/Telegram callers; in production, protect by firewall or additional auth if needed.
+- **CSRF:** Browser/staff endpoints use CSRF protection. Only machine-to-machine endpoints are exempt (`/api/submit/`, Telegram webhook routes, `/api/v1/submit/` with `X-API-KEY`).
 - **Secrets:** Stored in DB (SiteConfiguration). Do not commit real keys; use environment variables or secret management in production.
-- **DEBUG / ALLOWED_HOSTS:** Controlled via env: `DEBUG`, `ALLOWED_HOSTS`. `SECRET_KEY` via `DJANGO_SECRET_KEY`.
+- **Environment config:** Use `.env` (see `.env.example`) with `DJANGO_DEBUG`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, and security flags.
 - **Project settings:** Set `DJANGO_SETTINGS_MODULE=iraniu.settings` in `.env` or your environment when using runserver, WSGI, or management commands (e.g. in production or CI).
 
 ---

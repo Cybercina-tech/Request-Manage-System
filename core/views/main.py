@@ -8,14 +8,17 @@ import signal
 import subprocess
 import sys
 import uuid
+import csv
 from urllib.parse import quote
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
+from datetime import datetime
 from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, get_object_or_404, redirect
@@ -23,6 +26,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.core.paginator import Paginator
+from django.core.exceptions import ValidationError
 
 from core.models import (
     AdRequest,
@@ -30,13 +34,16 @@ from core.models import (
     AdminProfile,
     Category,
     SiteConfiguration,
+    SystemStatus,
     TelegramBot,
     TelegramChannel,
     TelegramUser,
     InstagramConfiguration,
     ApiClient,
     DeliveryLog,
+    Notification,
     ScheduledInstagramPost,
+    ActivityLog,
     REJECTION_REASONS,
     REJECTION_REASONS_DETAIL,
 )
@@ -50,15 +57,116 @@ from core.services import (
     set_webhook,
     delete_webhook,
 )
+from core.services.instagram import validate_instagram_token
+from core.services.telegram_client import get_me as telegram_get_me
 from core.services.dashboard import get_dashboard_context, get_pulse_data
 from core.services.ad_actions import approve_one_ad, reject_one_ad, request_revision_one_ad
+from core.services.activity_log import log_activity
 from core.view_utils import get_request_payload
-from core.forms import AdTemplateCreateForm, TemplateTesterForm, ChannelForm
+from core.forms import (
+    AdTemplateCreateForm,
+    ChannelForm,
+    DesignDefaultsForm,
+    InstagramBusinessForm,
+    TelegramBotConfigForm,
+    TemplateTesterForm,
+)
+from core.utils.validation import parse_hex_color, parse_int_in_range, validate_uploaded_image
 
 logger = logging.getLogger(__name__)
 
 # Session key for passing uploaded test background to Coordinate Lab
 COORD_LAB_TEMP_BACKGROUND_KEY = "coord_lab_temp_background_path"
+
+
+def _json_server_error(message: str, *, status: int = 500) -> JsonResponse:
+    """Return a generic JSON error response without exposing internal exceptions."""
+    return JsonResponse({'status': 'error', 'message': message}, status=status)
+
+
+RESTRICTED_SETTINGS_KEYS = {
+    'openai_api_key',
+    'openai_model',
+    'is_ai_enabled',
+    'ai_system_prompt',
+    'instagram_app_id',
+    'instagram_app_secret',
+    'instagram_business_id',
+    'facebook_access_token',
+    'production_base_url',
+    'default_font',
+    'default_watermark_opacity',
+    'default_watermark',
+    'default_primary_color',
+    'default_secondary_color',
+    'default_accent_color',
+}
+
+
+def _can_edit_restricted_settings(user) -> bool:
+    return bool(user and user.is_authenticated and (user.is_superuser or user.has_perm('core.can_edit_settings')))
+
+
+def _role_label(user) -> str:
+    if user.is_superuser:
+        return 'Admin'
+    if user.has_perm('core.can_edit_settings'):
+        return 'Editor'
+    return 'Viewer'
+
+
+def _available_font_options() -> list[tuple[str, str]]:
+    """Return selectable font options from uploaded/template/static fonts."""
+    options = [('Inter', 'Inter (Default)')]
+    seen = {'inter'}
+
+    # Uploaded template fonts
+    for tpl in AdTemplate.objects.exclude(font_file='').only('name', 'font_file'):
+        try:
+            name = Path(str(tpl.font_file)).name
+        except Exception:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append((name, f'{name} (Template: {tpl.name})'))
+
+    # Static fonts
+    static_fonts_dir = Path(settings.BASE_DIR) / 'static' / 'fonts'
+    if static_fonts_dir.exists():
+        for ext in ('*.ttf', '*.otf', '*.woff2'):
+            for font_file in sorted(static_fonts_dir.rglob(ext)):
+                name = font_file.name
+                key = name.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                options.append((name, name))
+
+    return options
+
+
+def _sanitize_workflow_stages(raw_stages):
+    """Normalize workflow stage payload to [{key,label,enabled}, ...]."""
+    if not isinstance(raw_stages, list):
+        return SiteConfiguration._meta.get_field('workflow_stages').default()
+    cleaned = []
+    used_keys = set()
+    for idx, stage in enumerate(raw_stages[:12]):
+        if not isinstance(stage, dict):
+            continue
+        label = (str(stage.get('label') or '')).strip()[:40]
+        key = (str(stage.get('key') or '')).strip().lower()[:24]
+        if not label:
+            continue
+        if not key:
+            key = f'stage_{idx+1}'
+        if key in used_keys:
+            key = f'{key}_{idx+1}'
+        used_keys.add(key)
+        cleaned.append({'key': key, 'label': label, 'enabled': bool(stage.get('enabled', True))})
+    return cleaned or SiteConfiguration._meta.get_field('workflow_stages').default()
 
 
 def landing(request):
@@ -353,85 +461,409 @@ def post_to_instagram_view(request, uuid, target):
     return JsonResponse(result, status=200 if result.get('success') else 500)
 
 
+SETTINGS_HUB_SECTIONS = ('instagram', 'telegram', 'channels', 'design')
+
+
 @staff_member_required
 @require_http_methods(['GET'])
-def settings_view(request):
-    """Settings Hub: vertical tabs — General, API & Integrations, Delivery, Team & Security, Channels, Appearance."""
-    from core.forms import ChannelForm
+def settings_hub_redirect(request):
+    """Redirect /settings/ to first card page (Instagram)."""
+    return redirect('settings_hub_instagram')
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def settings_hub_section(request, section):
+    """Modular CRM Settings Hub: one card page per section (instagram, telegram, channels, design)."""
     from django.conf import settings as django_settings
+
+    if section not in SETTINGS_HUB_SECTIONS:
+        return redirect('settings_hub_section', section='instagram')
+
     config = SiteConfiguration.get_config()
     env = getattr(django_settings, 'ENVIRONMENT', 'PROD')
-    active_tab = (request.GET.get('tab') or 'general').strip().lower()
-    if active_tab not in ('general', 'api', 'delivery', 'team', 'channels', 'appearance'):
-        active_tab = 'general'
+    can_edit_restricted = _can_edit_restricted_settings(request.user)
 
-    # Channels (for Channel Manager tab)
     channels = (
         TelegramChannel.objects.filter(bot_connection__environment=env)
         .select_related('bot_connection')
         .order_by('-is_default', 'title')
     )
-    channel_form = ChannelForm()
-
-    # Admins (for Team & Security tab)
-    admins = AdminProfile.objects.select_related('user').order_by('user__username') if request.user.is_superuser else []
-
-    # Recent delivery logs (compact for Delivery tab)
-    delivery_qs = DeliveryLog.objects.select_related('ad').order_by('-created_at')[:25]
-    delivery_channel = request.GET.get('delivery_channel', '').strip()
-    delivery_status = request.GET.get('delivery_status', '').strip()
-    if delivery_channel and delivery_channel in dict(DeliveryLog.Channel.choices):
-        delivery_qs = delivery_qs.filter(channel=delivery_channel)
-    if delivery_status and delivery_status in dict(DeliveryLog.DeliveryStatus.choices):
-        delivery_qs = delivery_qs.filter(status=delivery_status)
-    delivery_logs = list(delivery_qs)
-
-    # API clients & Instagram configs (for API & Integrations tab)
-    api_clients = ApiClient.objects.all().order_by('name')
-    instagram_configs = InstagramConfiguration.objects.all().order_by('username')
     bots = TelegramBot.objects.filter(environment=env).order_by('-is_default', 'name')
+    font_options = _available_font_options()
+
+    # Instagram card form (SiteConfiguration fields)
+    instagram_form = InstagramBusinessForm(initial={
+        'app_id': config.instagram_app_id or '',
+        'app_secret': '',  # never prefill
+        'instagram_business_id': config.instagram_business_id or '',
+        'long_lived_access_token': '',  # never prefill
+    })
+
+    # Telegram card: default bot
+    default_bot = bots.filter(is_default=True).first() or bots.first()
+    if default_bot:
+        webhook_display = default_bot.webhook_url or ''
+        if not webhook_display and config.production_base_url:
+            webhook_display = request.build_absolute_uri(
+                reverse('telegram_webhook_by_token', kwargs={'webhook_secret_token': default_bot.webhook_secret_token})
+            )
+        telegram_form = TelegramBotConfigForm(initial={
+            'bot_token': '',
+            'bot_username': default_bot.username or '',
+            'webhook_url': webhook_display,
+        })
+    else:
+        telegram_form = TelegramBotConfigForm(initial={
+            'bot_token': '',
+            'bot_username': config.telegram_bot_username or '',
+            'webhook_url': config.telegram_webhook_url or config.production_base_url or '',
+        })
+
+    # Design card form
+    font_choices = [(v, l) for v, l in font_options]
+    design_form = DesignDefaultsForm(font_choices=font_choices, instance=config)
+
+    # Instagram token status for badge (check if we have a valid token)
+    instagram_token_ok = False
+    if config.get_facebook_access_token():
+        instagram_token_ok, _ = validate_instagram_token(config.get_facebook_access_token())
 
     context = {
         'config': config,
-        'active_tab': active_tab,
+        'active_section': section,
+        'can_edit_restricted': can_edit_restricted,
         'channels': channels,
-        'channel_form': channel_form,
-        'admins': admins,
-        'delivery_logs': delivery_logs,
-        'channel_choices': DeliveryLog.Channel.choices,
-        'status_choices': DeliveryLog.DeliveryStatus.choices,
-        'delivery_filters': {'channel': delivery_channel, 'status': delivery_status},
-        'api_clients': api_clients,
-        'instagram_configs': instagram_configs,
+        'channel_form': ChannelForm(),
         'bots': bots,
+        'default_bot': default_bot,
+        'instagram_form': instagram_form,
+        'telegram_form': telegram_form,
+        'design_form': design_form,
+        'font_options': font_options,
         'theme_preference': getattr(config, 'theme_preference', 'light') or 'light',
+        'instagram_token_ok': instagram_token_ok,
     }
     return render(request, 'core/settings_hub.html', context)
 
 
 @staff_member_required
+@require_http_methods(['GET'])
+def settings_view(request):
+    """Legacy CRM control panel (tab-based). Redirects to new hub."""
+    return redirect('settings_hub_section', section='instagram')
+
+
+@staff_member_required
 @require_http_methods(['POST'])
 def settings_save(request):
-    """Save configuration (AJAX or form)."""
+    """Save CRM configuration (AJAX). Accepts optional section=instagram|telegram|design for card-specific save."""
+    section = (request.POST.get('section') or request.FILES and request.POST.get('section') or '').strip().lower()
+    if section and section not in SETTINGS_HUB_SECTIONS:
+        section = ''
+
+    if not _can_edit_restricted_settings(request.user):
+        restricted_hits = [k for k in RESTRICTED_SETTINGS_KEYS if k in request.POST]
+        if restricted_hits:
+            return JsonResponse({'status': 'error', 'message': 'Permission denied for restricted settings.'}, status=403)
+
     config = SiteConfiguration.get_config()
     data = request.POST
-    config.is_ai_enabled = data.get('is_ai_enabled') == 'on'
-    config.openai_api_key = (data.get('openai_api_key') or '').strip() or config.openai_api_key
-    config.openai_model = (data.get('openai_model') or config.openai_model).strip()
-    config.ai_system_prompt = data.get('ai_system_prompt') or config.ai_system_prompt
-    # Telegram config moved to Bots; keep legacy fields unchanged
-    config.approval_message_template = data.get('approval_message_template') or config.approval_message_template
-    config.rejection_message_template = data.get('rejection_message_template') or config.rejection_message_template
-    config.submission_ack_message = data.get('submission_ack_message') or config.submission_ack_message
-    config.production_base_url = (data.get('production_base_url') or '').strip() or config.production_base_url
-    ig_id = (data.get('instagram_business_id') or '').strip()
-    if ig_id:
-        config.instagram_business_id = ig_id[:64]
-    fb_token = (data.get('facebook_access_token') or '').strip()
-    if fb_token:
-        config.set_facebook_access_token(fb_token)
+
+    # Section-specific save (card pages)
+    if section == 'instagram' and _can_edit_restricted_settings(request.user):
+        config.instagram_app_id = (data.get('app_id') or '').strip()[:64] or config.instagram_app_id
+        app_secret = (data.get('app_secret') or '').strip()
+        if app_secret:
+            config.set_instagram_app_secret(app_secret)
+        ig_id = (data.get('instagram_business_id') or '').strip()
+        if ig_id:
+            config.instagram_business_id = ig_id[:64]
+        fb_token = (data.get('long_lived_access_token') or '').strip()
+        if fb_token:
+            config.set_facebook_access_token(fb_token)
+        config.save()
+        try:
+            from django.core.cache import cache
+            cache.delete('dashboard_instagram_valid')
+        except Exception:
+            pass
+        log_activity(user=request.user, action='Updated Instagram Business API settings', object_type='SiteConfiguration', object_repr=f'pk={config.pk}')
+        return JsonResponse({'status': 'success'})
+
+    if section == 'telegram' and _can_edit_restricted_settings(request.user):
+        from django.conf import settings as django_settings
+        env = getattr(django_settings, 'ENVIRONMENT', 'PROD')
+        default_bot = TelegramBot.objects.filter(environment=env, is_active=True).order_by('-is_default', 'name').first()
+        if default_bot:
+            token = (data.get('bot_token') or '').strip()
+            if token:
+                default_bot.set_token(token)
+            default_bot.username = (data.get('bot_username') or '').strip()[:64] or default_bot.username
+            default_bot.save()
+        else:
+            config.telegram_bot_username = (data.get('bot_username') or '').strip()[:64] or config.telegram_bot_username
+            config.save()
+        log_activity(user=request.user, action='Updated Telegram Bot settings', object_type='SiteConfiguration', object_repr=f'pk={config.pk}')
+        return JsonResponse({'status': 'success'})
+
+    if section == 'design' and _can_edit_restricted_settings(request.user):
+        font_options = _available_font_options()
+        design_form = DesignDefaultsForm(font_choices=[(v, l) for v, l in font_options], data=data, files=request.FILES, instance=config)
+        if design_form.is_valid():
+            design_form.save()
+            log_activity(user=request.user, action='Updated Design Defaults', object_type='SiteConfiguration', object_repr=f'pk={config.pk}')
+            return JsonResponse({'status': 'success'})
+        err = design_form.errors.as_json() if design_form.errors else 'Validation failed'
+        return JsonResponse({'status': 'error', 'message': err}, status=400)
+
+    # Legacy / full save (no section or workflow/data)
+    if _can_edit_restricted_settings(request.user):
+        config.is_ai_enabled = data.get('is_ai_enabled') == 'on'
+        config.openai_api_key = (data.get('openai_api_key') or '').strip() or config.openai_api_key
+        config.openai_model = (data.get('openai_model') or config.openai_model).strip()
+        config.ai_system_prompt = data.get('ai_system_prompt') or config.ai_system_prompt
+        config.approval_message_template = data.get('approval_message_template') or config.approval_message_template
+        config.rejection_message_template = data.get('rejection_message_template') or config.rejection_message_template
+        config.submission_ack_message = data.get('submission_ack_message') or config.submission_ack_message
+        config.production_base_url = (data.get('production_base_url') or '').strip() or config.production_base_url
+        ig_id = (data.get('instagram_business_id') or '').strip()
+        if ig_id:
+            config.instagram_business_id = ig_id[:64]
+        fb_token = (data.get('facebook_access_token') or '').strip()
+        if fb_token:
+            config.set_facebook_access_token(fb_token)
+        config.default_font = (data.get('default_font') or config.default_font).strip()[:255]
+        try:
+            config.default_watermark_opacity = parse_int_in_range(
+                data.get('default_watermark_opacity'),
+                minimum=0,
+                maximum=100,
+                field_name='default_watermark_opacity',
+            )
+        except ValidationError:
+            return JsonResponse({'status': 'error', 'message': 'Watermark opacity must be between 0 and 100.'}, status=400)
+
+    config.auto_responder_message = (data.get('auto_responder_message') or config.auto_responder_message).strip()
+    config.auto_reply_comments = data.get('auto_reply_comments') == 'on'
+    config.auto_reply_dms = data.get('auto_reply_dms') == 'on'
+    raw_stages = data.get('workflow_stages_json')
+    if raw_stages:
+        try:
+            import json
+            config.workflow_stages = _sanitize_workflow_stages(json.loads(raw_stages))
+        except Exception:
+            return JsonResponse({'status': 'error', 'message': 'Invalid workflow stages payload.'}, status=400)
+
+    retention_policy = (data.get('retention_policy') or '').strip()
+    if retention_policy in dict(SiteConfiguration._meta.get_field('retention_policy').choices):
+        config.retention_policy = retention_policy
+
     config.save()
+    log_activity(
+        user=request.user,
+        action='Updated CRM settings',
+        object_type='SiteConfiguration',
+        object_repr=f'pk={config.pk}',
+    )
     return JsonResponse({'status': 'success'})
+
+
+@staff_member_required
+def settings_invite_member(request):
+    """Invite a team member: GET shows form page, POST creates user and redirects to settings."""
+    if not _can_edit_restricted_settings(request.user):
+        return HttpResponseForbidden('Permission denied.')
+
+    if request.method == 'GET':
+        return render(request, 'core/settings_invite_member.html', {'error': None})
+
+    User = get_user_model()
+    email = (request.POST.get('email') or '').strip().lower()
+    role = (request.POST.get('role') or 'viewer').strip().lower()
+    if not email or '@' not in email:
+        return render(request, 'core/settings_invite_member.html', {
+            'error': 'Valid email is required.',
+            'email': email,
+            'role': role,
+        })
+    if role not in ('admin', 'editor', 'viewer'):
+        role = 'viewer'
+
+    existing = User.objects.filter(email__iexact=email).first()
+    if existing:
+        return render(request, 'core/settings_invite_member.html', {
+            'error': 'A user with this email already exists.',
+            'email': email,
+            'role': role,
+        })
+
+    username_base = email.split('@')[0][:24] or 'member'
+    username = username_base
+    idx = 1
+    while User.objects.filter(username__iexact=username).exists():
+        idx += 1
+        username = f'{username_base}{idx}'
+
+    temp_password = uuid.uuid4().hex[:12]
+    user = User.objects.create_user(username=username, email=email, password=temp_password)
+    user.is_staff = True
+    user.is_superuser = role == 'admin'
+    user.save(update_fields=['is_staff', 'is_superuser'])
+
+    perm = Permission.objects.filter(codename='can_edit_settings').first()
+    if perm:
+        if role == 'editor':
+            user.user_permissions.add(perm)
+        else:
+            user.user_permissions.remove(perm)
+
+    try:
+        from django.core.mail import send_mail
+        send_mail(
+            subject='Iraniu CRM Invitation',
+            message=(
+                f'You were invited to Iraniu CRM as {role.title()}.\n'
+                f'Username: {username}\n'
+                f'Temporary password: {temp_password}\n'
+                'Please change your password after login.'
+            ),
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+            recipient_list=[email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
+    log_activity(
+        user=request.user,
+        action='Invited team member',
+        object_type='User',
+        object_repr=f'{username} ({role.title()})',
+        metadata={'email': email, 'role': role},
+    )
+    messages.success(request, f'Invitation created for {email}.')
+    return redirect(reverse('settings') + '?tab=team')
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def export_ads_csv(request):
+    """Export all ads as CSV (streaming response)."""
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="ads_export_{timezone.now().date()}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(['UUID', 'Category', 'Status', 'Content', 'Created At', 'Updated At'])
+    for ad in AdRequest.objects.select_related('category').order_by('-created_at').iterator():
+        writer.writerow([
+            str(ad.uuid),
+            ad.get_category_display(),
+            ad.status,
+            (ad.content or '').replace('\n', ' ')[:1000],
+            ad.created_at.isoformat(),
+            ad.updated_at.isoformat(),
+        ])
+    log_activity(user=request.user, action='Exported ads CSV', object_type='AdRequest', object_repr='All ads')
+    return response
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def export_users_excel(request):
+    """Export user list in Excel-compatible TSV format."""
+    User = get_user_model()
+    response = HttpResponse(content_type='application/vnd.ms-excel; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="users_export_{timezone.now().date()}.xls"'
+    response.write('Username\tEmail\tRole\tIs Staff\tLast Login\n')
+    for user in User.objects.all().order_by('username').iterator():
+        response.write(
+            f'{user.username}\t{user.email or ""}\t{_role_label(user)}\t'
+            f'{"Yes" if user.is_staff else "No"}\t{user.last_login or ""}\n'
+        )
+    log_activity(user=request.user, action='Exported users Excel', object_type='User', object_repr='All users')
+    return response
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def cleanup_generated_media(request):
+    """Delete generated images older than retention policy."""
+    config = SiteConfiguration.get_config()
+    retention = (request.POST.get('retention_policy') or config.retention_policy or '1m').strip()
+    if retention not in ('1w', '1m', 'forever'):
+        retention = config.retention_policy
+
+    config.retention_policy = retention
+    config.save(update_fields=['retention_policy', 'updated_at'])
+
+    if retention == 'forever':
+        return JsonResponse({'status': 'success', 'deleted': 0, 'message': 'Retention set to Forever. No files deleted.'})
+
+    cutoff = timezone.now() - (timedelta(days=7) if retention == '1w' else timedelta(days=30))
+    target_dir = Path(settings.MEDIA_ROOT) / 'generated_ads'
+    deleted = 0
+    if target_dir.exists():
+        for file_path in target_dir.glob('*'):
+            if not file_path.is_file():
+                continue
+            try:
+                mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=dt_timezone.utc)
+                if mtime < cutoff:
+                    file_path.unlink(missing_ok=True)
+                    deleted += 1
+            except Exception:
+                continue
+
+    log_activity(
+        user=request.user,
+        action='Cleaned generated media',
+        object_type='Media',
+        object_repr='generated_ads',
+        metadata={'retention': retention, 'deleted': deleted},
+    )
+    return JsonResponse({'status': 'success', 'deleted': deleted, 'message': f'{deleted} file(s) removed.'})
+
+
+@staff_member_required
+def reset_all_settings(request):
+    """Danger zone: GET shows confirm page, POST resets config and redirects to settings."""
+    if not _can_edit_restricted_settings(request.user):
+        return HttpResponseForbidden('Permission denied.')
+
+    if request.method == 'GET':
+        return render(request, 'core/settings_reset_confirm.html', {'error': None})
+
+    if (request.POST.get('confirm_text') or '').strip() != 'DELETE':
+        return render(request, 'core/settings_reset_confirm.html', {
+            'error': 'Type DELETE to confirm.',
+        })
+
+    config = SiteConfiguration.get_config()
+    default_cfg = SiteConfiguration()
+    fields_to_reset = [
+        'is_ai_enabled',
+        'openai_model',
+        'ai_system_prompt',
+        'approval_message_template',
+        'rejection_message_template',
+        'submission_ack_message',
+        'production_base_url',
+        'instagram_business_id',
+        'default_font',
+        'default_watermark_opacity',
+        'workflow_stages',
+        'auto_responder_message',
+        'auto_reply_comments',
+        'auto_reply_dms',
+        'retention_policy',
+    ]
+    for field in fields_to_reset:
+        setattr(config, field, getattr(default_cfg, field))
+    config.save()
+
+    log_activity(user=request.user, action='Reset all settings', object_type='SiteConfiguration', object_repr=f'pk={config.pk}')
+    messages.success(request, 'Settings reset to default values.')
+    return redirect(reverse('settings') + '?tab=data')
 
 
 @staff_member_required
@@ -481,11 +913,62 @@ def theme_save(request):
 
 @staff_member_required
 @require_http_methods(['POST'])
-def test_telegram(request):
-    """Test Telegram connection (AJAX). Does not save token."""
-    token = (request.POST.get('telegram_bot_token') or '').strip()
-    ok, msg = test_telegram_connection(token)
+def notification_mark_read(request, pk):
+    """Mark one notification as read (AJAX)."""
+    notification = get_object_or_404(Notification, pk=pk)
+    notification.is_read = True
+    notification.save(update_fields=['is_read'])
+    try:
+        from django.core.cache import cache
+        cache.delete('navbar_notifications')
+    except Exception:
+        pass
+    return JsonResponse({'status': 'success'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def notification_mark_all_read(request):
+    """Mark all notifications as read (AJAX)."""
+    Notification.objects.filter(is_read=False).update(is_read=True)
+    try:
+        from django.core.cache import cache
+        cache.delete('navbar_notifications')
+    except Exception:
+        pass
+    return JsonResponse({'status': 'success'})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def check_instagram_connection(request):
+    """Check Instagram/Meta Graph API token (AJAX). Uses token from POST or from SiteConfiguration."""
+    token = (request.POST.get('long_lived_access_token') or request.POST.get('access_token') or '').strip()
+    if not token:
+        config = SiteConfiguration.get_config()
+        token = config.get_facebook_access_token() or ''
+    ok, msg = validate_instagram_token(token)
     return JsonResponse({'success': ok, 'message': msg})
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def test_telegram(request):
+    """Test Telegram connection (AJAX). Does not save token. Returns bot_info (getMe) for display."""
+    token = (request.POST.get('telegram_bot_token') or request.POST.get('bot_token') or '').strip()
+    success, bot_info, error = telegram_get_me(token)
+    if success and bot_info:
+        return JsonResponse({
+            'success': True,
+            'message': f"Connected as @{bot_info.get('username', '?')}",
+            'bot_info': {
+                'id': bot_info.get('id'),
+                'username': bot_info.get('username'),
+                'first_name': bot_info.get('first_name'),
+                'is_bot': bot_info.get('is_bot'),
+            },
+        })
+    return JsonResponse({'success': False, 'message': error or 'Invalid token'})
 
 
 @staff_member_required
@@ -512,8 +995,9 @@ def approve_ad(request):
             return JsonResponse({'status': 'error', 'message': 'Ad not in pending state'}, status=400)
         approve_one_ad(ad, edited_content=edited_content, approved_by=request.user)
         return JsonResponse({'status': 'success'})
-    except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    except Exception as exc:
+        logger.exception("approve_ad failed: %s", exc)
+        return _json_server_error('Could not approve ad.')
 
 
 @staff_member_required
@@ -547,8 +1031,9 @@ def reject_ad(request):
             return JsonResponse({'status': 'error', 'message': 'Ad not in pending state'}, status=400)
         reject_one_ad(ad, stored_reason, rejected_by=request.user)
         return JsonResponse({'status': 'success'})
-    except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    except Exception as exc:
+        logger.exception("reject_ad failed: %s", exc)
+        return _json_server_error('Could not reject ad.')
 
 
 @staff_member_required
@@ -571,8 +1056,9 @@ def bulk_approve(request):
             except AdRequest.DoesNotExist:
                 pass
         return JsonResponse({'status': 'success', 'approved_count': approved_count})
-    except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    except Exception as exc:
+        logger.exception("bulk_approve failed: %s", exc)
+        return _json_server_error('Bulk approve failed.')
 
 
 @staff_member_required
@@ -598,8 +1084,9 @@ def bulk_reject(request):
             except AdRequest.DoesNotExist:
                 pass
         return JsonResponse({'status': 'success', 'rejected_count': rejected_count})
-    except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    except Exception as exc:
+        logger.exception("bulk_reject failed: %s", exc)
+        return _json_server_error('Bulk reject failed.')
 
 
 def _bulk_reject_ads(ad_ids, reason, rejected_by):
@@ -897,6 +1384,13 @@ def export_config(request):
         'approval_message_template': config.approval_message_template,
         'rejection_message_template': config.rejection_message_template,
         'submission_ack_message': config.submission_ack_message,
+        'default_font': config.default_font,
+        'default_watermark_opacity': config.default_watermark_opacity,
+        'workflow_stages': config.workflow_stages,
+        'auto_responder_message': config.auto_responder_message,
+        'auto_reply_comments': config.auto_reply_comments,
+        'auto_reply_dms': config.auto_reply_dms,
+        'retention_policy': config.retention_policy,
     }
     return JsonResponse(data, json_dumps_params={'indent': 2})
 
@@ -940,8 +1434,9 @@ def submit_ad(request):
             ad.save(update_fields=['status'])
         ack = (config.submission_ack_message or 'Your broadcast is currently under AI scrutiny. We\'ll notify you the moment it goes live.').strip()
         return JsonResponse({'status': 'created', 'uuid': str(ad.uuid), 'ack_message': ack})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+    except Exception as exc:
+        logger.exception("submit_ad failed: %s", exc)
+        return JsonResponse({'error': 'Submission failed.'}, status=500)
 
 
 @staff_member_required
@@ -971,6 +1466,23 @@ def import_config(request):
             config.submission_ack_message = str(data['submission_ack_message'])
         if 'telegram_bot_username' in data:
             config.telegram_bot_username = str(data['telegram_bot_username'])[:64]
+        if 'default_font' in data:
+            config.default_font = str(data['default_font'])[:255]
+        if 'default_watermark_opacity' in data:
+            try:
+                config.default_watermark_opacity = max(0, min(100, int(data['default_watermark_opacity'])))
+            except (TypeError, ValueError):
+                pass
+        if 'workflow_stages' in data:
+            config.workflow_stages = _sanitize_workflow_stages(data['workflow_stages'])
+        if 'auto_responder_message' in data:
+            config.auto_responder_message = str(data['auto_responder_message'])
+        if 'auto_reply_comments' in data:
+            config.auto_reply_comments = bool(data['auto_reply_comments'])
+        if 'auto_reply_dms' in data:
+            config.auto_reply_dms = bool(data['auto_reply_dms'])
+        if 'retention_policy' in data and str(data['retention_policy']) in dict(SiteConfiguration._meta.get_field('retention_policy').choices):
+            config.retention_policy = str(data['retention_policy'])
         config.save()
         return JsonResponse({'status': 'success'})
     except Exception as e:
@@ -1352,7 +1864,6 @@ def settings_instagram_test(request, pk):
 
 @staff_member_required
 @require_http_methods(['POST'])
-@csrf_exempt
 def api_instagram_post(request):
     """
     POST /api/instagram/post/
@@ -1511,6 +2022,7 @@ def _save_temp_test_background(uploaded_file) -> str | None:
     """Save uploaded image to temp_test_backgrounds and return absolute path. Caller can store in session for Coordinate Lab."""
     if not uploaded_file:
         return None
+    validate_uploaded_image(uploaded_file, max_size_bytes=8 * 1024 * 1024, field_name='Temporary background')
     media_root = Path(getattr(settings, 'MEDIA_ROOT', None) or settings.BASE_DIR / 'media')
     temp_dir = media_root / 'temp_test_backgrounds'
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -1524,8 +2036,8 @@ def _save_temp_test_background(uploaded_file) -> str | None:
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
         return str(path.resolve())
-    except Exception as e:
-        logger.warning("Failed to save temp test background: %s", e)
+    except Exception as exc:
+        logger.warning("Failed to save temp test background: %s", exc)
         return None
 
 
@@ -1547,14 +2059,11 @@ def template_create(request):
 @staff_member_required
 @require_http_methods(['GET', 'POST'])
 def template_manual_edit(request, template_id):
-    """Manual Template Editor: form-based coordinate editing with live preview."""
-    from django.urls import reverse
-    from django.http import JsonResponse
+    """High-precision manual editor with numeric controls and live canvas preview."""
     from PIL import Image
-    import json
-    
+
     template = get_object_or_404(AdTemplate, pk=template_id)
-    
+
     # Get background image URL and dimensions
     background_url = ''
     img_width, img_height = 1080, 1080
@@ -1583,82 +2092,85 @@ def template_manual_edit(request, template_id):
             except Exception:
                 pass
     
-    # Load current coordinates
-    coords = template.coordinates or default_adtemplate_coordinates()
-    cat = coords.get('category', {})
-    desc = coords.get('description', {})
-    phone_coord = coords.get('phone', {})
-    
+    # Load current coordinates and always merge with defaults to avoid null/undefined crashes
+    coords = default_adtemplate_coordinates()
+    user_coords = template.coordinates or {}
+    if isinstance(user_coords, dict):
+        for key in coords.keys():
+            if isinstance(user_coords.get(key), dict):
+                coords[key].update({k: v for k, v in user_coords[key].items() if v is not None})
+
+    def _parse_align(value: str, default: str = 'right') -> str:
+        v = (value or '').strip().lower()
+        return v if v in ('left', 'center', 'right') else default
+
+    def _layer_config(prefix: str, base: dict, *, include_max_width: bool = False) -> dict:
+        min_x, max_x = -img_width, img_width * 2
+        min_y, max_y = -img_height, img_height * 2
+        parsed = {
+            'x': parse_int_in_range(
+                request.POST.get(f'{prefix}_x', base.get('x', 0)),
+                field_name=f'{prefix} x',
+                minimum=min_x,
+                maximum=max_x,
+            ),
+            'y': parse_int_in_range(
+                request.POST.get(f'{prefix}_y', base.get('y', 0)),
+                field_name=f'{prefix} y',
+                minimum=min_y,
+                maximum=max_y,
+            ),
+            'size': parse_int_in_range(
+                request.POST.get(f'{prefix}_size', base.get('size', 24)),
+                field_name=f'{prefix} size',
+                minimum=1,
+                maximum=600,
+            ),
+            'color': parse_hex_color(
+                request.POST.get(f'{prefix}_color', base.get('color', '#FFFFFF')),
+                field_name=f'{prefix} color',
+                default=str(base.get('color') or '#FFFFFF'),
+            ),
+            'font_path': (request.POST.get(f'{prefix}_font_path') or base.get('font_path') or '').strip(),
+            'align': _parse_align(request.POST.get(f'{prefix}_align', base.get('align', 'right')), default='right'),
+        }
+        if include_max_width:
+            parsed['max_width'] = parse_int_in_range(
+                request.POST.get(f'{prefix}_max_width', base.get('max_width', max(200, int(img_width * 0.6)))),
+                field_name=f'{prefix} max width',
+                minimum=1,
+                maximum=img_width * 2,
+            )
+        return parsed
+
     if request.method == 'POST':
-        action = request.POST.get('action', 'save')
-        
-        if action == 'save':
-            # Validate and save coordinates
-            new_coords = {
-                'category': {
-                    'x': int(request.POST.get('cat_x', cat.get('x', 50))),
-                    'y': int(request.POST.get('cat_y', cat.get('y', 50))),
-                    'size': int(request.POST.get('cat_size', cat.get('size', 48))),
-                    'color': (request.POST.get('cat_color', cat.get('color', '#FFFFFF')) or '#FFFFFF').strip(),
-                    'font_path': cat.get('font_path', ''),
-                },
-                'description': {
-                    'x': int(request.POST.get('desc_x', desc.get('x', 50))),
-                    'y': int(request.POST.get('desc_y', desc.get('y', 140))),
-                    'size': int(request.POST.get('desc_size', desc.get('size', 32))),
-                    'color': (request.POST.get('desc_color', desc.get('color', '#FFFFFF')) or '#FFFFFF').strip(),
-                    'font_path': desc.get('font_path', ''),
-                    'max_width': int(request.POST.get('desc_max_width', desc.get('max_width', 800))),
-                },
-                'phone': {
-                    'x': int(request.POST.get('phone_x', phone_coord.get('x', 50))),
-                    'y': int(request.POST.get('phone_y', phone_coord.get('y', 420))),
-                    'size': int(request.POST.get('phone_size', phone_coord.get('size', 28))),
-                    'color': (request.POST.get('phone_color', phone_coord.get('color', '#FFFF00')) or '#FFFF00').strip(),
-                    'font_path': phone_coord.get('font_path', ''),
-                },
-            }
-            
-            # Validate coordinates are within image bounds and font sizes are positive
-            errors = []
-            # Category validation
-            if new_coords['category']['x'] < 0 or new_coords['category']['x'] > img_width:
-                errors.append('Category X must be between 0 and {}'.format(img_width))
-            if new_coords['category']['y'] < 0 or new_coords['category']['y'] > img_height:
-                errors.append('Category Y must be between 0 and {}'.format(img_height))
-            if new_coords['category']['size'] < 1:
-                errors.append('Category font size must be at least 1')
-            # Description validation
-            if new_coords['description']['x'] < 0 or new_coords['description']['x'] > img_width:
-                errors.append('Description X must be between 0 and {}'.format(img_width))
-            if new_coords['description']['y'] < 0 or new_coords['description']['y'] > img_height:
-                errors.append('Description Y must be between 0 and {}'.format(img_height))
-            if new_coords['description']['size'] < 1:
-                errors.append('Description font size must be at least 1')
-            if new_coords['description']['max_width'] < 1:
-                errors.append('Description max width must be at least 1')
-            # Phone validation
-            if new_coords['phone']['x'] < 0 or new_coords['phone']['x'] > img_width:
-                errors.append('Phone X must be between 0 and {}'.format(img_width))
-            if new_coords['phone']['y'] < 0 or new_coords['phone']['y'] > img_height:
-                errors.append('Phone Y must be between 0 and {}'.format(img_height))
-            if new_coords['phone']['size'] < 1:
-                errors.append('Phone font size must be at least 1')
-            
-            if errors:
-                return JsonResponse({'status': 'error', 'errors': errors}, status=400)
-            
+        action = request.POST.get('action', 'save').strip().lower()
+        if action in ('save', 'save_test'):
+            try:
+                new_coords = {
+                    'category': _layer_config('cat', coords.get('category', {}), include_max_width=True),
+                    'description': _layer_config('desc', coords.get('description', {}), include_max_width=True),
+                    'phone': _layer_config('phone', coords.get('phone', {}), include_max_width=True),
+                    'price': _layer_config('price', coords.get('price', {}), include_max_width=True),
+                }
+            except ValidationError as exc:
+                return JsonResponse({'status': 'error', 'errors': [str(exc)]}, status=400)
+
             template.coordinates = new_coords
-            template.save()
-            
-            if request.POST.get('generate_test') == 'on':
-                # Generate test image
+            template.save(update_fields=['coordinates', 'updated_at'])
+
+            if action == 'save_test':
                 from core.services.image_engine import create_ad_image
+                test_category = (request.POST.get('preview_category') or 'دسته‌بندی').strip()
+                test_desc = (request.POST.get('preview_description') or 'متن نمونه برای تست نمایش.').strip()
+                test_phone = (request.POST.get('preview_phone') or '+98 912 345 6789').strip()
+                test_price = (request.POST.get('preview_price') or '').strip()
                 test_path = create_ad_image(
                     template.pk,
-                    category='دسته‌بندی',
-                    text='متن نمونه آگهی برای تست. این متن برای نمایش نحوه قرارگیری متن روی تصویر استفاده می‌شود.',
-                    phone='+98 912 345 6789',
+                    category=test_category,
+                    text=test_desc,
+                    phone=test_phone,
+                    price=test_price,
                 )
                 if test_path:
                     media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
@@ -1669,26 +2181,24 @@ def template_manual_edit(request, template_id):
                         'message': 'Coordinates saved and test image generated.',
                         'test_image_url': test_url,
                     })
-                else:
-                    return JsonResponse({
-                        'status': 'success',
-                        'message': 'Coordinates saved, but test image generation failed.',
-                    })
-            else:
                 return JsonResponse({
                     'status': 'success',
-                    'message': 'Coordinates saved successfully.',
+                    'message': 'Coordinates saved, but test image generation failed.',
                 })
-    
+
+            return JsonResponse({'status': 'success', 'message': 'Coordinates saved successfully.'})
+
     context = {
         'template': template,
         'background_url': background_url,
         'img_width': img_width,
         'img_height': img_height,
         'coords': coords,
-        'cat': cat,
-        'desc': desc,
-        'phone_coord': phone_coord,
+        'cat': coords.get('category', {}),
+        'desc': coords.get('description', {}),
+        'phone_coord': coords.get('phone', {}),
+        'price_coord': coords.get('price', {}),
+        'default_coords': default_adtemplate_coordinates(),
     }
     return render(request, 'core/template_manual_edit.html', context)
 
@@ -1697,7 +2207,7 @@ def template_manual_edit(request, template_id):
 @require_http_methods(['GET', 'POST'])
 def template_tester(request):
     """Preview ad image: select template, dummy text, and optional custom background. POST generates with optional upload."""
-    templates = AdTemplate.objects.filter(is_active=True).order_by('name')
+    templates = AdTemplate.objects.filter(is_active=True).only('pk', 'name').order_by('name')
     template = None
     preview_url = None
     validation_error = None
@@ -1720,7 +2230,11 @@ def template_tester(request):
                 temp_bg_path = None
                 uploaded = request.FILES.get('test_background')
                 if uploaded:
-                    temp_bg_path = _save_temp_test_background(uploaded)
+                    try:
+                        temp_bg_path = _save_temp_test_background(uploaded)
+                    except ValidationError as exc:
+                        validation_error = str(exc)
+                        temp_bg_path = None
                     if temp_bg_path:
                         background_file = temp_bg_path
                         used_custom_background = True
@@ -1814,11 +2328,10 @@ def template_tester_preview(request):
 # ---------- Channel Manager (dashboard/channels/) ----------
 
 @staff_member_required
-@require_http_methods(['GET', 'POST'])
 def channel_list(request):
     """
-    List all Telegram channels and add new one. Staff/superuser only.
-    POST: create channel; GET: list + form.
+    List all Telegram channels. Staff/superuser only.
+    Create new channel via channel_create page (dashboard/channels/create/).
     """
     from django.conf import settings
     env = getattr(settings, "ENVIRONMENT", "PROD")
@@ -1827,6 +2340,18 @@ def channel_list(request):
         .select_related("bot_connection")
         .order_by("-is_default", "title")
     )
+    context = {
+        "channels": channels,
+    }
+    return render(request, "dashboard/channels.html", context)
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
+def channel_create(request):
+    """
+    Create a new Telegram channel. GET: form page; POST: create and redirect.
+    """
     form = ChannelForm()
     if request.method == "POST":
         form = ChannelForm(request.POST)
@@ -1841,11 +2366,12 @@ def channel_list(request):
             return redirect("channel_list")
         else:
             messages.error(request, "Please correct the errors below.")
+    next_url = request.GET.get('next', '').strip()
     context = {
-        "channels": channels,
         "form": form,
+        "next_url": next_url,
     }
-    return render(request, "dashboard/channels.html", context)
+    return render(request, "dashboard/channel_form.html", context)
 
 
 @staff_member_required
@@ -1856,6 +2382,9 @@ def channel_delete(request, pk):
     title = channel.title
     channel.delete()
     messages.success(request, f'Channel "{title}" has been deleted.')
+    next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+    if next_url:
+        return redirect(next_url)
     return redirect("channel_list")
 
 
@@ -1868,6 +2397,9 @@ def channel_set_default(request, pk):
     channel.is_default = True
     channel.save(update_fields=["is_default"])
     messages.success(request, f'"{channel.title}" is now the default channel.')
+    next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+    if next_url:
+        return redirect(next_url)
     return redirect("channel_list")
 
 
@@ -1881,14 +2413,23 @@ def channel_test_connection(request, pk):
         token = channel.bot_connection.get_decrypted_token()
     except Exception:
         messages.error(request, "Could not get bot token.")
+        next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+        if next_url:
+            return redirect(next_url)
         return redirect("channel_list")
     if not token:
         messages.error(request, "Bot has no token configured.")
+        next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+        if next_url:
+            return redirect(next_url)
         return redirect("channel_list")
     try:
         chat_id = int(channel.channel_id.strip())
     except (ValueError, TypeError):
         messages.error(request, "Invalid channel ID.")
+        next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+        if next_url:
+            return redirect(next_url)
         return redirect("channel_list")
     text = "🔔 Test message from Iraniu Channel Manager — if you see this, the bot has admin rights."
     success, _, api_error = send_message(token, chat_id, text)
@@ -1896,4 +2437,7 @@ def channel_test_connection(request, pk):
         messages.success(request, f'Test message sent to "{channel.title}".')
     else:
         messages.error(request, api_error or "Failed to send test message. Check bot admin rights and channel ID.")
+    next_url = (request.POST.get('next') or request.GET.get('next') or '').strip()
+    if next_url:
+        return redirect(next_url)
     return redirect("channel_list")

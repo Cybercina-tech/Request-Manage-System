@@ -1,28 +1,57 @@
-"""
-Iraniu
-Django settings.
-"""
+"""Iraniu Django settings."""
 
 import os
 from pathlib import Path
+from typing import Iterable
+
+from django.core.exceptions import ImproperlyConfigured
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional dependency guard
+    load_dotenv = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-change-in-production-iraniu')
+if load_dotenv is not None:
+    load_dotenv(BASE_DIR / ".env")
 
-DEBUG = True
 
-ALLOWED_HOSTS = [
-    "request.iraniu.uk",
-    "www.request.iraniu.uk",
-    "localhost",
-    "127.0.0.1",
-]
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://request.iraniu.uk",
-    "http://request.iraniu.uk",
-]
+
+def _env_list(name: str, default: Iterable[str] | None = None) -> list[str]:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return list(default or [])
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+DEBUG = _env_bool("DJANGO_DEBUG", default=True)  # default True for local; set False in production
+SECRET_KEY = (os.environ.get("DJANGO_SECRET_KEY") or "").strip() or "dev-change-in-production-iraniu"
+if not DEBUG and not (os.environ.get("DJANGO_SECRET_KEY") or "").strip():
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false.")
+
+ALLOWED_HOSTS = _env_list(
+    "DJANGO_ALLOWED_HOSTS",
+    default=[
+        "request.iraniu.uk",
+        "www.request.iraniu.uk",
+        "localhost",
+        "127.0.0.1",
+    ],
+)
+
+CSRF_TRUSTED_ORIGINS = _env_list(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    default=["https://request.iraniu.uk", "http://request.iraniu.uk"],
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -38,6 +67,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -63,6 +93,8 @@ TEMPLATES = [
                 'core.context_processors.site_config',
                 'core.context_processors.static_version',
                 'core.context_processors.webhook_health',
+                'core.context_processors.system_watchdog',
+                'core.context_processors.notifications',
             ],
         },
     },
@@ -90,8 +122,14 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+# Default language: English. Use landing page button or set_language to switch.
+LANGUAGE_CODE = 'en'
+LANGUAGES = [
+    ('en', 'English'),
+    ('fa', 'فارسی'),
+]
+LOCALE_PATHS = [BASE_DIR / 'locale']
+TIME_ZONE = 'Asia/Tehran'
 USE_I18N = True
 USE_TZ = True
 
@@ -153,12 +191,20 @@ INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
 # اجبار جنگو به تشخیص HTTPS از طریق هدرهای cPanel/پروکسی
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Security defaults (minimal, no HSTS yet)
-SESSION_COOKIE_SECURE = False  # True when not DEBUG (see below)
-CSRF_COOKIE_SECURE = False     # True when not DEBUG (see below)
-SECURE_BROWSER_XSS_FILTER = True
+# Security defaults
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_SSL_REDIRECT = _env_bool("DJANGO_SECURE_SSL_REDIRECT", default=not DEBUG)
+SECURE_HSTS_SECONDS = int((os.environ.get("DJANGO_SECURE_HSTS_SECONDS") or "31536000").strip() or "31536000") if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -181,12 +227,3 @@ if TELEGRAM_MODE not in ('polling', 'webhook'):
 
 # Auto-start bots with Django when TELEGRAM_MODE is polling. DISABLED for cPanel — use Cron Job with 'python manage.py runbots' instead.
 ENABLE_AUTO_BOTS = False  # Manual execution only via 'python manage.py runbots' (Cron Job)
-
-# Security headers and SSL (only when not debugging — cPanel/production)
-if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'DENY'
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True

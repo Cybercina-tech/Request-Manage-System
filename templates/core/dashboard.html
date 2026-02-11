@@ -1,261 +1,302 @@
 {% extends "base.html" %}
-{% load static iraniu_tags %}
+{% load static i18n %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Dashboard Home{% endblock %}
 
 {% block content %}
-<h1 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Dashboard</h1>
-<p class="text-muted mb-4">Overview and quick access to ads, templates, and settings.</p>
+<section class="command-center">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h1 class="cc-title mb-1">Analytics & Command Center</h1>
+      <p class="text-muted mb-0">Real-time pulse, performance analytics, and operational shortcuts.</p>
+    </div>
+  </div>
 
-<!-- A. Summary Cards -->
-<div class="row g-3 g-md-4 mb-4">
-  <div class="col-6 col-md-3">
-    <div class="dashboard-summary-card">
-      <div class="dashboard-summary-label">Total Active Ads</div>
-      <div class="dashboard-summary-value">{{ total_active_ads }}</div>
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-md-6 col-xl-3">
+      <article class="cc-card kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></span>
+          <span class="kpi-label">Total Ads</span>
+        </div>
+        <div class="kpi-value">{{ total_ads_this_month }}</div>
+        <div class="kpi-sub">Last month: {{ total_ads_last_month }}</div>
+        <span class="kpi-badge {% if weekly_growth_pct >= 0 %}up{% else %}down{% endif %}">
+          {% if weekly_growth_pct >= 0 %}+{% endif %}{{ weekly_growth_pct }}% this week
+        </span>
+      </article>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <article class="cc-card kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-icon"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i></span>
+          <span class="kpi-label">Active Channels</span>
+        </div>
+        <div class="kpi-value">{{ active_telegram_channels }}</div>
+        <div class="kpi-sub">Connected Telegram channels</div>
+      </article>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <article class="cc-card kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
+          <span class="kpi-label">Templates Ready</span>
+        </div>
+        <div class="kpi-value">{{ total_templates }}</div>
+        <div class="kpi-sub">Active and ready to publish</div>
+      </article>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <article class="cc-card kpi-card system-health-widget">
+        <div class="kpi-head">
+          <span class="kpi-icon"><i class="fa-solid fa-heart-pulse" aria-hidden="true"></i></span>
+          <span class="kpi-label">System Health</span>
+        </div>
+        <div class="system-health-lines">
+          <div class="system-health-line">
+            <span class="health-pulse-dot {% if worker_online %}online{% else %}offline{% endif %}" aria-hidden="true"></span>
+            <span>Worker: {% if worker_online %}Online{% else %}Offline{% endif %}</span>
+          </div>
+          <div class="system-health-line">
+            <span class="health-dot {% if telegram_online %}ok{% else %}err{% endif %}"></span>
+            <span>Telegram Bot: {% if telegram_online %}Connected{% else %}Disconnected{% endif %}</span>
+          </div>
+          <div class="system-health-line">
+            <span class="health-dot {% if instagram_valid %}ok{% else %}err{% endif %}"></span>
+            <span>Instagram API: {% if instagram_valid %}Valid{% else %}Expired{% endif %}</span>
+          </div>
+          <div class="system-health-line">
+            <span class="health-dot {% if database_healthy %}ok{% else %}err{% endif %}"></span>
+            <span>Database: {% if database_healthy %}Healthy{% else %}Error{% endif %}</span>
+          </div>
+        </div>
+      </article>
     </div>
   </div>
-  <div class="col-6 col-md-3">
-    <div class="dashboard-summary-card">
-      <div class="dashboard-summary-label">Total Templates</div>
-      <div class="dashboard-summary-value">{{ total_templates }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="dashboard-summary-card">
-      <div class="dashboard-summary-label">Active Telegram Channels</div>
-      <div class="dashboard-summary-value">{{ active_telegram_channels }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="dashboard-summary-card">
-      <div class="dashboard-summary-label">API Status</div>
-      <div class="dashboard-summary-value dashboard-summary-api dashboard-summary-api--{{ api_status_class }}">{{ api_status }}</div>
-    </div>
-  </div>
-</div>
 
-<!-- B. Quick Actions (The Hub) -->
-<div class="dashboard-section mb-4">
-  <h2 class="dashboard-section-title">Quick Actions</h2>
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-xl-8">
+      <article class="cc-card insight-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="chart-title">Status Breakdown</h2>
+          <span class="text-muted small">Published / Draft / Failed</span>
+        </div>
+        {% with total=status_counts.published|add:status_counts.draft|add:status_counts.failed %}
+        <div class="status-breakdown">
+          <div class="status-row">
+            <div class="status-label">Published <strong>{{ status_counts.published }}</strong></div>
+            <div class="status-track">
+              <span class="status-fill status-fill--published" style="width:{% widthratio status_counts.published total 100 %}%"></span>
+            </div>
+          </div>
+          <div class="status-row">
+            <div class="status-label">Draft <strong>{{ status_counts.draft }}</strong></div>
+            <div class="status-track">
+              <span class="status-fill status-fill--draft" style="width:{% widthratio status_counts.draft total 100 %}%"></span>
+            </div>
+          </div>
+          <div class="status-row">
+            <div class="status-label">Failed <strong>{{ status_counts.failed }}</strong></div>
+            <div class="status-track">
+              <span class="status-fill status-fill--failed" style="width:{% widthratio status_counts.failed total 100 %}%"></span>
+            </div>
+          </div>
+        </div>
+        {% endwith %}
+      </article>
+    </div>
+    <div class="col-12 col-xl-4">
+      <article class="cc-card insight-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="chart-title">7-Day Activity</h2>
+          <span class="text-muted small">Daily created ads</span>
+        </div>
+        <ul class="daily-list">
+          {% for day in last_7_days %}
+          <li>
+            <span class="day-name">{{ day.date }}</span>
+            <span class="day-bar"><span style="width:{% widthratio day.count 20 100 %}%"></span></span>
+            <strong class="day-value">{{ day.count }}</strong>
+          </li>
+          {% empty %}
+          <li class="text-muted">No data yet.</li>
+          {% endfor %}
+        </ul>
+      </article>
+    </div>
+  </div>
+
   <div class="row g-3">
-    <div class="col-sm-6 col-lg-3">
-      <a href="{% url 'template_tester' %}" class="dashboard-action-card">
-        <span class="dashboard-action-icon"><i class="fa-solid fa-plus" aria-hidden="true"></i></span>
-        <span class="dashboard-action-label">Create New Ad</span>
-        <span class="dashboard-action-desc">Generate ad image from template</span>
-      </a>
+    <div class="col-12 col-xl-8">
+      <article class="cc-card">
+        <h2 class="chart-title mb-3">Action Hub</h2>
+        <div class="action-grid">
+          <a href="{% url 'template_tester' %}" class="quick-action">
+            <i class="fa-solid fa-plus"></i>
+            <span>New Ad Campaign</span>
+          </a>
+          <a href="{% url 'template_tester' %}" class="quick-action">
+            <i class="fa-solid fa-palette"></i>
+            <span>Design Template</span>
+          </a>
+          {% if last_edited_template %}
+          <a href="{% url 'template_manual_edit' last_edited_template.pk %}" class="quick-action">
+            <i class="fa-solid fa-compass-drafting"></i>
+            <span>Manual Editor</span>
+          </a>
+          {% else %}
+          <a href="{% url 'template_tester' %}" class="quick-action">
+            <i class="fa-solid fa-compass-drafting"></i>
+            <span>Manual Editor</span>
+          </a>
+          {% endif %}
+          <a href="{% url 'settings_hub_channels' %}" class="quick-action">
+            <i class="fa-solid fa-gear"></i>
+            <span>Connect Channel</span>
+          </a>
+        </div>
+      </article>
     </div>
-    <div class="col-sm-6 col-lg-3">
-      <a href="{% url 'template_tester' %}" class="dashboard-action-card">
-        <span class="dashboard-action-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
-        <span class="dashboard-action-label">Manage Templates</span>
-        <span class="dashboard-action-desc">Preview and manage templates</span>
-      </a>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-      {% if last_edited_template %}
-      <a href="{% url 'template_manual_edit' last_edited_template.pk %}" class="dashboard-action-card">
-        <span class="dashboard-action-icon"><i class="fa-solid fa-sliders" aria-hidden="true"></i></span>
-        <span class="dashboard-action-label">Manual X/Y Editor</span>
-        <span class="dashboard-action-desc">{{ last_edited_template.name }}</span>
-      </a>
-      {% else %}
-      <a href="{% url 'template_tester' %}" class="dashboard-action-card dashboard-action-card--muted">
-        <span class="dashboard-action-icon"><i class="fa-solid fa-sliders" aria-hidden="true"></i></span>
-        <span class="dashboard-action-label">Manual X/Y Editor</span>
-        <span class="dashboard-action-desc">Create a template first</span>
-      </a>
-      {% endif %}
-    </div>
-    <div class="col-sm-6 col-lg-3">
-      <a href="{% url 'channel_list' %}" class="dashboard-action-card">
-        <span class="dashboard-action-icon"><i class="fa-solid fa-broadcast-tower" aria-hidden="true"></i></span>
-        <span class="dashboard-action-label">Channel Manager</span>
-        <span class="dashboard-action-desc">Telegram channels</span>
-      </a>
+    <div class="col-12 col-xl-4">
+      <article class="cc-card activity-card {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}activity-rtl{% endif %}">
+        <h2 class="chart-title mb-3">Recent Activities</h2>
+        <ul class="activity-list">
+          {% for log in recent_activities %}
+          <li>
+            <div class="activity-main" dir="auto">
+              <strong>{{ log.user.username|default:"System" }}</strong>
+              {{ log.action }}
+              {% if log.object_repr %} "{{ log.object_repr }}"{% endif %}
+            </div>
+            <div class="activity-time">{{ log.created_at|timesince }} ago</div>
+          </li>
+          {% empty %}
+          <li class="text-muted">No activity recorded yet.</li>
+          {% endfor %}
+        </ul>
+      </article>
     </div>
   </div>
-</div>
+</section>
 
-<!-- C. Recent Ads Table -->
-<div class="dashboard-section">
-  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-    <h2 class="dashboard-section-title mb-0">Recent Ads</h2>
-    <a href="{% url 'ad_list' %}" class="btn btn-sm btn-outline-secondary">View all</a>
-  </div>
-  <div class="dashboard-table-wrap">
-    <table class="table dashboard-table">
-      <thead>
-        <tr>
-          <th>Content</th>
-          <th>Category</th>
-          <th>Status</th>
-          <th>Created</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for ad in recent_ads %}
-        <tr>
-          <td class="dashboard-table-content"><span dir="auto">{{ ad.content|truncatewords:12|persian_display }}</span></td>
-          <td>{{ ad.get_category_display|default:"—" }}</td>
-          <td><span class="dashboard-status dashboard-status--{{ ad.status }}">{{ ad.get_status_display }}</span></td>
-          <td>{{ ad.created_at|date:"Y-m-d H:i" }}</td>
-          <td><a href="{% url 'ad_detail' ad.uuid %}" class="btn btn-sm btn-outline-primary">View</a></td>
-        </tr>
-        {% empty %}
-        <tr>
-          <td colspan="5" class="text-center text-muted py-4">No ads yet.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Monthly Requests Chart -->
-<div class="dashboard-section mt-5">
-  <div class="dashboard-chart-container" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 1.5rem; box-shadow: var(--shadow-sm);">
-    <div id="monthlyRequestsChart"></div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_css %}
 <style>
-.dashboard-summary-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 1.25rem;
-  box-shadow: var(--shadow-sm);
-  height: 100%;
-}
-.dashboard-summary-label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
-  margin-bottom: 0.35rem;
-}
-.dashboard-summary-value {
-  font-size: 1.75rem;
+.command-center .cc-title {
+  color: var(--text-primary);
   font-weight: 700;
-  color: var(--text-primary);
 }
-.dashboard-summary-api--ok { color: var(--success-color); }
-.dashboard-summary-api--not-configured { color: var(--text-secondary); }
-.dashboard-section-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 1rem;
+.cc-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 1rem;
 }
-.dashboard-action-card {
+.kpi-card { min-height: 165px; position: relative; }
+.kpi-head { display: flex; align-items: center; gap: .5rem; margin-bottom: .45rem; }
+.kpi-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(59, 130, 246, 0.12); color: rgba(59, 130, 246, 1);
+}
+.kpi-label { color: var(--text-secondary); font-size: .85rem; }
+.kpi-value { font-size: 2rem; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.kpi-value.health { font-size: 1.1rem; display: flex; align-items: center; gap: .45rem; }
+.kpi-sub { margin-top: .3rem; color: var(--text-secondary); font-size: .85rem; }
+.kpi-badge {
+  position: absolute; bottom: 1rem; right: 1rem;
+  font-size: .72rem; border-radius: 999px; padding: .23rem .56rem;
+}
+.kpi-badge.up { background: rgba(16,185,129,.15); color: rgba(16,185,129,1); }
+.kpi-badge.down { background: rgba(239,68,68,.15); color: rgba(239,68,68,1); }
+.health-dot { width: .6rem; height: .6rem; border-radius: 999px; display: inline-block; }
+.health-dot.ok { background: rgba(16,185,129,1); box-shadow: 0 0 8px rgba(16,185,129,.55); }
+.health-dot.err { background: rgba(239,68,68,1); box-shadow: 0 0 8px rgba(239,68,68,.55); }
+.insight-card { min-height: 260px; }
+.chart-title { margin: 0; font-size: 1.04rem; font-weight: 600; color: var(--text-primary); }
+.status-breakdown { margin-top: .4rem; }
+.status-row { margin-bottom: .85rem; }
+.status-label {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 1.25rem;
-  text-decoration: none;
+  justify-content: space-between;
   color: var(--text-primary);
-  transition: border-color 0.2s, box-shadow 0.2s;
-  height: 100%;
-  min-height: 120px;
+  font-size: .9rem;
+  margin-bottom: .35rem;
 }
-.dashboard-action-card:hover {
-  border-color: var(--primary-color);
-  box-shadow: var(--shadow-sm);
-  color: var(--text-primary);
-}
-.dashboard-action-card--muted { opacity: 0.85; }
-.dashboard-action-icon {
-  font-size: 1.5rem;
-  color: var(--primary-color);
-  margin-bottom: 0.5rem;
-}
-.dashboard-action-label {
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-.dashboard-action-desc {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-.dashboard-table-wrap {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+.status-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
 }
-.dashboard-table {
-  margin: 0;
+.status-fill { display: block; height: 100%; border-radius: 999px; }
+.status-fill--published { background: rgba(16, 185, 129, 1); }
+.status-fill--draft { background: rgba(59, 130, 246, 1); }
+.status-fill--failed { background: rgba(239, 68, 68, 1); }
+.daily-list {
+  list-style: none;
+  padding: 0;
+  margin: .35rem 0 0;
+}
+.daily-list li {
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) 26px;
+  gap: .6rem;
+  align-items: center;
+  margin-bottom: .6rem;
+}
+.day-name { color: var(--text-secondary); font-size: .86rem; }
+.day-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+.day-bar span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  background: rgba(59, 130, 246, 1);
+}
+.day-value { color: var(--text-primary); font-size: .84rem; text-align: right; }
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .8rem;
+}
+.quick-action {
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   color: var(--text-primary);
+  text-decoration: none;
+  display: flex; flex-direction: column; gap: .45rem;
+  align-items: flex-start; justify-content: center;
+  min-height: 112px;
+  padding: 1rem;
+  transition: border-color .2s, transform .2s ease;
 }
-.dashboard-table thead th {
-  background: var(--bg-body);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.75rem 1rem;
+.quick-action i { font-size: 1.25rem; color: rgba(59,130,246,1); }
+.quick-action span { font-weight: 600; }
+.quick-action:hover { border-color: rgba(59,130,246,1); transform: translateY(-2px); color: var(--text-primary); }
+.activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-list li {
+  padding: .65rem .2rem;
   border-bottom: 1px solid var(--border-color);
 }
-.dashboard-table tbody td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-  vertical-align: middle;
-}
-.dashboard-table tbody tr:last-child td { border-bottom: none; }
-.dashboard-table tbody tr:hover {
-  background: var(--bg-body);
-}
-.dashboard-table-content {
-  max-width: 280px;
-}
-.dashboard-status {
-  display: inline-block;
-  padding: 0.2rem 0.5rem;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 500;
-}
-.dashboard-status--pending_ai,
-.dashboard-status--pending_manual { background: rgba(59, 130, 246, 0.15); color: var(--primary-color); }
-.dashboard-status--approved,
-.dashboard-status--solved { background: rgba(16, 185, 129, 0.15); color: var(--success-color); }
-.dashboard-status--rejected,
-.dashboard-status--expired { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-.dashboard-status--needs_revision { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-.dashboard-chart-container {
-  min-height: 500px;
+.activity-list li:last-child { border-bottom: 0; }
+.activity-main { color: var(--text-primary); font-size: .92rem; }
+.activity-time { color: var(--text-secondary); font-size: .78rem; margin-top: .2rem; }
+.activity-rtl .activity-main { direction: rtl; text-align: right; }
+@media (max-width: 768px) {
+  .action-grid { grid-template-columns: 1fr; }
 }
 </style>
-{% endblock %}
-
-{% block extra_js %}
-<script src="{% static 'js/monthly-requests-chart-chartjs.js' %}"></script>
-<script>
-(function() {
-  // Initialize Monthly Requests Chart
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-      if (window.MonthlyRequestsChartJS) {
-        const darkMode = document.body.classList.contains('theme-dark');
-        window.MonthlyRequestsChartJS.init('monthlyRequestsChart', { darkMode: darkMode });
-      }
-    });
-  } else {
-    if (window.MonthlyRequestsChartJS) {
-      const darkMode = document.body.classList.contains('theme-dark');
-      window.MonthlyRequestsChartJS.init('monthlyRequestsChart', { darkMode: darkMode });
-    }
-  }
-})();
-</script>
 {% endblock %}

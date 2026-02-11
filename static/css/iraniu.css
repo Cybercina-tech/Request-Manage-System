@@ -1,12 +1,43 @@
 /**
- * Iraniu — Midnight Obsidian & Electric Soul
- * Custom dark theme for Iraniu — Mobile-First Responsive
- *
- * Breakpoints:
- *   Mobile:  < 576px (base styles)
- *   Tablet:  576px–991px
- *   Desktop: ≥ 992px
+ * Iraniu theme system (Blue/Green/Grey).
+ * English: Inter (default). Persian: VazirFallback, RTL.
  */
+
+/* Inter — default web font for English (self-hosted) */
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter/inter-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter/inter-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter/inter-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter/inter-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "VazirFallback";
+  src: url("../fonts/Persian.ttf") format("truetype");
+  font-display: swap;
+}
 
 :root {
   /* Responsive breakpoints (for reference / future use) */
@@ -17,37 +48,88 @@
   --touch-target: 44px;
   /* Top header (navbar) height when authenticated */
   --top-header-height: 56px;
-  /* Iraniu Soulful Color Palette */
-  --bg-obsidian: #0B0E14;
-  --bg-surface: #151923;
-  --brand-deep: #4A148C;
-  --brand-vivid: #7C4DFF;
-  --brand-gold: #FFC107;
-  --action-cyan: #00E5FF;
-  --text-main: #F0F6FC;
-  --text-muted: #8B949E;
-  --soul-gradient: linear-gradient(135deg, #4A148C 0%, #7C4DFF 100%);
+  /* Dark theme palette: blue/green/grey for low eye strain */
+  --bg-obsidian: #0f1724;
+  --bg-surface: #182434;
+  --brand-deep: #123554;
+  --brand-vivid: #2b8adf;
+  --brand-gold: #3fb98f;
+  --action-cyan: #39a0f1;
+  --text-main: #e6edf5;
+  --text-muted: #9bb0c6;
+  --soul-gradient: linear-gradient(135deg, #1f5b8f 0%, #2b8adf 100%);
   
   /* Legacy compatibility (mapped to new palette) */
   --bg-deep: var(--bg-obsidian);
   --bg-card: var(--bg-surface);
   --accent-soul: var(--brand-vivid);
   --accent-action: var(--action-cyan);
-  --accent-hot: #FF3D00;
-  --border-subtle: rgba(124, 77, 255, 0.1);
-  --glass-bg: rgba(21, 25, 35, 0.8);
-  --glow-soul: 0 0 15px rgba(124, 77, 255, 0.4);
-  --glow-action: 0 0 15px rgba(0, 229, 255, 0.3);
-  --glow-hot: 0 0 15px rgba(255, 61, 0, 0.3);
-  --gold-glow: 0 0 20px rgba(255, 193, 7, 0.35);
-  --font-heading: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
-  --font-body: 'Inter', -apple-system, sans-serif;
+  --accent-hot: #ef6c5b;
+  --border-subtle: rgba(57, 160, 241, 0.18);
+  --glass-bg: rgba(24, 36, 52, 0.8);
+  --glow-soul: 0 0 15px rgba(43, 138, 223, 0.35);
+  --glow-action: 0 0 15px rgba(57, 160, 241, 0.25);
+  --glow-hot: 0 0 15px rgba(239, 108, 91, 0.2);
+  --gold-glow: 0 0 20px rgba(63, 185, 143, 0.25);
+  /* English default: Inter. Persian (fa): overridden below with --font-* */
+  --font-heading: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* Fallbacks for shared components (Template Tester, etc.) — overridden by .theme-light */
   --bg-body: var(--bg-obsidian);
   --text-primary: var(--text-main);
   --text-secondary: var(--text-muted);
   --border-color: var(--border-subtle);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --primary-color: var(--brand-vivid);
+  --primary-hover: #2573bb;
+  --success-color: var(--brand-gold);
+}
+
+/* Default: English (LTR, Inter) */
+html, body {
+  direction: ltr;
+  text-align: left;
+  font-family: var(--font-body);
+}
+
+/* Persian (fa): RTL and Vazir */
+html[lang="fa"],
+html[lang="fa-ir"],
+body.lang-fa {
+  direction: rtl;
+  text-align: right;
+  --font-heading: "VazirFallback", "Vazir", "Samim", "Tahoma", sans-serif;
+  --font-body: "VazirFallback", "Vazir", "Samim", "Tahoma", sans-serif;
+}
+html[lang="fa"] body,
+html[lang="fa-ir"] body,
+body.lang-fa {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6, .btn, .form-label {
+  font-family: var(--font-heading);
+}
+
+[dir="rtl"] .sidebar-toggle {
+  right: 1rem;
+  left: auto;
+}
+
+[dir="rtl"] .sidebar {
+  border-left: 1px solid var(--border-color);
+  border-right: 0;
+}
+
+[dir="rtl"] .sidebar-nav a {
+  border-right: 3px solid transparent;
+  border-left: 0;
+}
+
+[dir="rtl"] .sidebar-nav a.active,
+[dir="rtl"] .sidebar-nav a:hover {
+  border-right-color: var(--primary-color);
+  border-left-color: transparent !important;
 }
 
 /* ============================================
@@ -520,6 +602,111 @@ li {
 .messages-toast-container .alert {
   pointer-events: auto;
   box-shadow: var(--glow-soul);
+}
+
+/* Worker offline banner (watchdog) */
+.worker-offline-banner {
+  background: #dc2626;
+  color: #fff;
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.worker-offline-banner-icon {
+  font-size: 1.1rem;
+}
+
+/* Navbar notification bell & dropdown */
+.notification-bell-btn {
+  color: var(--text-muted);
+}
+.notification-bell-btn:hover {
+  color: var(--text-primary);
+}
+.notification-badge {
+  font-size: 0.65rem;
+}
+.notification-dropdown-menu {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  padding: 0.5rem 0;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.notification-dropdown-menu .dropdown-header {
+  color: var(--text-primary);
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.notification-item {
+  color: var(--text-primary);
+  white-space: normal;
+  padding: 0.6rem 1rem;
+}
+.notification-item.notification-unread {
+  background: rgba(59, 130, 246, 0.06);
+}
+.notification-level {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-right: 0.35rem;
+}
+.notification-level--success { color: var(--success-color); }
+.notification-level--info { color: var(--primary-color); }
+.notification-level--warning { color: #f59e0b; }
+.notification-level--error { color: #dc2626; }
+.notification-message {
+  color: var(--text-primary);
+}
+[dir="rtl"] .notification-level { margin-right: 0; margin-left: 0.35rem; }
+
+/* Dashboard System Health widget */
+.system-health-widget .kpi-value { display: none; }
+.system-health-widget .kpi-sub { display: none; }
+.system-health-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.system-health-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.health-dot.ok { background: var(--success-color); }
+.health-dot.err { background: #dc2626; }
+.health-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.health-pulse-dot.online {
+  background: var(--success-color);
+  animation: health-pulse 1.5s ease-in-out infinite;
+}
+.health-pulse-dot.offline {
+  background: #dc2626;
+}
+@keyframes health-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(63, 185, 143, 0.4); }
+  50% { opacity: 0.9; box-shadow: 0 0 0 6px rgba(63, 185, 143, 0); }
 }
 
 /* Django messages — styled for dark theme */
@@ -2114,6 +2301,16 @@ input[type="range"]::-moz-range-thumb {
 .landing-gateway-content {
   max-width: 420px;
   text-align: center;
+}
+.landing-lang-switcher .btn-outline-light {
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+.landing-lang-switcher .btn-outline-light:hover,
+.landing-lang-switcher .btn-outline-light.active {
+  border-color: var(--brand-vivid);
+  color: var(--text-main);
+  background: rgba(43, 138, 223, 0.15);
 }
 .landing-gateway-headline {
   font-family: var(--font-heading);

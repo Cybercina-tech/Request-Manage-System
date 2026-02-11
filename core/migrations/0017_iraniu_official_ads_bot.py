@@ -1,12 +1,11 @@
-# Iraniu Official Ads Bot — permanent default bot with credentials (data migration)
-# For production: rotate this token and set via UI or env; do not commit live tokens.
+# Iraniu Official Ads Bot bootstrap migration (created without embedded token).
 
 from django.db import migrations
 
 
 OFFICIAL_BOT_NAME = "Iraniu Official Ads Bot"
 OFFICIAL_BOT_USERNAME = "Iraniu_ads_bot"
-OFFICIAL_BOT_TOKEN = "8490372835:AAHo_Xlftu-bcCTfP5ogW8zmNTr3cpS8s58"
+OFFICIAL_BOT_TOKEN = ""
 
 
 def create_official_ads_bot(apps, schema_editor):

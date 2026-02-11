@@ -32,6 +32,7 @@ POLL_TIMEOUT = 30
 RECONNECT_DELAY_BASE = 2
 RECONNECT_DELAY_MAX = 60
 HEARTBEAT_INTERVAL_SEC = 30
+SYSTEM_STATUS_HEARTBEAT_SEC = 60  # Update SystemStatus singleton every 60s for watchdog
 MAX_CONSECUTIVE_ERRORS = 15
 OFFLINE_THRESHOLD_SEC = 90
 # 409 Conflict = another getUpdates already running; backoff and do not retry immediately
@@ -78,6 +79,20 @@ def _update_error(bot_id: int, error_msg: str, status: str = None):
     if status is not None:
         upd["status"] = status
     _update_status(bot_id, **upd)
+
+
+def _update_system_status_heartbeat():
+    """Update SystemStatus singleton (last_heartbeat, is_bot_active=True). Used by runbots worker."""
+    try:
+        from django.core.cache import cache
+        from core.models import SystemStatus
+        status = SystemStatus.get_status()
+        status.last_heartbeat = timezone.now()
+        status.is_bot_active = True
+        status.save(update_fields=["last_heartbeat", "is_bot_active", "updated_at"])
+        cache.delete("system_status_worker_online")
+    except Exception as e:
+        logger.debug("update_system_status_heartbeat: %s", e)
 
 
 class BotWorker:
@@ -158,6 +173,7 @@ class BotWorker:
         consecutive_errors = 0
         conflict_backoff_index = 0
         last_heartbeat_time = time.monotonic()
+        last_system_heartbeat_time = time.monotonic()
 
         def _sigterm(_signum, _frame):
             self._shutdown_requested = True
@@ -263,6 +279,12 @@ class BotWorker:
                             status=TelegramBot.Status.ONLINE,
                         )
                         last_heartbeat_time = now
+                    except Exception:
+                        pass
+                if now - last_system_heartbeat_time >= SYSTEM_STATUS_HEARTBEAT_SEC:
+                    try:
+                        _update_system_status_heartbeat()
+                        last_system_heartbeat_time = now
                     except Exception:
                         pass
 

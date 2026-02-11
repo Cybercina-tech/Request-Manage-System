@@ -10,6 +10,8 @@ from django.utils.html import format_html
 from datetime import timedelta
 from .models import (
     SiteConfiguration,
+    SystemStatus,
+    Notification,
     AdTemplate,
     Category,
     AdRequest,
@@ -24,6 +26,7 @@ from .models import (
     ApiClient,
     DeliveryLog,
     ScheduledInstagramPost,
+    ActivityLog,
 )
 
 
@@ -84,6 +87,30 @@ class SiteConfigurationAdmin(admin.ModelAdmin):
     filter_horizontal = ()
     raw_id_fields = ['default_telegram_bot']
     inlines = [TelegramChannelInline]
+
+
+@admin.register(SystemStatus)
+class SystemStatusAdmin(admin.ModelAdmin):
+    list_display = ['pk', 'last_heartbeat', 'is_bot_active', 'updated_at']
+    readonly_fields = ['last_heartbeat', 'is_bot_active', 'active_errors', 'updated_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ['id', 'level', 'message_short', 'is_read', 'created_at']
+    list_filter = ['level', 'is_read']
+    search_fields = ['message']
+    readonly_fields = ['created_at']
+
+    def message_short(self, obj):
+        return (obj.message or '')[:60] + ('…' if len(obj.message or '') > 60 else '')
+    message_short.short_description = 'Message'
 
 
 class AdRequestInline(admin.TabularInline):
@@ -291,11 +318,10 @@ class TelegramBotAdmin(admin.ModelAdmin):
             status=TelegramBot.Status.OFFLINE,
             mode=TelegramBot.Mode.POLLING,
         )
-        bot.set_token("8576459250:AAH61NFfBZMqzYJMBPZt3nx-24w53g8zXzM")
         bot.save()
         self.message_user(
             request,
-            "Dev Bot (@Iraniu_dev_bot) created. Set a Dev Channel linked to this bot for testing.",
+            "Dev Bot (@Iraniu_dev_bot) created without token. Set bot token from Bots page before use.",
             level=admin.constants.SUCCESS,
         )
 
@@ -376,6 +402,20 @@ class DeliveryLogAdmin(admin.ModelAdmin):
     list_filter = ['channel', 'status']
     search_fields = ['ad__uuid', 'error_message']
     readonly_fields = ['created_at']
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'user', 'action', 'object_type', 'object_repr']
+    list_filter = ['object_type', 'action']
+    search_fields = ['action', 'object_type', 'object_repr', 'user__username']
+    readonly_fields = ['created_at', 'user', 'action', 'object_type', 'object_repr', 'metadata']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(AdminProfile)
@@ -531,4 +571,3 @@ class AdTemplateAdmin(admin.ModelAdmin):
             return
         url = reverse('admin:core_adtemplate_coordinate_lab', args=[first.pk])
         return redirect(url)
-

@@ -1,0 +1,87 @@
+<div class="settings-hub-card-header">
+  <h2>Instagram Business API</h2>
+  <p>Configure your Instagram Business API connection here. Use App ID and long-lived token from Meta for Developers.</p>
+</div>
+<div class="settings-hub-card-body">
+  <form id="instagramCardForm">
+    {% csrf_token %}
+    <input type="hidden" name="section" value="instagram">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">App ID</label>
+        <input type="text" class="form-control" name="app_id" value="{{ instagram_form.initial.app_id|default:'' }}" placeholder="Facebook App ID">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">App Secret</label>
+        <div class="input-group token-wrap">
+          <input type="password" class="form-control" name="app_secret" placeholder="••••••••" autocomplete="new-password">
+          <button class="btn btn-outline-secondary toggle-password" type="button" data-target="app_secret"><i class="fa-regular fa-eye"></i></button>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">Instagram Business ID</label>
+        <input type="text" class="form-control" name="instagram_business_id" value="{{ instagram_form.initial.instagram_business_id|default:'' }}" placeholder="Instagram Graph API user ID">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label d-flex align-items-center gap-2" style="color: var(--text-primary);">
+          Long-lived Access Token
+          {% if instagram_token_ok %}
+            <span class="status-badge active"><i class="fa-solid fa-check"></i> Active</span>
+          {% else %}
+            <span class="status-badge expired"><i class="fa-solid fa-circle-exclamation"></i> Inactive</span>
+          {% endif %}
+        </label>
+        <div class="input-group token-wrap">
+          <input type="password" class="form-control" name="long_lived_access_token" placeholder="••••••••" autocomplete="new-password">
+          <button class="btn btn-outline-secondary toggle-password" type="button" data-target="long_lived_access_token"><i class="fa-regular fa-eye"></i></button>
+        </div>
+      </div>
+      <div class="col-12">
+        <button type="button" class="btn btn-outline-primary" id="instagramCheckBtn">Check Connection</button>
+        <span id="instagramCheckResult" class="ms-2 small"></span>
+      </div>
+    </div>
+  </form>
+</div>
+<div class="settings-hub-card-footer">
+  <button type="button" class="btn btn-soul" id="instagramSaveBtn">Save Changes</button>
+</div>
+
+<script>
+(function() {
+  var form = document.getElementById('instagramCardForm');
+  if (!form) return;
+  var csrf = (window.settingsHub && window.settingsHub.csrf) || (form.querySelector('[name=csrfmiddlewaretoken]') && form.querySelector('[name=csrfmiddlewaretoken]').value);
+  form.querySelectorAll('.toggle-password').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var name = btn.getAttribute('data-target');
+      var input = form.querySelector('[name="' + name + '"]');
+      if (!input) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.querySelector('i').className = input.type === 'password' ? 'fa-regular fa-eye' : 'fa-regular fa-eye-slash';
+    });
+  });
+  document.getElementById('instagramCheckBtn').addEventListener('click', function() {
+    var resultEl = document.getElementById('instagramCheckResult');
+    var fd = new FormData(form);
+    fd.set('long_lived_access_token', form.querySelector('[name=long_lived_access_token]').value);
+    fetch('{% url "check_instagram_connection" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        resultEl.textContent = d.message || (d.success ? 'OK' : 'Failed');
+        resultEl.style.color = d.success ? 'var(--success-color)' : '#dc2626';
+      })
+      .catch(function() { resultEl.textContent = 'Request failed'; resultEl.style.color = '#dc2626'; });
+  });
+  document.getElementById('instagramSaveBtn').addEventListener('click', function() {
+    var fd = new FormData(form);
+    fetch('{% url "settings_save" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'success' && window.settingsHub && window.settingsHub.showToast) window.settingsHub.showToast();
+        else if (d.status !== 'success') alert(d.message || 'Save failed');
+      })
+      .catch(function() { alert('Request failed'); });
+  });
+})();
+</script>

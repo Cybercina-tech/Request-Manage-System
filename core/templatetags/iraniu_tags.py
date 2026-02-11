@@ -4,7 +4,6 @@ Persian/Arabic text reshaping for consistent RTL display.
 """
 
 from django import template
-from django.utils.safestring import mark_safe
 
 register = template.Library()
 
@@ -21,6 +20,6 @@ def persian_display(text):
         import arabic_reshaper
         from bidi.algorithm import get_display
         reshaped = arabic_reshaper.reshape(str(text))
-        return mark_safe(get_display(reshaped))
+        return get_display(reshaped)
     except (ImportError, Exception):
         return text

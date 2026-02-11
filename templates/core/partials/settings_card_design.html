@@ -1,0 +1,99 @@
+<div class="settings-hub-card-header">
+  <h2>Global Design Defaults</h2>
+  <p>Set the baseline for every new ad: font, colors, and watermark. The mini-preview updates as you change options.</p>
+</div>
+<div class="settings-hub-card-body">
+  <form id="designCardForm">
+    {% csrf_token %}
+    <input type="hidden" name="section" value="design">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">Default Font</label>
+        <select class="form-select" name="default_font" id="designDefaultFont">
+          {% for value, label in font_options %}
+          <option value="{{ value }}" {% if config.default_font == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">Watermark Opacity</label>
+        <div class="d-flex align-items-center gap-2">
+          <input type="range" class="form-range flex-grow-1" name="default_watermark_opacity" id="designWatermarkOpacity" min="0" max="100" value="{{ config.default_watermark_opacity|default:60 }}">
+          <span id="designOpacityValue" class="small fw-bold" style="min-width: 2.5rem;">{{ config.default_watermark_opacity|default:60 }}%</span>
+        </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label" style="color: var(--text-primary);">Default Color Palette</label>
+        <div class="d-flex flex-wrap gap-4 align-items-center">
+          <div class="d-flex align-items-center gap-2">
+            <label class="small mb-0" style="color: var(--text-secondary);">Primary</label>
+            <input type="color" class="form-control form-control-color" name="default_primary_color" id="designPrimaryColor" value="{{ config.default_primary_color|default:'#2b8adf' }}" style="width: 2.5rem; height: 2.5rem; padding: 2px; cursor: pointer;">
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small mb-0" style="color: var(--text-secondary);">Secondary</label>
+            <input type="color" class="form-control form-control-color" name="default_secondary_color" id="designSecondaryColor" value="{{ config.default_secondary_color|default:'#3fb98f' }}" style="width: 2.5rem; height: 2.5rem; padding: 2px; cursor: pointer;">
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label class="small mb-0" style="color: var(--text-secondary);">Accent</label>
+            <input type="color" class="form-control form-control-color" name="default_accent_color" id="designAccentColor" value="{{ config.default_accent_color|default:'#39a0f1' }}" style="width: 2.5rem; height: 2.5rem; padding: 2px; cursor: pointer;">
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label" style="color: var(--text-primary);">Watermark Image</label>
+        <input type="file" class="form-control" name="default_watermark" accept="image/*">
+        {% if config.default_watermark %}<p class="small text-muted mt-1">Current: {{ config.default_watermark.name }}</p>{% endif %}
+      </div>
+      <div class="col-12">
+        <label class="form-label" style="color: var(--text-primary);">Live Preview</label>
+        <div id="designMiniPreview" class="mini-preview">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span id="previewPrimary" class="rounded" style="width: 1rem; height: 1rem;"></span>
+            <span id="previewSecondary" class="rounded" style="width: 1rem; height: 1rem;"></span>
+            <span id="previewAccent" class="rounded" style="width: 1rem; height: 1rem;"></span>
+          </div>
+          <p id="previewSample" class="mb-0 small" style="font-family: var(--font-body);">Sample ad text with default colors</p>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+<div class="settings-hub-card-footer">
+  <button type="button" class="btn btn-soul" id="designSaveBtn">Save Changes</button>
+</div>
+
+<script>
+(function() {
+  var form = document.getElementById('designCardForm');
+  if (!form) return;
+  var csrf = (window.settingsHub && window.settingsHub.csrf) || (form.querySelector('[name=csrfmiddlewaretoken]') && form.querySelector('[name=csrfmiddlewaretoken]').value);
+  var opacityRange = document.getElementById('designWatermarkOpacity');
+  var opacityValue = document.getElementById('designOpacityValue');
+  if (opacityRange && opacityValue) {
+    opacityRange.addEventListener('input', function() { opacityValue.textContent = opacityRange.value + '%'; });
+  }
+  function updatePreview() {
+    var primary = (document.getElementById('designPrimaryColor') || {}).value || '#2b8adf';
+    var secondary = (document.getElementById('designSecondaryColor') || {}).value || '#3fb98f';
+    var accent = (document.getElementById('designAccentColor') || {}).value || '#39a0f1';
+    var p1 = document.getElementById('previewPrimary');
+    var p2 = document.getElementById('previewSecondary');
+    var p3 = document.getElementById('previewAccent');
+    if (p1) p1.style.backgroundColor = primary;
+    if (p2) p2.style.backgroundColor = secondary;
+    if (p3) p3.style.backgroundColor = accent;
+  }
+  form.querySelectorAll('input[type=color]').forEach(function(inp) { inp.addEventListener('input', updatePreview); });
+  updatePreview();
+  document.getElementById('designSaveBtn').addEventListener('click', function() {
+    var fd = new FormData(form);
+    fetch('{% url "settings_save" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'success' && window.settingsHub && window.settingsHub.showToast) window.settingsHub.showToast();
+        else if (d.status !== 'success') alert(d.message || 'Save failed');
+      })
+      .catch(function() { alert('Request failed'); });
+  });
+})();
+</script>

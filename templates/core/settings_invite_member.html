@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Invite Member — Settings{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    Invite Member
+  </h1>
+  <a href="{% url 'settings_hub_instagram' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back to Settings</a>
+</div>
+
+<div class="card-soul mb-4" style="max-width: 420px;">
+  {% if error %}
+  <div class="alert alert-danger mb-3" role="alert">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="{% url 'settings_invite_member' %}">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label" for="id_email">Email</label>
+      <input type="email" name="email" id="id_email" class="form-control" value="{{ email|default:'' }}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="id_role">Role</label>
+      <select name="role" id="id_role" class="form-select">
+        <option value="editor" {% if role == 'editor' %}selected{% endif %}>Editor</option>
+        <option value="viewer" {% if role == 'viewer' or not role %}selected{% endif %}>Viewer</option>
+        <option value="admin" {% if role == 'admin' %}selected{% endif %}>Admin</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-soul">Send Invitation</button>
+  </form>
+</div>
+{% endblock %}

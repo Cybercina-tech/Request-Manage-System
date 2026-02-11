@@ -1,0 +1,25 @@
+# Persian (فارسی) — Iraniu landing
+# Copyright (C) 2025
+# This file is distributed under the same license as the Iraniu project.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Iraniu\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-02-11 12:00+0000\n"
+"PO-Revision-Date: 2025-02-11 12:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: Persian\n"
+"Language: fa\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Thank you for visiting Iraniu"
+msgstr "از بازدید شما از ایرانيو سپاسگزاریم"
+
+msgid "This platform is for staff members only."
+msgstr "این پلتفرم فقط برای کارکنان است."
+
+msgid "Staff Login"
+msgstr "ورود کارکنان"

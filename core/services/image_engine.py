@@ -155,6 +155,19 @@ def _hex_to_rgb(value: str):
         return (255, 255, 255)
 
 
+def _coerce_int(value, *, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    """Safely coerce a value to int with optional bounds; fallback to default on failure."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
 def _wrap_persian_text(draw, text: str, font, max_width: int, reshaper, get_display):
     """
     Word-wrap Persian text to fit within max_width.
@@ -222,6 +235,7 @@ def create_ad_image(
     category: str,
     text: str,
     phone: str,
+    price: str = "",
     *,
     background_file=None,
 ) -> str | None:
@@ -291,22 +305,37 @@ def create_ad_image(
 
     base_font_path = tpl.font_file.path if tpl.font_file else None
 
+    def _draw_aligned_line(draw_obj, txt: str, x: int, y: int, font_obj, color, align: str, max_w: int | None = None):
+        if not txt:
+            return
+        bbox = draw_obj.textbbox((0, 0), txt, font=font_obj)
+        text_w = max(1, bbox[2] - bbox[0])
+        area_w = max_w if (max_w is not None and max_w > 0) else text_w
+        anchor_x = x
+        if align == "center":
+            anchor_x = x + int((area_w - text_w) / 2)
+        elif align == "left":
+            anchor_x = x + int(max(0, area_w - text_w))
+        draw_obj.text((anchor_x, y), txt, fill=color, font=font_obj)
+
     # Category
     c_conf = coords.get("category", {})
     cat_font = _load_font(
         base_font_path,
         c_conf.get("font_path") or "",
         ImageFont,
-        int(c_conf.get("size") or 48),
+        _coerce_int(c_conf.get("size"), default=48, minimum=1, maximum=400),
     )
     cat_color = _hex_to_rgb(c_conf.get("color") or "#FFFFFF")
-    cat_x = int(c_conf.get("x") or 0)
-    cat_y = int(c_conf.get("y") or 0)
+    cat_x = _coerce_int(c_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
+    cat_y = _coerce_int(c_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
+    cat_align = (c_conf.get("align") or "right").strip().lower()
+    if cat_align not in ("left", "center", "right"):
+        cat_align = "right"
     # Step A: Reshape + Step B: BiDi for Category text
     cat_text = _shape_persian(category or "", reshaper, get_display)
     if cat_text:
-        # Step C: Draw the processed text
-        draw.text((cat_x, cat_y), cat_text, fill=cat_color, font=cat_font)
+        _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align)
 
     # Description (body)
     d_conf = coords.get("description", {})
@@ -314,19 +343,21 @@ def create_ad_image(
         base_font_path,
         d_conf.get("font_path") or "",
         ImageFont,
-        int(d_conf.get("size") or 32),
+        _coerce_int(d_conf.get("size"), default=32, minimum=1, maximum=400),
     )
     desc_color = _hex_to_rgb(d_conf.get("color") or "#FFFFFF")
-    desc_x = int(d_conf.get("x") or 0)
-    desc_y = int(d_conf.get("y") or 0)
-    max_width = int(d_conf.get("max_width") or 800)
+    desc_x = _coerce_int(d_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
+    desc_y = _coerce_int(d_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
+    max_width = _coerce_int(d_conf.get("max_width"), default=800, minimum=1, maximum=img.width * 2)
+    desc_align = (d_conf.get("align") or "right").strip().lower()
+    if desc_align not in ("left", "center", "right"):
+        desc_align = "right"
 
     # Multi-line Description: Each line is already reshaped individually by _wrap_persian_text
     wrapped_lines = _wrap_persian_text(draw, text or "", desc_font, max_width, reshaper, get_display)
     for line in wrapped_lines:
         # Line is already reshaped and BiDi-processed by _wrap_persian_text
-        # Step C: Draw the processed line
-        draw.text((desc_x, desc_y), line, fill=desc_color, font=desc_font)
+        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width)
         bbox = draw.textbbox((0, 0), line, font=desc_font)
         desc_y += (bbox[3] - bbox[1]) + 6
 
@@ -336,16 +367,36 @@ def create_ad_image(
         base_font_path,
         p_conf.get("font_path") or "",
         ImageFont,
-        int(p_conf.get("size") or 28),
+        _coerce_int(p_conf.get("size"), default=28, minimum=1, maximum=400),
     )
     phone_color = _hex_to_rgb(p_conf.get("color") or "#FFFF00")
-    phone_x = int(p_conf.get("x") or 0)
-    phone_y = int(p_conf.get("y") or 0)
+    phone_x = _coerce_int(p_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
+    phone_y = _coerce_int(p_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
+    phone_align = (p_conf.get("align") or "right").strip().lower()
+    if phone_align not in ("left", "center", "right"):
+        phone_align = "right"
     # Step A: Reshape + Step B: BiDi for Phone text
     phone_text = _shape_persian(phone or "", reshaper, get_display)
     if phone_text:
-        # Step C: Draw the processed text
-        draw.text((phone_x, phone_y), phone_text, fill=phone_color, font=phone_font)
+        _draw_aligned_line(draw, phone_text, phone_x, phone_y, phone_font, phone_color, phone_align)
+
+    # Price (optional layer)
+    price_conf = coords.get("price", {})
+    price_font = _load_font(
+        base_font_path,
+        price_conf.get("font_path") or "",
+        ImageFont,
+        _coerce_int(price_conf.get("size"), default=30, minimum=1, maximum=400),
+    )
+    price_color = _hex_to_rgb(price_conf.get("color") or "#00E5FF")
+    price_x = _coerce_int(price_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
+    price_y = _coerce_int(price_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
+    price_align = (price_conf.get("align") or "right").strip().lower()
+    if price_align not in ("left", "center", "right"):
+        price_align = "right"
+    price_text = _shape_persian(price or "", reshaper, get_display)
+    if price_text:
+        _draw_aligned_line(draw, price_text, price_x, price_y, price_font, price_color, price_align)
 
     # Save
     media_root = _get_media_root()
@@ -402,4 +453,3 @@ def make_story_image(feed_image_path: str) -> str | None:
         logger.warning("make_story_image: failed to save: %s", e)
         return None
     return str(out_path.resolve())
-

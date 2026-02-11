@@ -54,11 +54,12 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        bot_ids = None  # Defined at start so finally block never sees UnboundLocalError
         # Lock mechanism: prevent duplicate execution (e.g., Cron Job overlap)
         LOCK_KEY = "runbots_execution_lock"
         LOCK_TIMEOUT = 3600  # 1 hour (in case process crashes without releasing)
         current_pid = os.getpid()
-        
+
         # Try to acquire lock
         lock_acquired = cache.add(LOCK_KEY, current_pid, timeout=LOCK_TIMEOUT)
         if not lock_acquired:
@@ -70,10 +71,10 @@ class Command(BaseCommand):
                 )
             )
             sys.exit(1)
-        
+
         try:
             log_dir = (options.get("log_dir") or "").strip()
-            base = Path(settings.BASE_DIR) if getattr(settings, "BASE_DIR", None) else Path.cwd()
+            base = Path(settings.BASE_DIR)
             if not log_dir:
                 log_dir = str(base / "logs")
             else:
@@ -87,14 +88,13 @@ class Command(BaseCommand):
             mode = getattr(settings, "TELEGRAM_MODE", "polling").lower()
             if mode not in ("polling", "webhook"):
                 mode = "polling"
-            
+
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Supervisor starting (mode={mode}, PID={current_pid}) — Ctrl+C to stop"
                 )
             )
-            
-            from django.conf import settings
+
             env = getattr(settings, "ENVIRONMENT", "PROD")
             qs = TelegramBot.objects.filter(
                 environment=env, is_active=True, mode=TelegramBot.Mode.POLLING
@@ -153,10 +153,17 @@ class Command(BaseCommand):
                 # Re-raise exceptions; finally block will handle cleanup
                 raise
         finally:
-            # Release lock
+            # Release lock and mark system status as inactive (watchdog)
             cache.delete(LOCK_KEY)
+            try:
+                from core.models import SystemStatus
+                status = SystemStatus.get_status()
+                status.is_bot_active = False
+                status.save(update_fields=["is_bot_active", "updated_at"])
+            except Exception:
+                pass
             self.stdout.write(self.style.SUCCESS(f"runbots process exiting (PID={current_pid})"))
-            if bot_ids:
+            if bot_ids is not None and bot_ids:
                 TelegramBot.objects.filter(pk__in=bot_ids).update(
                     current_pid=None,
                     is_running=False,

@@ -1,21 +1,19 @@
-{% load static %}
+{% load static i18n %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ request.LANGUAGE_CODE|default:'en' }}" dir="{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}rtl{% else %}ltr{% endif %}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Iraniu{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   {% comment %}Project CSS/JS: always use {% static %} — do not hardcode /static/{% endcomment %}
   <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}?v={{ STATIC_VERSION }}">
   <link rel="stylesheet" href="{% static 'css/style.css' %}?v={{ STATIC_VERSION }}">
   <link rel="stylesheet" href="{% static 'css/iraniu.css' %}?v={{ STATIC_VERSION }}">
   {% block extra_css %}{% endblock %}
 </head>
-<body class="theme-{{ theme_preference|default:'light' }}" data-initial-theme="{{ theme_preference|default:'light' }}">
+<body class="theme-{{ theme_preference|default:'light' }} {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}lang-fa{% endif %}" data-initial-theme="{{ theme_preference|default:'light' }}">
   <script>
     (function() {
       var stored = localStorage.getItem('iraniu_theme');
@@ -32,12 +30,51 @@
       <div class="top-header-inner">
         <div class="top-header-left"></div>
         <div class="top-header-right d-flex align-items-center gap-3">
+          <div class="dropdown notification-bell-dropdown">
+            <button class="btn btn-link position-relative p-2 text-decoration-none notification-bell-btn" type="button" id="notificationBellBtn" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Notifications">
+              <i class="fa-solid fa-bell" aria-hidden="true"></i>
+              {% if notification_unread_count > 0 %}
+              <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger notification-badge">{{ notification_unread_count }}</span>
+              {% endif %}
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end notification-dropdown-menu {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}text-end{% endif %}" dir="{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}rtl{% else %}ltr{% endif %}" aria-labelledby="notificationBellBtn" style="min-width: 320px; max-width: 400px;" data-read-url="{% url 'notification_mark_read' 1 %}">
+              <li class="dropdown-header d-flex justify-content-between align-items-center">
+                <span>Notifications</span>
+                {% if notification_unread_count > 0 %}
+                <button type="button" class="btn btn-sm btn-outline-secondary notification-mark-all-read">Mark all read</button>
+                {% endif %}
+              </li>
+              {% for n in recent_notifications %}
+              <li>
+                <div class="dropdown-item notification-item {% if not n.is_read %}notification-unread{% endif %} {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}text-end{% endif %}" dir="{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}rtl{% else %}ltr{% endif %}" data-notification-id="{{ n.id }}">
+                  <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="flex-grow-1">
+                      {% if n.link %}<a href="{{ n.link }}" class="text-decoration-none">{% endif %}
+                      <span class="notification-level notification-level--{{ n.level }}">{{ n.level|upper }}</span>
+                      <span class="notification-message">{{ n.message }}</span>
+                      <small class="d-block text-muted">{{ n.created_at }}</small>
+                      {% if n.link %}</a>{% endif %}
+                    </div>
+                    {% if not n.is_read and n.id %}
+                    <button type="button" class="btn btn-sm btn-link p-0 notification-mark-read" data-id="{{ n.id }}" aria-label="Mark as read">Mark read</button>
+                    {% endif %}
+                  </div>
+                </div>
+              </li>
+              {% empty %}
+              <li><div class="dropdown-item text-muted text-center">هیچ اعلانی ندارید</div></li>
+              {% endfor %}
+            </ul>
+          </div>
           <button type="button" class="theme-switcher-btn border-0 rounded p-2" title="Toggle theme" aria-label="Toggle light/dark theme" data-theme-toggle>
             <i class="fa-solid fa-sun icon theme-icon-light" aria-hidden="true" style="display: {% if theme_preference == 'dark' %}inline-block{% else %}none{% endif %};"></i>
             <i class="fa-solid fa-moon icon theme-icon-dark" aria-hidden="true" style="display: {% if theme_preference == 'light' %}inline-block{% else %}none{% endif %};"></i>
           </button>
           <span class="top-header-user text-nowrap">{{ user.get_full_name|default:user.username }}</span>
-          <a href="{% url 'logout' %}" class="btn btn-sm btn-outline-secondary">Logout</a>
+          <form method="post" action="{% url 'logout' %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
+          </form>
         </div>
       </div>
     </header>
@@ -70,7 +107,7 @@
             <i class="fa-solid fa-layer-group icon me-2" aria-hidden="true"></i>
             Template Manager
           </a>
-          <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
+          <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name|slice:':14' == 'settings_hub_' %}active{% endif %}">
             <i class="fa-solid fa-cog icon me-2" aria-hidden="true"></i>
             System Settings
           </a>
@@ -174,6 +211,61 @@
       window.addEventListener('load', function() { setTimeout(hideBar, 300); });
       window.addEventListener('pageshow', function(e) { if (!e.persisted) setTimeout(hideBar, 200); });
     })();
+
+    // Notification: mark one as read, mark all as read
+    (function() {
+      var menu = document.querySelector('.notification-dropdown-menu');
+      var readUrlTemplate = menu && menu.getAttribute('data-read-url');
+      document.querySelectorAll('.notification-mark-read').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.preventDefault();
+          var id = btn.getAttribute('data-id');
+          if (!id || !readUrlTemplate) return;
+          var url = readUrlTemplate.replace(/\/1\//, '/' + id + '/');
+          var form = new FormData();
+          form.append('csrfmiddlewaretoken', csrfToken);
+          fetch(url, { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function() { window.location.reload(); });
+        });
+      });
+      var markAll = document.querySelector('.notification-mark-all-read');
+      if (markAll) {
+        markAll.addEventListener('click', function() {
+          var form = new FormData();
+          form.append('csrfmiddlewaretoken', csrfToken);
+          fetch('{% url "notification_mark_all_read" %}', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function() { window.location.reload(); });
+        });
+      }
+    })();
+
+    // Auto-dismiss success/info toasts after 5s; error/warning stay until closed
+    (function() {
+      var container = document.querySelector('.messages-toast-container');
+      if (!container) return;
+      container.querySelectorAll('.alert-success, .alert-info').forEach(function(el) {
+        setTimeout(function() {
+          var bsAlert = bootstrap.Alert.getOrCreateInstance(el);
+          if (bsAlert) bsAlert.close();
+        }, 5000);
+      });
+    })();
+
+    // Global toast helper for JS-triggered alerts (e.g. "Template Saved")
+    window.showToast = function(message, level) {
+      level = level || 'success';
+      var container = document.querySelector('.messages-toast-container') || (function() {
+        var c = document.createElement('div'); c.className = 'messages-toast-container'; document.body.appendChild(c); return c;
+      })();
+      var alert = document.createElement('div');
+      alert.className = 'alert alert-' + level + ' alert-dismissible fade show';
+      alert.setAttribute('role', 'alert');
+      alert.innerHTML = message + ' <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>';
+      container.appendChild(alert);
+      if (level === 'success' || level === 'info') setTimeout(function() { var a = bootstrap.Alert.getOrCreateInstance(alert); if (a) a.close(); }, 5000);
+    };
   </script>
   {% block extra_js %}{% endblock %}
 </body>

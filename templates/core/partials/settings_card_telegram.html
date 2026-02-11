@@ -1,0 +1,87 @@
+<div class="settings-hub-card-header">
+  <h2>Telegram Bot Configuration</h2>
+  <p>Configure your Telegram bot token and webhook. Verify with getMe to confirm the correct bot.</p>
+</div>
+<div class="settings-hub-card-body">
+  <form id="telegramCardForm">
+    {% csrf_token %}
+    <input type="hidden" name="section" value="telegram">
+    <div class="row g-3">
+      <div class="col-md-8">
+        <label class="form-label" style="color: var(--text-primary);">Bot Token</label>
+        <div class="input-group token-wrap">
+          <input type="password" class="form-control" name="bot_token" placeholder="••••••••" autocomplete="new-password">
+          <button class="btn btn-outline-secondary toggle-password" type="button" data-target="bot_token"><i class="fa-regular fa-eye"></i></button>
+        </div>
+      </div>
+      <div class="col-md-4 d-flex align-items-end">
+        <button type="button" class="btn btn-outline-primary w-100" id="telegramVerifyBtn">Verify Bot</button>
+      </div>
+      <div class="col-12">
+        <p id="telegramVerifyResult" class="small mb-0"></p>
+        <div id="telegramBotInfo" class="mt-2 d-none"></div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">Bot Username</label>
+        <input type="text" class="form-control" name="bot_username" value="{{ telegram_form.initial.bot_username|default:'' }}" placeholder="username without @">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" style="color: var(--text-primary);">Webhook URL</label>
+        <input type="url" class="form-control" name="webhook_url" value="{{ telegram_form.initial.webhook_url|default:'' }}" placeholder="https://..." readonly>
+      </div>
+      <div class="col-12">
+        <a href="https://t.me/BotFather" target="_blank" rel="noopener" class="small">Get or manage your bot via @BotFather <i class="fa-solid fa-external-link-alt ms-1"></i></a>
+      </div>
+    </div>
+  </form>
+</div>
+<div class="settings-hub-card-footer">
+  <button type="button" class="btn btn-soul" id="telegramSaveBtn">Save Changes</button>
+</div>
+
+<script>
+(function() {
+  var form = document.getElementById('telegramCardForm');
+  if (!form) return;
+  var csrf = (window.settingsHub && window.settingsHub.csrf) || (form.querySelector('[name=csrfmiddlewaretoken]') && form.querySelector('[name=csrfmiddlewaretoken]').value);
+  form.querySelectorAll('.toggle-password').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var name = btn.getAttribute('data-target');
+      var input = form.querySelector('[name="' + name + '"]');
+      if (!input) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.querySelector('i').className = input.type === 'password' ? 'fa-regular fa-eye' : 'fa-regular fa-eye-slash';
+    });
+  });
+  document.getElementById('telegramVerifyBtn').addEventListener('click', function() {
+    var resultEl = document.getElementById('telegramVerifyResult');
+    var infoEl = document.getElementById('telegramBotInfo');
+    var fd = new FormData();
+    fd.append('csrfmiddlewaretoken', csrf);
+    fd.append('bot_token', form.querySelector('[name=bot_token]').value);
+    fetch('{% url "test_telegram" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        resultEl.textContent = d.message || (d.success ? 'OK' : 'Failed');
+        resultEl.style.color = d.success ? 'var(--success-color)' : '#dc2626';
+        if (d.success && d.bot_info) {
+          infoEl.innerHTML = 'Bot: <strong>@' + (d.bot_info.username || '?') + '</strong> (ID: ' + (d.bot_info.id || '?') + ')';
+          infoEl.classList.remove('d-none');
+        } else {
+          infoEl.classList.add('d-none');
+        }
+      })
+      .catch(function() { resultEl.textContent = 'Request failed'; resultEl.style.color = '#dc2626'; document.getElementById('telegramBotInfo').classList.add('d-none'); });
+  });
+  document.getElementById('telegramSaveBtn').addEventListener('click', function() {
+    var fd = new FormData(form);
+    fetch('{% url "settings_save" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'success' && window.settingsHub && window.settingsHub.showToast) window.settingsHub.showToast();
+        else if (d.status !== 'success') alert(d.message || 'Save failed');
+      })
+      .catch(function() { alert('Request failed'); });
+  });
+})();
+</script>

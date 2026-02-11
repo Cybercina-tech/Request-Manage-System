@@ -4,7 +4,7 @@
 from django.db import migrations
 
 OFFICIAL_BOT_USERNAME = "Iraniu_ads_bot"
-OFFICIAL_BOT_TOKEN = "8490372835:AAHo_Xlftu-bcCTfP5ogW8zmNTr3cpS8s58"
+OFFICIAL_BOT_TOKEN = ""
 
 
 def force_webhook_and_token(apps, schema_editor):

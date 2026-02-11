@@ -1,0 +1,62 @@
+<div class="settings-hub-card-header">
+  <h2>Channel Manager</h2>
+  <p>Manage Telegram channels for automated posts. Set a default channel and add or remove channels.</p>
+</div>
+<div class="settings-hub-card-body">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <span class="text-muted" style="color: var(--text-secondary);">Channels</span>
+    <a href="{% url 'channel_create' %}?next={% url 'settings_hub_channels' %}" class="btn btn-soul btn-sm">
+      <i class="fa-solid fa-plus me-1"></i> Add New Channel
+    </a>
+  </div>
+
+  {% if channels %}
+  <div class="channel-grid">
+    {% for ch in channels %}
+    <div class="channel-card" data-channel-pk="{{ ch.pk }}">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="channel-name">{{ ch.title }}{% if ch.is_default %} <span class="badge bg-primary ms-1">Default</span>{% endif %}</div>
+          <div class="channel-id"><code>{{ ch.channel_id }}</code></div>
+          <small class="text-muted">@{{ ch.bot_connection.username|default:"—" }}</small>
+        </div>
+        <div class="d-flex align-items-center gap-1">
+          <form method="post" action="{% url 'channel_set_default' ch.pk %}" class="channel-set-default-form d-inline">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'settings_hub_channels' %}">
+            {% if not ch.is_default %}
+            <button type="submit" class="btn btn-sm btn-outline-primary" title="Set as default">Set default</button>
+            {% endif %}
+          </form>
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-danger dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fa-solid fa-trash"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li>
+                <form method="post" action="{% url 'channel_delete' ch.pk %}" class="channel-delete-form" onsubmit="return confirm('Delete this channel?');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{% url 'settings_hub_channels' %}">
+                  <button type="submit" class="dropdown-item text-danger">Confirm delete</button>
+                </form>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state-illustration">
+    <div class="icon-wrap"><i class="fa-solid fa-layer-group"></i></div>
+    <p class="mb-1" style="color: var(--text-primary);">No channels yet</p>
+    <p class="small mb-2">Start by adding a channel to receive automated ads.</p>
+    <a href="{% url 'channel_create' %}?next={% url 'settings_hub_channels' %}" class="btn btn-soul">
+      <i class="fa-solid fa-plus me-1"></i> Add Channel
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="settings-hub-card-footer">
+  <span class="small text-muted">Channels are saved when you add or change them. No separate save needed.</span>
+</div>

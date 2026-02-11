@@ -1,0 +1,5 @@
+2026-02-11 22:21:15,861 [INFO] Worker starting bot_id=3 pid=33722
+2026-02-11 22:21:18,549 [INFO] Bot @Iraniu_dev_bot is now polling...
+2026-02-11 22:31:27,507 [WARNING] getUpdates failed (1/15): Connection error: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot8576459250:AAFc8Y26W_3Ol9f0KaStbaEr-OtMvsz1QBo/getUpdates?timeout=30&limit=100&offset=36770
+2026-02-11 22:31:45,156 [WARNING] getUpdates failed (2/15): Connection error: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot8576459250:AAFc8Y26W_3Ol9f0KaStbaEr-OtMvsz1QBo/getUpdates?timeout=30&limit=100&offset=36770
+2026-02-11 22:32:43,725 [WARNING] getUpdates failed (3/15): Connection error: HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot8576459250:AAFc8Y26W_3Ol9f0KaStbaEr-OtMvsz1QBo/getUpdates?timeout=30&limit=100&offset=36770

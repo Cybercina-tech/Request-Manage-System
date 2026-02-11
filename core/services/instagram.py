@@ -20,6 +20,39 @@ RETRY_DELAY_SECONDS = 0.5
 INSTAGRAM_CAPTION_MAX_LENGTH = 2200
 
 
+def validate_instagram_token(token: str) -> tuple[bool, str]:
+    """
+    Validate a Facebook/Instagram access token via Graph API (e.g. for SiteConfiguration).
+    Returns (success, message). Does not require InstagramConfiguration.
+    """
+    if not (token or '').strip():
+        return False, 'No access token'
+    try:
+        r = requests.get(
+            f'{GRAPH_API_BASE}/me',
+            params={'access_token': token.strip(), 'fields': 'id,name'},
+            timeout=REQUEST_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get('id'):
+            return True, f"Connected as {data.get('name', data['id'])}"
+        return False, 'Invalid response'
+    except requests.RequestException as e:
+        logger.exception('Instagram validate_instagram_token: %s', e)
+        err = getattr(e, 'response', None)
+        if err is not None and hasattr(err, 'json'):
+            try:
+                body = err.json()
+                return False, body.get('error', {}).get('message', str(e))
+            except Exception:
+                pass
+        return False, str(e)[:200]
+    except Exception as e:
+        logger.exception('Instagram validate_instagram_token: %s', e)
+        return False, str(e)[:200]
+
+
 class InstagramService:
     """Post ad to Instagram via Graph API. Validate credentials; format caption; optional image."""
 

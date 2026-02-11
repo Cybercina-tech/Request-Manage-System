@@ -1,0 +1,42 @@
+<div class="row g-2">
+  <div class="col-6">
+    <label class="form-label">{{ title }} X</label>
+    <div class="input-step-wrap">
+      <input type="number" class="form-control" id="{{ prefix }}_x" name="{{ prefix }}_x" value="{{ x|default:0 }}" step="1">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="down" data-step="1">-</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="up" data-step="10">+10</button>
+    </div>
+  </div>
+  <div class="col-6">
+    <label class="form-label">{{ title }} Y</label>
+    <div class="input-step-wrap">
+      <input type="number" class="form-control" id="{{ prefix }}_y" name="{{ prefix }}_y" value="{{ y|default:0 }}" step="1">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="down" data-step="1">-</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="up" data-step="10">+10</button>
+    </div>
+  </div>
+  <div class="col-6">
+    <label class="form-label">Font Size</label>
+    <input type="number" class="form-control" id="{{ prefix }}_size" name="{{ prefix }}_size" value="{{ size|default:24 }}" step="1" min="1">
+  </div>
+  <div class="col-6">
+    <label class="form-label">Alignment</label>
+    <select class="form-select" id="{{ prefix }}_align" name="{{ prefix }}_align">
+      <option value="right" {% if align == 'right' %}selected{% endif %}>Right</option>
+      <option value="center" {% if align == 'center' %}selected{% endif %}>Center</option>
+      <option value="left" {% if align == 'left' %}selected{% endif %}>Left</option>
+    </select>
+  </div>
+  <div class="col-6">
+    <label class="form-label">Color (Hex)</label>
+    <input type="text" class="form-control" id="{{ prefix }}_color_hex" name="{{ prefix }}_color" value="{{ color|default:'#FFFFFF' }}">
+  </div>
+  <div class="col-6">
+    <label class="form-label">Color Picker</label>
+    <input type="color" class="form-control form-control-color" id="{{ prefix }}_color_picker" value="{{ color|default:'#FFFFFF' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label">Max Width</label>
+    <input type="number" class="form-control" id="{{ prefix }}_max_width" name="{{ prefix }}_max_width" value="{{ max_width|default:800 }}" step="1" min="1">
+  </div>
+</div>

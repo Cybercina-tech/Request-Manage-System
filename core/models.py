@@ -19,6 +19,16 @@ from django.utils import timezone
 from .encryption import decrypt_token, encrypt_token, mask_token
 
 
+def default_workflow_stages():
+    """Default CRM workflow pipeline."""
+    return [
+        {"key": "pending", "label": "Pending", "enabled": True},
+        {"key": "processing", "label": "Processing", "enabled": True},
+        {"key": "published", "label": "Published", "enabled": True},
+        {"key": "archived", "label": "Archived", "enabled": True},
+    ]
+
+
 class SiteConfiguration(models.Model):
     """
     Singleton-style global configuration.
@@ -84,6 +94,15 @@ class SiteConfiguration(models.Model):
         help_text='Bot used to post to the default channel above (must have admin rights in that channel).',
     )
     # Instagram Business (for Post to Feed/Story; fallback if no InstagramConfiguration)
+    instagram_app_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text='Facebook App ID (Meta for Developers).',
+    )
+    instagram_app_secret_encrypted = models.TextField(
+        blank=True,
+        help_text='Facebook App Secret (encrypted at rest).',
+    )
     instagram_business_id = models.CharField(
         max_length=64,
         blank=True,
@@ -100,12 +119,76 @@ class SiteConfiguration(models.Model):
         default='light',
         help_text='Global UI theme: Light (easy on eyes) or Dark.',
     )
+    # CRM defaults
+    default_font = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Default font for generated content and UI defaults (path/name).',
+    )
+    default_watermark_opacity = models.PositiveSmallIntegerField(
+        default=60,
+        help_text='Default watermark opacity percentage (0-100).',
+    )
+    default_watermark = models.ImageField(
+        upload_to='settings/watermarks/',
+        blank=True,
+        null=True,
+        help_text='Default watermark image for generated ads.',
+    )
+    default_primary_color = models.CharField(
+        max_length=18,
+        default='#2b8adf',
+        blank=True,
+        help_text='Default primary color (hex) for new ads.',
+    )
+    default_secondary_color = models.CharField(
+        max_length=18,
+        default='#3fb98f',
+        blank=True,
+        help_text='Default secondary color (hex) for new ads.',
+    )
+    default_accent_color = models.CharField(
+        max_length=18,
+        default='#39a0f1',
+        blank=True,
+        help_text='Default accent color (hex) for new ads.',
+    )
+    # Workflow & automation
+    workflow_stages = models.JSONField(
+        default=default_workflow_stages,
+        blank=True,
+        help_text='Ordered workflow stages: [{"key","label","enabled"}].',
+    )
+    auto_responder_message = models.TextField(
+        blank=True,
+        default='Welcome to Iraniu. Please send your ad details to continue.',
+        help_text='Automatic welcome message sent when a user starts the bot.',
+    )
+    auto_reply_comments = models.BooleanField(
+        default=False,
+        help_text='Enable automatic replies to comments.',
+    )
+    auto_reply_dms = models.BooleanField(
+        default=False,
+        help_text='Enable automatic replies to DMs.',
+    )
+    # Data management
+    retention_policy = models.CharField(
+        max_length=16,
+        choices=[('1w', '1 Week'), ('1m', '1 Month'), ('forever', 'Forever')],
+        default='1m',
+        help_text='How long generated images are retained.',
+    )
     # Maintenance
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = 'Site Configuration'
         verbose_name_plural = 'Site Configuration'
+        permissions = (
+            ('can_edit_settings', 'Can edit restricted CRM settings tabs'),
+        )
 
     def clean(self):
         from django.core.exceptions import ValidationError
@@ -131,12 +214,92 @@ class SiteConfiguration(models.Model):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
+    def get_instagram_app_secret(self) -> str:
+        """Return decrypted Instagram App Secret."""
+        return decrypt_token(self.instagram_app_secret_encrypted)
+
+    def set_instagram_app_secret(self, plain_secret: str):
+        self.instagram_app_secret_encrypted = encrypt_token((plain_secret or '').strip())
+
     def get_facebook_access_token(self) -> str:
         """Return decrypted Facebook access token for Instagram API."""
         return decrypt_token(self.facebook_access_token_encrypted)
 
     def set_facebook_access_token(self, plain_token: str):
         self.facebook_access_token_encrypted = encrypt_token((plain_token or '').strip())
+
+
+def default_active_errors():
+    """Default for SystemStatus.active_errors (list of error strings)."""
+    return []
+
+
+class SystemStatus(models.Model):
+    """
+    Singleton-style system watchdog: heartbeat from runbots worker,
+    bot active flag, and active error messages (e.g. "Instagram Token Expired").
+    """
+    last_heartbeat = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Last heartbeat from runbots worker; if older than 2 min, worker is OFFLINE.',
+    )
+    is_bot_active = models.BooleanField(
+        default=False,
+        help_text='True when runbots process is running and sending heartbeats.',
+    )
+    active_errors = models.JSONField(
+        default=default_active_errors,
+        blank=True,
+        help_text='List of current error messages, e.g. ["Instagram Token Expired"].',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'System Status'
+        verbose_name_plural = 'System Status'
+
+    @classmethod
+    def get_status(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={'active_errors': []})
+        return obj
+
+    def add_active_error(self, message: str):
+        if not message or not isinstance(self.active_errors, list):
+            self.active_errors = list(self.active_errors or [])
+        msg = (message or '').strip()[:512]
+        if msg and msg not in self.active_errors:
+            self.active_errors.append(msg)
+            self.save(update_fields=['active_errors', 'updated_at'])
+
+    def clear_active_error(self, message: str):
+        if isinstance(self.active_errors, list) and message:
+            self.active_errors = [m for m in self.active_errors if m != message.strip()]
+            self.save(update_fields=['active_errors', 'updated_at'])
+
+
+class Notification(models.Model):
+    """Internal system-wide notification (Success, Info, Warning, Error). Supports RTL/Persian."""
+    class Level(models.TextChoices):
+        SUCCESS = 'success', 'Success'
+        INFO = 'info', 'Info'
+        WARNING = 'warning', 'Warning'
+        ERROR = 'error', 'Error'
+
+    level = models.CharField(max_length=16, choices=Level.choices, db_index=True)
+    message = models.TextField(help_text='Notification text (supports Persian/RTL).')
+    link = models.URLField(blank=True, help_text='Optional URL to fix the issue.')
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Notification'
+        verbose_name_plural = 'Notifications'
+
+    def __str__(self):
+        return f'{self.get_level_display()}: {self.message[:50]}'
 
 
 class TelegramUser(models.Model):
@@ -718,13 +881,43 @@ class DeliveryLog(models.Model):
         return f'{self.ad_id} {self.channel} {self.status}'
 
 
+class ActivityLog(models.Model):
+    """Audit trail for critical CRM actions."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='activity_logs',
+    )
+    action = models.CharField(max_length=128)
+    object_type = models.CharField(max_length=64, blank=True, default='')
+    object_repr = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['created_at']),
+            models.Index(fields=['object_type']),
+        ]
+        verbose_name = 'Activity Log'
+        verbose_name_plural = 'Activity Logs'
+
+    def __str__(self):
+        return f'{self.action} ({self.object_type})'
+
+
 def default_adtemplate_coordinates():
     """
     Default coordinates JSON for AdTemplate.
     Keys:
-      - category: {x, y, size, color, font_path}
-      - description: {x, y, size, color, font_path, max_width}
-      - phone: {x, y, size, color, font_path}
+      - category: {x, y, size, color, font_path, align}
+      - description: {x, y, size, color, font_path, max_width, align}
+      - phone: {x, y, size, color, font_path, align}
+      - price: {x, y, size, color, font_path, align}
     """
     return {
         'category': {
@@ -733,6 +926,7 @@ def default_adtemplate_coordinates():
             'size': 48,
             'color': '#FFFFFF',
             'font_path': '',
+            'align': 'right',
         },
         'description': {
             'x': 50,
@@ -741,6 +935,7 @@ def default_adtemplate_coordinates():
             'color': '#FFFFFF',
             'font_path': '',
             'max_width': 800,
+            'align': 'right',
         },
         'phone': {
             'x': 50,
@@ -748,6 +943,15 @@ def default_adtemplate_coordinates():
             'size': 28,
             'color': '#FFFF00',
             'font_path': '',
+            'align': 'right',
+        },
+        'price': {
+            'x': 50,
+            'y': 500,
+            'size': 30,
+            'color': '#00E5FF',
+            'font_path': '',
+            'align': 'right',
         },
     }
 
@@ -773,8 +977,8 @@ class AdTemplate(models.Model):
         default=default_adtemplate_coordinates,
         blank=True,
         help_text=(
-            'JSON with keys: category, description, phone. '
-            'Each contains x, y, size, color, font_path; description also has max_width.'
+            'JSON with keys: category, description, phone, price. '
+            'Each contains x, y, size, color, font_path, align; description also has max_width.'
         ),
     )
     is_active = models.BooleanField(default=True, help_text='Active templates are eligible for auto-selection.')

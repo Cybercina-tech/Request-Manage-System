@@ -2,13 +2,14 @@
 Iraniu — AI moderation and text cleaning. OpenAI integration; safe defaults on failure.
 """
 
+import os
 import re
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def clean_ad_text(text):
+def clean_ad_text(text: str | None) -> str:
     """Strip HTML/Markdown for AI and storage."""
     if not text:
         return ''
@@ -34,19 +35,20 @@ def validate_ad_content(text: str) -> tuple[bool, str]:
     return True, ''
 
 
-def run_ai_moderation(content, config):
+def run_ai_moderation(content: str, config) -> tuple[bool, str]:
     """
     Send content to OpenAI for moderation.
     Returns (approved: bool, reason: str). Defaults to (True, '') on failure.
     """
-    if not config.is_ai_enabled or not config.openai_api_key:
+    api_key = (os.environ.get("OPENAI_API_KEY") or getattr(config, "openai_api_key", "") or "").strip()
+    if not config.is_ai_enabled or not api_key:
         return True, ''
 
     try:
         import json
         from openai import OpenAI
 
-        client = OpenAI(api_key=config.openai_api_key, timeout=15.0)
+        client = OpenAI(api_key=api_key, timeout=15.0)
         system = config.ai_system_prompt or (
             'You are a moderator for Iraniu. Check if this ad follows community rules. '
             'Reply with JSON only: {"approved": true or false, "reason": "optional reason"}'
@@ -72,7 +74,7 @@ def run_ai_moderation(content, config):
         return True, ''
 
 
-def test_openai_connection(api_key):
+def test_openai_connection(api_key: str | None) -> tuple[bool, str]:
     """Test OpenAI API. Returns (success, message)."""
     if not (api_key or '').strip():
         return False, 'No API key provided'
