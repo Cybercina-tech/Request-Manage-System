@@ -61,8 +61,9 @@ urlpatterns = [
     path('settings/api/key-display/', views.settings_api_key_display, name='settings_api_key_display'),
     path('settings/api/create/', views.settings_api_edit, name='settings_api_create'),
     path('settings/api/<int:pk>/edit/', views.settings_api_edit, name='settings_api_edit'),
-    # Ad templates: create (then Coordinate Lab) and tester
+    # Ad templates: create, manual editor, and tester
     path('templates/create/', views.template_create, name='template_create'),
+    path('templates/<int:template_id>/edit-coordinates/', views.template_manual_edit, name='template_manual_edit'),
     path('templates/tester/', views.template_tester, name='template_tester'),
     path('templates/tester/preview/', views.template_tester_preview, name='template_tester_preview'),
     path('deliveries/', views.delivery_list, name='delivery_list'),

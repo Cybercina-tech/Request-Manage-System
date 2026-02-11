@@ -1546,6 +1546,155 @@ def template_create(request):
 
 @staff_member_required
 @require_http_methods(['GET', 'POST'])
+def template_manual_edit(request, template_id):
+    """Manual Template Editor: form-based coordinate editing with live preview."""
+    from django.urls import reverse
+    from django.http import JsonResponse
+    from PIL import Image
+    import json
+    
+    template = get_object_or_404(AdTemplate, pk=template_id)
+    
+    # Get background image URL and dimensions
+    background_url = ''
+    img_width, img_height = 1080, 1080
+    if template.background_image:
+        try:
+            background_url = template.background_image.url
+            with template.background_image.open('rb') as fh:
+                img = Image.open(fh)
+                img_width, img_height = img.size
+        except Exception:
+            pass
+    
+    if not background_url:
+        # Use default template
+        from django.templatetags.static import static
+        default_rel = "static/images/default_template/Template.png"
+        default_path = Path(settings.BASE_DIR) / default_rel
+        if default_path.exists():
+            try:
+                static_url = static('images/default_template/Template.png')
+                if static_url:
+                    background_url = request.build_absolute_uri(static_url)
+                with open(default_path, 'rb') as fh:
+                    img = Image.open(fh)
+                    img_width, img_height = img.size
+            except Exception:
+                pass
+    
+    # Load current coordinates
+    coords = template.coordinates or default_adtemplate_coordinates()
+    cat = coords.get('category', {})
+    desc = coords.get('description', {})
+    phone_coord = coords.get('phone', {})
+    
+    if request.method == 'POST':
+        action = request.POST.get('action', 'save')
+        
+        if action == 'save':
+            # Validate and save coordinates
+            new_coords = {
+                'category': {
+                    'x': int(request.POST.get('cat_x', cat.get('x', 50))),
+                    'y': int(request.POST.get('cat_y', cat.get('y', 50))),
+                    'size': int(request.POST.get('cat_size', cat.get('size', 48))),
+                    'color': (request.POST.get('cat_color', cat.get('color', '#FFFFFF')) or '#FFFFFF').strip(),
+                    'font_path': cat.get('font_path', ''),
+                },
+                'description': {
+                    'x': int(request.POST.get('desc_x', desc.get('x', 50))),
+                    'y': int(request.POST.get('desc_y', desc.get('y', 140))),
+                    'size': int(request.POST.get('desc_size', desc.get('size', 32))),
+                    'color': (request.POST.get('desc_color', desc.get('color', '#FFFFFF')) or '#FFFFFF').strip(),
+                    'font_path': desc.get('font_path', ''),
+                    'max_width': int(request.POST.get('desc_max_width', desc.get('max_width', 800))),
+                },
+                'phone': {
+                    'x': int(request.POST.get('phone_x', phone_coord.get('x', 50))),
+                    'y': int(request.POST.get('phone_y', phone_coord.get('y', 420))),
+                    'size': int(request.POST.get('phone_size', phone_coord.get('size', 28))),
+                    'color': (request.POST.get('phone_color', phone_coord.get('color', '#FFFF00')) or '#FFFF00').strip(),
+                    'font_path': phone_coord.get('font_path', ''),
+                },
+            }
+            
+            # Validate coordinates are within image bounds and font sizes are positive
+            errors = []
+            # Category validation
+            if new_coords['category']['x'] < 0 or new_coords['category']['x'] > img_width:
+                errors.append('Category X must be between 0 and {}'.format(img_width))
+            if new_coords['category']['y'] < 0 or new_coords['category']['y'] > img_height:
+                errors.append('Category Y must be between 0 and {}'.format(img_height))
+            if new_coords['category']['size'] < 1:
+                errors.append('Category font size must be at least 1')
+            # Description validation
+            if new_coords['description']['x'] < 0 or new_coords['description']['x'] > img_width:
+                errors.append('Description X must be between 0 and {}'.format(img_width))
+            if new_coords['description']['y'] < 0 or new_coords['description']['y'] > img_height:
+                errors.append('Description Y must be between 0 and {}'.format(img_height))
+            if new_coords['description']['size'] < 1:
+                errors.append('Description font size must be at least 1')
+            if new_coords['description']['max_width'] < 1:
+                errors.append('Description max width must be at least 1')
+            # Phone validation
+            if new_coords['phone']['x'] < 0 or new_coords['phone']['x'] > img_width:
+                errors.append('Phone X must be between 0 and {}'.format(img_width))
+            if new_coords['phone']['y'] < 0 or new_coords['phone']['y'] > img_height:
+                errors.append('Phone Y must be between 0 and {}'.format(img_height))
+            if new_coords['phone']['size'] < 1:
+                errors.append('Phone font size must be at least 1')
+            
+            if errors:
+                return JsonResponse({'status': 'error', 'errors': errors}, status=400)
+            
+            template.coordinates = new_coords
+            template.save()
+            
+            if request.POST.get('generate_test') == 'on':
+                # Generate test image
+                from core.services.image_engine import create_ad_image
+                test_path = create_ad_image(
+                    template.pk,
+                    category='دسته‌بندی',
+                    text='متن نمونه آگهی برای تست. این متن برای نمایش نحوه قرارگیری متن روی تصویر استفاده می‌شود.',
+                    phone='+98 912 345 6789',
+                )
+                if test_path:
+                    media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
+                    rel = Path(test_path).name
+                    test_url = f"{request.scheme}://{request.get_host()}{media_url}/generated_ads/{rel}"
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': 'Coordinates saved and test image generated.',
+                        'test_image_url': test_url,
+                    })
+                else:
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': 'Coordinates saved, but test image generation failed.',
+                    })
+            else:
+                return JsonResponse({
+                    'status': 'success',
+                    'message': 'Coordinates saved successfully.',
+                })
+    
+    context = {
+        'template': template,
+        'background_url': background_url,
+        'img_width': img_width,
+        'img_height': img_height,
+        'coords': coords,
+        'cat': cat,
+        'desc': desc,
+        'phone_coord': phone_coord,
+    }
+    return render(request, 'core/template_manual_edit.html', context)
+
+
+@staff_member_required
+@require_http_methods(['GET', 'POST'])
 def template_tester(request):
     """Preview ad image: select template, dummy text, and optional custom background. POST generates with optional upload."""
     templates = AdTemplate.objects.filter(is_active=True).order_by('name')

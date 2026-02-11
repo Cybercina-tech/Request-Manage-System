@@ -6,7 +6,7 @@ import json
 from datetime import timedelta
 from django.utils import timezone
 
-from core.models import AdRequest
+from core.models import AdRequest, AdTemplate, TelegramChannel, SiteConfiguration
 
 
 def get_pulse_data():
@@ -54,7 +54,8 @@ def get_pulse_data():
 
 def get_dashboard_context():
     """
-    Full context for dashboard template: pulse data + last_7_days chart.
+    Full context for dashboard home: pulse data, home stats (active ads, templates,
+    channels, API status), recent ads feed, last_edited_template for quick link.
     """
     pulse = get_pulse_data()
     now = timezone.now()
@@ -70,8 +71,33 @@ def get_dashboard_context():
         ).count()
         last_7_days.append({"date": day.strftime("%a"), "count": count})
 
+    # Home stats: active ads (in workflow, not rejected/expired), templates, channels
+    total_active_ads = AdRequest.objects.exclude(
+        status__in=[AdRequest.Status.REJECTED, AdRequest.Status.EXPIRED]
+    ).count()
+    total_templates = AdTemplate.objects.filter(is_active=True).count()
+    active_telegram_channels = TelegramChannel.objects.filter(is_active=True).count()
+
+    config = SiteConfiguration.get_config()
+    api_configured = bool((getattr(config, "openai_api_key", None) or "").strip())
+    api_status = "OK" if api_configured else "Not configured"
+    api_status_class = "ok" if api_configured else "not-configured"
+
+    recent_ads = list(
+        AdRequest.objects.select_related("category")
+        .order_by("-created_at")[:5]
+    )
+    last_edited_template = AdTemplate.objects.order_by("-updated_at").first()
+
     return {
         **pulse,
         "last_7_days": last_7_days,
         "last_7_days_json": json.dumps(last_7_days),
+        "total_active_ads": total_active_ads,
+        "total_templates": total_templates,
+        "active_telegram_channels": active_telegram_channels,
+        "api_status": api_status,
+        "api_status_class": api_status_class,
+        "recent_ads": recent_ads,
+        "last_edited_template": last_edited_template,
     }

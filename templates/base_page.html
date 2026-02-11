@@ -15,7 +15,17 @@
   <link rel="stylesheet" href="{% static 'css/iraniu.css' %}?v={{ STATIC_VERSION }}">
   {% block extra_css %}{% endblock %}
 </head>
-<body class="theme-{{ theme_preference|default:'light' }}">
+<body class="theme-{{ theme_preference|default:'light' }}" data-initial-theme="{{ theme_preference|default:'light' }}">
+  <script>
+    (function() {
+      var stored = localStorage.getItem('iraniu_theme');
+      if (stored === 'light' || stored === 'dark') {
+        document.body.classList.remove('theme-light', 'theme-dark');
+        document.body.classList.add('theme-' + stored);
+      }
+    })();
+  </script>
+  <div class="global-loading-bar" id="globalLoadingBar" aria-hidden="true" role="presentation"></div>
   <div class="app-layout">
     {% if user.is_authenticated %}
     <header class="top-header" id="topHeader">
@@ -48,14 +58,10 @@
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">
-          <div class="nav-section-label">Main</div>
           <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-            <i class="fa-solid fa-th-large icon me-2" aria-hidden="true"></i>
-            Dashboard
+            <i class="fa-solid fa-home icon me-2" aria-hidden="true"></i>
+            Home
           </a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-label">Operations</div>
           <a href="{% url 'ad_list' %}" class="{% if request.resolver_match.url_name == 'ad_list' %}active{% endif %}">
             <i class="fa-solid fa-rectangle-ad icon me-2" aria-hidden="true"></i>
             Ads Manager
@@ -64,16 +70,9 @@
             <i class="fa-solid fa-layer-group icon me-2" aria-hidden="true"></i>
             Template Manager
           </a>
-          <a href="{% url 'template_create' %}" class="{% if request.resolver_match.url_name == 'template_create' %}active{% endif %}">
-            <i class="fa-solid fa-plus icon me-2" aria-hidden="true"></i>
-            Add New Template
-          </a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-label">Configuration</div>
           <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
             <i class="fa-solid fa-cog icon me-2" aria-hidden="true"></i>
-            Settings
+            System Settings
           </a>
         </div>
       </nav>
@@ -151,6 +150,7 @@
       function onThemeToggle() {
         var next = currentTheme() === 'light' ? 'dark' : 'light';
         setTheme(next);
+        try { localStorage.setItem('iraniu_theme', next); } catch (e) {}
         var form = new FormData();
         form.append('theme', next);
         form.append('csrfmiddlewaretoken', csrfToken);
@@ -160,6 +160,19 @@
           .catch(function() { setTheme(next === 'light' ? 'dark' : 'light'); });
       }
       document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) { btn.addEventListener('click', onThemeToggle); });
+    })();
+
+    // Global loading bar: show on same-origin link click in main content, hide on load
+    (function() {
+      var bar = document.getElementById('globalLoadingBar');
+      if (!bar) return;
+      function showBar() { bar.classList.add('is-loading'); bar.setAttribute('aria-hidden', 'false'); }
+      function hideBar() { bar.classList.remove('is-loading'); bar.setAttribute('aria-hidden', 'true'); }
+      document.querySelectorAll('.main-content a[href^="/"], .main-content a[href^="' + window.location.origin + '"]').forEach(function(a) {
+        if (a.getAttribute('href') && a.getAttribute('href').indexOf('#') !== 0) a.addEventListener('click', showBar);
+      });
+      window.addEventListener('load', function() { setTimeout(hideBar, 300); });
+      window.addEventListener('pageshow', function(e) { if (!e.persisted) setTimeout(hideBar, 200); });
     })();
   </script>
   {% block extra_js %}{% endblock %}

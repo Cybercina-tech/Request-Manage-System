@@ -88,12 +88,17 @@
         <div class="card-header custom-card-header">2. Edit layout</div>
         <div class="card-body">
           <p class="text-muted mb-2">Position Category, Text, and Phone labels on the template.</p>
-          <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}" class="btn btn-soul btn-sm rounded-3">
-            <i class="fa-solid fa-crosshairs me-1" aria-hidden="true"></i> Edit this Template Layout
-          </a>
-          {% if used_custom_background %}
-          <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}?use_temp_background=1" class="btn btn-outline-primary btn-sm rounded-3 ms-2">Use this background in Coordinate Lab</a>
-          {% endif %}
+          <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}" class="btn btn-soul btn-sm rounded-3">
+              <i class="fa-solid fa-crosshairs me-1" aria-hidden="true"></i> Coordinate Lab (Drag & Drop)
+            </a>
+            <a href="{% url 'template_manual_edit' template.pk %}" class="btn btn-primary btn-sm rounded-3" style="background: var(--primary-color); border-color: var(--primary-color);">
+              <i class="fa-solid fa-keyboard me-1" aria-hidden="true"></i> Manual Coordinate Editor
+            </a>
+            {% if used_custom_background %}
+            <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}?use_temp_background=1" class="btn btn-outline-primary btn-sm rounded-3">Use this background in Coordinate Lab</a>
+            {% endif %}
+          </div>
         </div>
       </div>
       {% endif %}

@@ -1,0 +1,33 @@
+{% comment %}
+Monthly Requests Chart Component
+Add this section to your dashboard.html after the Recent Ads section
+Uses Chart.js (already included in the project)
+{% endcomment %}
+
+<div class="dashboard-section mt-5">
+  <div class="dashboard-chart-container" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 1.5rem; box-shadow: var(--shadow-sm);">
+    <div id="monthlyRequestsChart"></div>
+  </div>
+</div>
+
+{% block extra_js %}
+<script src="{% static 'js/monthly-requests-chart-chartjs.js' %}"></script>
+<script>
+(function() {
+  // Initialize chart when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      if (window.MonthlyRequestsChartJS) {
+        const darkMode = document.body.classList.contains('theme-dark');
+        window.MonthlyRequestsChartJS.init('monthlyRequestsChart', { darkMode: darkMode });
+      }
+    });
+  } else {
+    if (window.MonthlyRequestsChartJS) {
+      const darkMode = document.body.classList.contains('theme-dark');
+      window.MonthlyRequestsChartJS.init('monthlyRequestsChart', { darkMode: darkMode });
+    }
+  }
+})();
+</script>
+{% endblock %}

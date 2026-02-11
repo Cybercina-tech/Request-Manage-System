@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Manual Coordinate Editor — {{ template.name }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'template_tester' %}">Template Manager</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Manual Coordinate Editor — {{ template.name }}</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block extra_css %}
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.manual-editor-page {
+  background: var(--bg-body);
+  padding: 1.5rem;
+  border-radius: 12px;
+}
+.manual-editor-form-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 1.5rem;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+.manual-editor-form-card h5 {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+}
+.manual-editor-form-card .form-label {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+.manual-editor-form-card .form-control,
+.manual-editor-form-card input[type="color"] {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+.manual-editor-form-card .form-control:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  outline: none;
+}
+.preview-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+.preview-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.preview-image-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.preview-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #dc2626;
+  background: rgba(220, 38, 38, 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+.preview-marker.category { border-color: #7C4DFF; background: rgba(124, 77, 255, 0.3); }
+.preview-marker.description { border-color: #2196F3; background: rgba(33, 150, 243, 0.3); }
+.preview-marker.phone { border-color: #FFC107; background: rgba(255, 193, 7, 0.3); }
+.preview-label {
+  position: absolute;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  margin-top: -4px;
+  pointer-events: none;
+}
+.preview-label.category { background: #7C4DFF; }
+.preview-label.description { background: #2196F3; }
+.preview-label.phone { background: #FFC107; color: #000; }
+.test-image-result {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+.test-image-result img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+/* Preview Content section — dual theme */
+.preview-content-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.preview-content-card .form-label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.preview-content-card .form-control,
+.preview-content-card textarea {
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 6px;
+}
+.preview-content-card .form-control:focus,
+.preview-content-card textarea:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  outline: none;
+}
+/* Coordinate input warning when out of bounds */
+.coord-input-out-of-bounds {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
+}
+.theme-light .coord-input-out-of-bounds { border-color: #dc2626 !important; }
+/* Live canvas preview overlay — text overlays with RTL */
+.preview-canvas-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+.preview-canvas-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  vertical-align: top;
+}
+.preview-text-overlay {
+  position: absolute;
+  font-family: 'Vazirmatn', 'Vazir', 'Tahoma', sans-serif;
+  direction: rtl;
+  text-align: right;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  pointer-events: none;
+  line-height: 1.4;
+}
+.preview-text-overlay.desc-overlay {
+  border: 1px dashed rgba(59, 130, 246, 0.5);
+  box-sizing: border-box;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="manual-editor-page">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+    <div>
+      <h1 class="mb-1" style="color: var(--text-primary); font-weight: 600;">Manual Coordinate Editor</h1>
+      <p class="text-muted mb-0">{{ template.name }} — Pixel-perfect control with numeric inputs</p>
+    </div>
+    <a href="{% url 'template_tester' %}" class="btn btn-secondary">Back to Template Manager</a>
+  </div>
+
+  <div id="saveStatus" class="alert alert-success d-none mb-3" role="alert"></div>
+  <div id="errorStatus" class="alert alert-danger d-none mb-3" role="alert"></div>
+
+  <div class="row g-4">
+    <!-- Left: Control Panel (40% width) -->
+    <div class="col-lg-5">
+      <!-- Preview Content (test data only — not saved) -->
+      <div class="preview-content-card">
+        <h5 class="mb-3" style="color: var(--text-primary); font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">Preview Content</h5>
+        <p class="small text-muted mb-3">Test data for live preview. These values are not saved.</p>
+        <div class="mb-3">
+          <label class="form-label" for="testCategory">Test Category</label>
+          <input type="text" class="form-control" id="testCategory" value="شغل" placeholder="شغل" maxlength="200" data-preview-content>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="testDescription">Test Description</label>
+          <textarea class="form-control" id="testDescription" rows="3" placeholder="متن آزمایشی" data-preview-content>این یک متن آزمایشی برای بررسی چیدمان آگهی است.</textarea>
+        </div>
+        <div class="mb-0">
+          <label class="form-label" for="testPhone">Test Phone</label>
+          <input type="text" class="form-control" id="testPhone" value="09123456789" placeholder="09123456789" maxlength="60" data-preview-content>
+        </div>
+      </div>
+
+      <form id="manualEditorForm" class="manual-editor-form-card">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save">
+        
+        <!-- Category Settings -->
+        <div class="mb-4">
+          <h5>Category Settings</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">X Position</label>
+              <input type="number" class="form-control" name="cat_x" id="cat_x" value="{{ cat.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="category" data-coord="x" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Y Position</label>
+              <input type="number" class="form-control" name="cat_y" id="cat_y" value="{{ cat.y|default:50 }}" min="0" max="{{ img_height }}" data-preview="category" data-coord="y" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Font Size</label>
+              <input type="number" class="form-control" name="cat_size" id="cat_size" value="{{ cat.size|default:48 }}" min="8" max="200" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Color</label>
+              <input type="color" class="form-control form-control-color" name="cat_color" id="cat_color" value="{{ cat.color|default:'#FFFFFF' }}" title="Category text color">
+            </div>
+          </div>
+        </div>
+
+        <!-- Description/Text Settings -->
+        <div class="mb-4">
+          <h5>Description / Text Settings</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">X Position</label>
+              <input type="number" class="form-control" name="desc_x" id="desc_x" value="{{ desc.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="description" data-coord="x" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Y Position</label>
+              <input type="number" class="form-control" name="desc_y" id="desc_y" value="{{ desc.y|default:140 }}" min="0" max="{{ img_height }}" data-preview="description" data-coord="y" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Font Size</label>
+              <input type="number" class="form-control" name="desc_size" id="desc_size" value="{{ desc.size|default:32 }}" min="8" max="200" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Max Width</label>
+              <input type="number" class="form-control" name="desc_max_width" id="desc_max_width" value="{{ desc.max_width|default:800 }}" min="100" max="{{ img_width }}" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Color</label>
+              <input type="color" class="form-control form-control-color" name="desc_color" id="desc_color" value="{{ desc.color|default:'#FFFFFF' }}" title="Description text color">
+            </div>
+          </div>
+        </div>
+
+        <!-- Phone Settings -->
+        <div class="mb-4">
+          <h5>Phone Settings</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">X Position</label>
+              <input type="number" class="form-control" name="phone_x" id="phone_x" value="{{ phone_coord.x|default:50 }}" min="0" max="{{ img_width }}" data-preview="phone" data-coord="x" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Y Position</label>
+              <input type="number" class="form-control" name="phone_y" id="phone_y" value="{{ phone_coord.y|default:420 }}" min="0" max="{{ img_height }}" data-preview="phone" data-coord="y" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Font Size</label>
+              <input type="number" class="form-control" name="phone_size" id="phone_size" value="{{ phone_coord.size|default:28 }}" min="8" max="200" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Color</label>
+              <input type="color" class="form-control form-control-color" name="phone_color" id="phone_color" value="{{ phone_coord.color|default:'#FFFF00' }}" title="Phone text color">
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mt-4">
+          <button type="submit" class="btn btn-primary" id="btnSave" style="background: var(--primary-color); border-color: var(--primary-color); color: #fff;">
+            <i class="fa-solid fa-save me-1"></i> Save Coordinates
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnSaveAndTest" style="background: var(--border-color); color: var(--text-primary); border-color: var(--border-color);">
+            <i class="fa-solid fa-image me-1"></i> Generate Test
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Right: Sticky Preview (60% width) -->
+    <div class="col-lg-7">
+      <div class="preview-container">
+        <h5 class="mb-3" style="color: var(--text-primary); font-weight: 600;">Live Preview</h5>
+        {% if background_url %}
+        <div class="preview-canvas-wrapper" id="previewWrapper">
+          <img id="previewImage" src="{{ background_url }}" alt="Template background" crossorigin="anonymous">
+          <div class="preview-text-overlay" id="overlayCategory" dir="rtl" style="left: {{ cat.x|default:50 }}px; top: {{ cat.y|default:50 }}px; font-size: {{ cat.size|default:48 }}px; color: {{ cat.color|default:'#FFFFFF' }};"></div>
+          <div class="preview-text-overlay desc-overlay" id="overlayDescription" dir="rtl" style="left: {{ desc.x|default:50 }}px; top: {{ desc.y|default:140 }}px; font-size: {{ desc.size|default:32 }}px; color: {{ desc.color|default:'#FFFFFF' }}; max-width: {{ desc.max_width|default:800 }}px;"></div>
+          <div class="preview-text-overlay" id="overlayPhone" dir="rtl" style="left: {{ phone_coord.x|default:50 }}px; top: {{ phone_coord.y|default:420 }}px; font-size: {{ phone_coord.size|default:28 }}px; color: {{ phone_coord.color|default:'#FFFF00' }};"></div>
+        </div>
+        <p class="small text-muted mt-2 mb-0">Image size: {{ img_width }} × {{ img_height }}px. Preview shows test content at coordinates (RTL, Persian font).</p>
+        {% else %}
+        <p class="text-muted">No background image available for this template.</p>
+        {% endif %}
+        <div id="testImageResult" class="test-image-result d-none">
+          <h6 class="mb-2" style="color: var(--text-primary);">Generated Test Image</h6>
+          <img id="testImage" src="" alt="Test image" style="max-width: 100%;">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var form = document.getElementById('manualEditorForm');
+  var previewWrapper = document.getElementById('previewWrapper');
+  var previewImg = document.getElementById('previewImage');
+  var imgWidth = {{ img_width }};
+  var imgHeight = {{ img_height }};
+  var csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  var overlayIds = { cat: 'overlayCategory', desc: 'overlayDescription', phone: 'overlayPhone' };
+  var coordInputPrefixes = { category: 'cat', description: 'desc', phone: 'phone' };
+
+  function getNum(id, fallback) {
+    var el = document.getElementById(id);
+    return el ? (parseInt(el.value, 10) || fallback) : fallback;
+  }
+  function getColor(id, fallback) {
+    var el = document.getElementById(id);
+    return (el && el.value) ? el.value : fallback;
+  }
+
+  function updateLivePreview() {
+    if (!previewImg || !previewWrapper || previewImg.offsetWidth <= 0) return;
+    var scale = previewImg.offsetWidth / imgWidth;
+
+    var catX = getNum('cat_x', 50), catY = getNum('cat_y', 50), catSize = getNum('cat_size', 48), catColor = getColor('cat_color', '#FFFFFF');
+    var descX = getNum('desc_x', 50), descY = getNum('desc_y', 140), descSize = getNum('desc_size', 32), descMaxW = getNum('desc_max_width', 800), descColor = getColor('desc_color', '#FFFFFF');
+    var phoneX = getNum('phone_x', 50), phoneY = getNum('phone_y', 420), phoneSize = getNum('phone_size', 28), phoneColor = getColor('phone_color', '#FFFF00');
+
+    var testCat = (document.getElementById('testCategory') && document.getElementById('testCategory').value) || 'شغل';
+    var testDesc = (document.getElementById('testDescription') && document.getElementById('testDescription').value) || '';
+    var testPhone = (document.getElementById('testPhone') && document.getElementById('testPhone').value) || '09123456789';
+
+    function styleOverlay(prefix, x, y, size, color, text, maxWidthPx) {
+      var id = overlayIds[prefix];
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.style.left = (x * scale) + 'px';
+      el.style.top = (y * scale) + 'px';
+      el.style.fontSize = (size * scale) + 'px';
+      el.style.color = color;
+      el.textContent = text || '';
+      if (maxWidthPx != null) el.style.maxWidth = (maxWidthPx * scale) + 'px';
+    }
+
+    styleOverlay('cat', catX, catY, catSize, catColor, testCat, null);
+    styleOverlay('desc', descX, descY, descSize, descColor, testDesc, descMaxW);
+    styleOverlay('phone', phoneX, phoneY, phoneSize, phoneColor, testPhone, null);
+
+    // Out-of-bounds: compare overlay rects to image rect (display coordinates)
+    var imgRect = previewImg.getBoundingClientRect();
+    function setOutOfBounds(prefix, isOut) {
+      var p = coordInputPrefixes[prefix];
+      var xIn = document.getElementById(p + '_x'), yIn = document.getElementById(p + '_y');
+      var sizeIn = prefix === 'desc' ? document.getElementById('desc_max_width') : null;
+      [xIn, yIn].filter(Boolean).forEach(function(inp) {
+        if (inp) inp.classList.toggle('coord-input-out-of-bounds', !!isOut);
+      });
+      if (sizeIn) sizeIn.classList.toggle('coord-input-out-of-bounds', !!isOut);
+    }
+    function checkOverlay(id) {
+      var ov = document.getElementById(id);
+      if (!ov || !ov.textContent.trim()) return false;
+      var r = ov.getBoundingClientRect();
+      return r.right > imgRect.right || r.left < imgRect.left || r.bottom > imgRect.bottom || r.top < imgRect.top;
+    }
+    setOutOfBounds('category', checkOverlay('overlayCategory'));
+    setOutOfBounds('description', checkOverlay('overlayDescription'));
+    setOutOfBounds('phone', checkOverlay('overlayPhone'));
+    // Re-check out-of-bounds after layout (overlay size may have changed)
+    requestAnimationFrame(function() {
+      setOutOfBounds('category', checkOverlay('overlayCategory'));
+      setOutOfBounds('description', checkOverlay('overlayDescription'));
+      setOutOfBounds('phone', checkOverlay('overlayPhone'));
+    });
+  }
+
+  function attachPreviewListeners() {
+    var inputs = form.querySelectorAll('input[type="number"], input[type="color"]');
+    inputs.forEach(function(inp) { inp.addEventListener('input', updateLivePreview); inp.addEventListener('change', updateLivePreview); });
+    document.querySelectorAll('[data-preview-content]').forEach(function(inp) {
+      inp.addEventListener('input', updateLivePreview);
+      inp.addEventListener('change', updateLivePreview);
+    });
+  }
+
+  if (previewImg) {
+    if (previewImg.complete) {
+      updateLivePreview();
+    } else {
+      previewImg.addEventListener('load', updateLivePreview);
+    }
+    window.addEventListener('resize', updateLivePreview);
+  }
+  attachPreviewListeners();
+
+  function showStatus(type, message) {
+    var el = document.getElementById(type === 'success' ? 'saveStatus' : 'errorStatus');
+    var other = document.getElementById(type === 'success' ? 'errorStatus' : 'saveStatus');
+    if (el) {
+      el.textContent = message;
+      el.classList.remove('d-none');
+      setTimeout(function() { el.classList.add('d-none'); }, 5000);
+    }
+    if (other) other.classList.add('d-none');
+  }
+  
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = document.getElementById('btnSave');
+    var origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+    
+    var fd = new FormData(form);
+    fetch('{% url "template_manual_edit" template.pk %}', {
+      method: 'POST',
+      body: fd,
+      headers: { 'X-CSRFToken': csrf }
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+        if (data.status === 'success') {
+          showStatus('success', data.message);
+          if (data.test_image_url) {
+            var resultDiv = document.getElementById('testImageResult');
+            var testImg = document.getElementById('testImage');
+            if (resultDiv && testImg) {
+              testImg.src = data.test_image_url;
+              resultDiv.classList.remove('d-none');
+            }
+          }
+        } else {
+          showStatus('error', 'Error: ' + (data.errors ? data.errors.join(', ') : data.message || 'Unknown error'));
+        }
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+        showStatus('error', 'Request failed: ' + (err.message || 'Network error'));
+      });
+  });
+  
+  document.getElementById('btnSaveAndTest').addEventListener('click', function() {
+    var checkbox = document.createElement('input');
+    checkbox.type = 'hidden';
+    checkbox.name = 'generate_test';
+    checkbox.value = 'on';
+    form.appendChild(checkbox);
+    form.dispatchEvent(new Event('submit'));
+    form.removeChild(checkbox);
+  });
+})();
+</script>
+{% endblock %}

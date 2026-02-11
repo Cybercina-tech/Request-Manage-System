@@ -1,6 +1,6 @@
 /**
- * Professional Light Theme — Blue/Green/Grey palette (low eye strain)
- * Load before iraniu.css. Applied when <body class="theme-light">.
+ * Dual Theme Engine — CSS variables for .theme-light and .theme-dark on <body>.
+ * Load before iraniu.css. Use var(--bg-body), var(--text-primary), etc. globally.
  */
 
 .theme-light {
@@ -13,4 +13,50 @@
   --success-color: #10B981;
   --border-color: #E2E8F0;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* Dark palette: Navy/Slate background, light text. Maps iraniu vars for global use. */
+.theme-dark {
+  --bg-body: #0F172A;
+  --bg-card: #1E293B;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --primary-color: #60A5FA;
+  --primary-hover: #3B82F6;
+  --success-color: #34D399;
+  --border-color: #334155;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --bg-obsidian: var(--bg-body);
+  --bg-surface: var(--bg-card);
+  --text-main: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  --border-subtle: var(--border-color);
+}
+
+body.theme-dark {
+  background-color: var(--bg-body);
+  color: var(--text-primary);
+}
+
+/* Global loading bar (full-width app) */
+.global-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--primary-color);
+  transform: scaleX(0);
+  transform-origin: left;
+  z-index: 9999;
+  transition: transform 0.15s ease-out;
+  pointer-events: none;
+}
+.global-loading-bar.is-loading {
+  transform: scaleX(0.4);
+  animation: global-loading-pulse 0.8s ease-in-out infinite;
+}
+@keyframes global-loading-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
