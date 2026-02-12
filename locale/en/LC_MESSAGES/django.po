@@ -1,4 +1,4 @@
-# English (default) — Iraniu landing
+# English (default) — Iraniu
 # Copyright (C) 2025
 # This file is distributed under the same license as the Iraniu project.
 #
@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Iraniu\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2025-02-11 12:00+0000\n"
-"PO-Revision-Date: 2025-02-11 12:00+0000\n"
+"PO-Revision-Date: 2026-02-12 12:00+0000\n"
 "Last-Translator: \n"
 "Language-Team: English\n"
 "Language: en\n"
@@ -23,3 +23,171 @@ msgstr "This platform is for staff members only."
 
 msgid "Staff Login"
 msgstr "Staff Login"
+
+msgid "Log In"
+msgstr "Log In"
+
+msgid "Management Platform"
+msgstr "Management Platform"
+
+msgid "Username"
+msgstr "Username"
+
+msgid "Enter your username"
+msgstr "Enter your username"
+
+msgid "Password"
+msgstr "Password"
+
+msgid "Enter your password"
+msgstr "Enter your password"
+
+msgid "Back to Home"
+msgstr "Back to Home"
+
+msgid "Notifications"
+msgstr "Notifications"
+
+msgid "Mark all read"
+msgstr "Mark all read"
+
+msgid "Mark as read"
+msgstr "Mark as read"
+
+msgid "Mark read"
+msgstr "Mark read"
+
+msgid "No notifications"
+msgstr "No notifications"
+
+msgid "Logout"
+msgstr "Logout"
+
+msgid "Home"
+msgstr "Home"
+
+msgid "Ads Manager"
+msgstr "Ads Manager"
+
+msgid "Template Manager"
+msgstr "Template Manager"
+
+msgid "System Settings"
+msgstr "System Settings"
+
+msgid "Powered by"
+msgstr "Powered by"
+
+msgid "Dashboard Home"
+msgstr "Dashboard Home"
+
+msgid "Analytics & Command Center"
+msgstr "Analytics & Command Center"
+
+msgid "Real-time pulse, performance analytics, and operational shortcuts."
+msgstr "Real-time pulse, performance analytics, and operational shortcuts."
+
+msgid "Total Ads"
+msgstr "Total Ads"
+
+msgid "Last month"
+msgstr "Last month"
+
+msgid "this week"
+msgstr "this week"
+
+msgid "Active Channels"
+msgstr "Active Channels"
+
+msgid "Connected Telegram channels"
+msgstr "Connected Telegram channels"
+
+msgid "Templates Ready"
+msgstr "Templates Ready"
+
+msgid "Active and ready to publish"
+msgstr "Active and ready to publish"
+
+msgid "System Health"
+msgstr "System Health"
+
+msgid "Worker"
+msgstr "Worker"
+
+msgid "Online"
+msgstr "Online"
+
+msgid "Offline"
+msgstr "Offline"
+
+msgid "Telegram Bot"
+msgstr "Telegram Bot"
+
+msgid "Connected"
+msgstr "Connected"
+
+msgid "Disconnected"
+msgstr "Disconnected"
+
+msgid "Instagram API"
+msgstr "Instagram API"
+
+msgid "Valid"
+msgstr "Valid"
+
+msgid "Expired"
+msgstr "Expired"
+
+msgid "Database"
+msgstr "Database"
+
+msgid "Healthy"
+msgstr "Healthy"
+
+msgid "Error"
+msgstr "Error"
+
+msgid "Status Breakdown"
+msgstr "Status Breakdown"
+
+msgid "Published"
+msgstr "Published"
+
+msgid "Draft"
+msgstr "Draft"
+
+msgid "Failed"
+msgstr "Failed"
+
+msgid "7-Day Activity"
+msgstr "7-Day Activity"
+
+msgid "Daily created ads"
+msgstr "Daily created ads"
+
+msgid "No data yet."
+msgstr "No data yet."
+
+msgid "Action Hub"
+msgstr "Action Hub"
+
+msgid "New Ad Campaign"
+msgstr "New Ad Campaign"
+
+msgid "Design Template"
+msgstr "Design Template"
+
+msgid "Manual Editor"
+msgstr "Manual Editor"
+
+msgid "Connect Channel"
+msgstr "Connect Channel"
+
+msgid "Recent Activities"
+msgstr "Recent Activities"
+
+msgid "ago"
+msgstr "ago"
+
+msgid "No activity recorded yet."
+msgstr "No activity recorded yet."

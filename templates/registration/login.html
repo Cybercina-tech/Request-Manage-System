@@ -1,10 +1,11 @@
-{% load static %}
+{% load static i18n %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ request.LANGUAGE_CODE|default:'en' }}" dir="{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}rtl{% else %}ltr{% endif %}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Log In — Iraniu</title>
+  <title>{% trans "Log In" %} — Iraniu</title>
+  <link rel="icon" type="image/png" href="{% static 'img/favicon.png' %}">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}?v={{ STATIC_VERSION|default:'1' }}">
   <link rel="stylesheet" href="{% static 'css/iraniu.css' %}?v={{ STATIC_VERSION|default:'1' }}">
@@ -93,12 +94,27 @@
     }
   </style>
 </head>
-<body>
+<body class="{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}lang-fa{% endif %}">
   <div class="login-container">
     <div class="login-card">
+      <!-- Language switcher -->
+      <div class="text-center mb-3">
+        <form action="{% url 'set_language' %}" method="post" class="d-inline">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input type="hidden" name="language" value="en">
+          <button type="submit" class="btn btn-sm btn-outline-light me-1 {% if request.LANGUAGE_CODE == 'en' %}active{% endif %}">English</button>
+        </form>
+        <form action="{% url 'set_language' %}" method="post" class="d-inline">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input type="hidden" name="language" value="fa">
+          <button type="submit" class="btn btn-sm btn-outline-light {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}active{% endif %}">فارسی</button>
+        </form>
+      </div>
       <div class="login-logo">
         <h1>Iraniu</h1>
-        <p>Management Platform</p>
+        <p>{% trans "Management Platform" %}</p>
       </div>
 
       {% if form.errors %}
@@ -121,25 +137,25 @@
         <input type="hidden" name="next" value="{{ next }}" />
         
         <div class="form-group">
-          <label for="id_username">Username</label>
-          <input type="text" name="username" id="id_username" class="form-control" required autofocus placeholder="Enter your username">
+          <label for="id_username">{% trans "Username" %}</label>
+          <input type="text" name="username" id="id_username" class="form-control" required autofocus placeholder="{% trans "Enter your username" %}">
         </div>
 
         <div class="form-group">
-          <label for="id_password">Password</label>
-          <input type="password" name="password" id="id_password" class="form-control" required placeholder="Enter your password">
+          <label for="id_password">{% trans "Password" %}</label>
+          <input type="password" name="password" id="id_password" class="form-control" required placeholder="{% trans "Enter your password" %}">
         </div>
 
         <button type="submit" class="btn btn-soul">
-          <i class="fa-solid fa-right-to-bracket icon me-2" aria-hidden="true"></i>
-          Log In
+          <i class="fa-solid fa-right-to-bracket icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+          {% trans "Log In" %}
         </button>
       </form>
 
       <div class="login-footer">
         <a href="{% url 'landing' %}">
-          <i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i>
-          Back to Home
+          <i class="fa-solid fa-arrow-{% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}right{% else %}left{% endif %} icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-1{% else %}me-1{% endif %}" aria-hidden="true"></i>
+          {% trans "Back to Home" %}
         </a>
       </div>
     </div>

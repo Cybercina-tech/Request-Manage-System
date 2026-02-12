@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% load static i18n %}
 
-{% block title %}Dashboard Home{% endblock %}
+{% block title %}{% trans "Dashboard Home" %}{% endblock %}
 
 {% block content %}
 <section class="command-center">
   <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-      <h1 class="cc-title mb-1">Analytics & Command Center</h1>
-      <p class="text-muted mb-0">Real-time pulse, performance analytics, and operational shortcuts.</p>
+      <h1 class="cc-title mb-1">{% trans "Analytics & Command Center" %}</h1>
+      <p class="text-muted mb-0">{% trans "Real-time pulse, performance analytics, and operational shortcuts." %}</p>
     </div>
   </div>
 
@@ -17,12 +17,12 @@
       <article class="cc-card kpi-card">
         <div class="kpi-head">
           <span class="kpi-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></span>
-          <span class="kpi-label">Total Ads</span>
+          <span class="kpi-label">{% trans "Total Ads" %}</span>
         </div>
         <div class="kpi-value">{{ total_ads_this_month }}</div>
-        <div class="kpi-sub">Last month: {{ total_ads_last_month }}</div>
+        <div class="kpi-sub">{% trans "Last month" %}: {{ total_ads_last_month }}</div>
         <span class="kpi-badge {% if weekly_growth_pct >= 0 %}up{% else %}down{% endif %}">
-          {% if weekly_growth_pct >= 0 %}+{% endif %}{{ weekly_growth_pct }}% this week
+          {% if weekly_growth_pct >= 0 %}+{% endif %}{{ weekly_growth_pct }}% {% trans "this week" %}
         </span>
       </article>
     </div>
@@ -30,44 +30,44 @@
       <article class="cc-card kpi-card">
         <div class="kpi-head">
           <span class="kpi-icon"><i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i></span>
-          <span class="kpi-label">Active Channels</span>
+          <span class="kpi-label">{% trans "Active Channels" %}</span>
         </div>
         <div class="kpi-value">{{ active_telegram_channels }}</div>
-        <div class="kpi-sub">Connected Telegram channels</div>
+        <div class="kpi-sub">{% trans "Connected Telegram channels" %}</div>
       </article>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
       <article class="cc-card kpi-card">
         <div class="kpi-head">
           <span class="kpi-icon"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
-          <span class="kpi-label">Templates Ready</span>
+          <span class="kpi-label">{% trans "Templates Ready" %}</span>
         </div>
         <div class="kpi-value">{{ total_templates }}</div>
-        <div class="kpi-sub">Active and ready to publish</div>
+        <div class="kpi-sub">{% trans "Active and ready to publish" %}</div>
       </article>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
       <article class="cc-card kpi-card system-health-widget">
         <div class="kpi-head">
           <span class="kpi-icon"><i class="fa-solid fa-heart-pulse" aria-hidden="true"></i></span>
-          <span class="kpi-label">System Health</span>
+          <span class="kpi-label">{% trans "System Health" %}</span>
         </div>
         <div class="system-health-lines">
           <div class="system-health-line">
             <span class="health-pulse-dot {% if worker_online %}online{% else %}offline{% endif %}" aria-hidden="true"></span>
-            <span>Worker: {% if worker_online %}Online{% else %}Offline{% endif %}</span>
+            <span>{% trans "Worker" %}: {% if worker_online %}{% trans "Online" %}{% else %}{% trans "Offline" %}{% endif %}</span>
           </div>
           <div class="system-health-line">
             <span class="health-dot {% if telegram_online %}ok{% else %}err{% endif %}"></span>
-            <span>Telegram Bot: {% if telegram_online %}Connected{% else %}Disconnected{% endif %}</span>
+            <span>{% trans "Telegram Bot" %}: {% if telegram_online %}{% trans "Connected" %}{% else %}{% trans "Disconnected" %}{% endif %}</span>
           </div>
           <div class="system-health-line">
             <span class="health-dot {% if instagram_valid %}ok{% else %}err{% endif %}"></span>
-            <span>Instagram API: {% if instagram_valid %}Valid{% else %}Expired{% endif %}</span>
+            <span>{% trans "Instagram API" %}: {% if instagram_valid %}{% trans "Valid" %}{% else %}{% trans "Expired" %}{% endif %}</span>
           </div>
           <div class="system-health-line">
             <span class="health-dot {% if database_healthy %}ok{% else %}err{% endif %}"></span>
-            <span>Database: {% if database_healthy %}Healthy{% else %}Error{% endif %}</span>
+            <span>{% trans "Database" %}: {% if database_healthy %}{% trans "Healthy" %}{% else %}{% trans "Error" %}{% endif %}</span>
           </div>
         </div>
       </article>
@@ -78,25 +78,25 @@
     <div class="col-12 col-xl-8">
       <article class="cc-card insight-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h2 class="chart-title">Status Breakdown</h2>
-          <span class="text-muted small">Published / Draft / Failed</span>
+          <h2 class="chart-title">{% trans "Status Breakdown" %}</h2>
+          <span class="text-muted small">{% trans "Published" %} / {% trans "Draft" %} / {% trans "Failed" %}</span>
         </div>
         {% with total=status_counts.published|add:status_counts.draft|add:status_counts.failed %}
         <div class="status-breakdown">
           <div class="status-row">
-            <div class="status-label">Published <strong>{{ status_counts.published }}</strong></div>
+            <div class="status-label">{% trans "Published" %} <strong>{{ status_counts.published }}</strong></div>
             <div class="status-track">
               <span class="status-fill status-fill--published" style="width:{% widthratio status_counts.published total 100 %}%"></span>
             </div>
           </div>
           <div class="status-row">
-            <div class="status-label">Draft <strong>{{ status_counts.draft }}</strong></div>
+            <div class="status-label">{% trans "Draft" %} <strong>{{ status_counts.draft }}</strong></div>
             <div class="status-track">
               <span class="status-fill status-fill--draft" style="width:{% widthratio status_counts.draft total 100 %}%"></span>
             </div>
           </div>
           <div class="status-row">
-            <div class="status-label">Failed <strong>{{ status_counts.failed }}</strong></div>
+            <div class="status-label">{% trans "Failed" %} <strong>{{ status_counts.failed }}</strong></div>
             <div class="status-track">
               <span class="status-fill status-fill--failed" style="width:{% widthratio status_counts.failed total 100 %}%"></span>
             </div>
@@ -108,8 +108,8 @@
     <div class="col-12 col-xl-4">
       <article class="cc-card insight-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h2 class="chart-title">7-Day Activity</h2>
-          <span class="text-muted small">Daily created ads</span>
+          <h2 class="chart-title">{% trans "7-Day Activity" %}</h2>
+          <span class="text-muted small">{% trans "Daily created ads" %}</span>
         </div>
         <ul class="daily-list">
           {% for day in last_7_days %}
@@ -119,7 +119,7 @@
             <strong class="day-value">{{ day.count }}</strong>
           </li>
           {% empty %}
-          <li class="text-muted">No data yet.</li>
+          <li class="text-muted">{% trans "No data yet." %}</li>
           {% endfor %}
         </ul>
       </article>
@@ -129,37 +129,37 @@
   <div class="row g-3">
     <div class="col-12 col-xl-8">
       <article class="cc-card">
-        <h2 class="chart-title mb-3">Action Hub</h2>
+        <h2 class="chart-title mb-3">{% trans "Action Hub" %}</h2>
         <div class="action-grid">
           <a href="{% url 'template_tester' %}" class="quick-action">
             <i class="fa-solid fa-plus"></i>
-            <span>New Ad Campaign</span>
+            <span>{% trans "New Ad Campaign" %}</span>
           </a>
           <a href="{% url 'template_tester' %}" class="quick-action">
             <i class="fa-solid fa-palette"></i>
-            <span>Design Template</span>
+            <span>{% trans "Design Template" %}</span>
           </a>
           {% if last_edited_template %}
           <a href="{% url 'template_manual_edit' last_edited_template.pk %}" class="quick-action">
             <i class="fa-solid fa-compass-drafting"></i>
-            <span>Manual Editor</span>
+            <span>{% trans "Manual Editor" %}</span>
           </a>
           {% else %}
           <a href="{% url 'template_tester' %}" class="quick-action">
             <i class="fa-solid fa-compass-drafting"></i>
-            <span>Manual Editor</span>
+            <span>{% trans "Manual Editor" %}</span>
           </a>
           {% endif %}
           <a href="{% url 'settings_hub_channels' %}" class="quick-action">
             <i class="fa-solid fa-gear"></i>
-            <span>Connect Channel</span>
+            <span>{% trans "Connect Channel" %}</span>
           </a>
         </div>
       </article>
     </div>
     <div class="col-12 col-xl-4">
       <article class="cc-card activity-card {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}activity-rtl{% endif %}">
-        <h2 class="chart-title mb-3">Recent Activities</h2>
+        <h2 class="chart-title mb-3">{% trans "Recent Activities" %}</h2>
         <ul class="activity-list">
           {% for log in recent_activities %}
           <li>
@@ -168,10 +168,10 @@
               {{ log.action }}
               {% if log.object_repr %} "{{ log.object_repr }}"{% endif %}
             </div>
-            <div class="activity-time">{{ log.created_at|timesince }} ago</div>
+            <div class="activity-time">{{ log.created_at|timesince }} {% trans "ago" %}</div>
           </li>
           {% empty %}
-          <li class="text-muted">No activity recorded yet.</li>
+          <li class="text-muted">{% trans "No activity recorded yet." %}</li>
           {% endfor %}
         </ul>
       </article>

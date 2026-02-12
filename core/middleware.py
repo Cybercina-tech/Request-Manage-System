@@ -1,6 +1,6 @@
 """
 Iraniu — Require authentication for all internal URLs.
-Only these are public: /, /login/, /logout/, /api/submit/, /telegram/webhook/*
+Only these are public: /, /login/, /logout/, /i18n/, /api/submit/, /telegram/webhook/*
 """
 
 from django.conf import settings
@@ -11,6 +11,7 @@ PUBLIC_PATHS = (
     "/",
     "/login/",
     "/logout/",
+    "/i18n/",       # Language switching (set_language) must be public
     "/api/submit/",
     "/api/v1/",  # Partner API uses X-API-KEY
     "/telegram/webhook/",

@@ -1,4 +1,4 @@
-# Persian (فارسی) — Iraniu landing
+# Persian (فارسی) — Iraniu
 # Copyright (C) 2025
 # This file is distributed under the same license as the Iraniu project.
 #
@@ -7,13 +7,16 @@ msgstr ""
 "Project-Id-Version: Iraniu\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2025-02-11 12:00+0000\n"
-"PO-Revision-Date: 2025-02-11 12:00+0000\n"
+"PO-Revision-Date: 2026-02-12 12:00+0000\n"
 "Last-Translator: \n"
 "Language-Team: Persian\n"
 "Language: fa\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+# --- Landing page ---
 
 msgid "Thank you for visiting Iraniu"
 msgstr "از بازدید شما از ایرانيو سپاسگزاریم"
@@ -23,3 +26,177 @@ msgstr "این پلتفرم فقط برای کارکنان است."
 
 msgid "Staff Login"
 msgstr "ورود کارکنان"
+
+# --- Login page ---
+
+msgid "Log In"
+msgstr "ورود"
+
+msgid "Management Platform"
+msgstr "پلتفرم مدیریت"
+
+msgid "Username"
+msgstr "نام کاربری"
+
+msgid "Enter your username"
+msgstr "نام کاربری خود را وارد کنید"
+
+msgid "Password"
+msgstr "رمز عبور"
+
+msgid "Enter your password"
+msgstr "رمز عبور خود را وارد کنید"
+
+msgid "Back to Home"
+msgstr "بازگشت به صفحه اصلی"
+
+# --- Base page / Sidebar / Header ---
+
+msgid "Notifications"
+msgstr "اعلان‌ها"
+
+msgid "Mark all read"
+msgstr "خواندن همه"
+
+msgid "Mark as read"
+msgstr "علامت‌گذاری به عنوان خوانده شده"
+
+msgid "Mark read"
+msgstr "خوانده شد"
+
+msgid "No notifications"
+msgstr "هیچ اعلانی ندارید"
+
+msgid "Logout"
+msgstr "خروج"
+
+msgid "Home"
+msgstr "خانه"
+
+msgid "Ads Manager"
+msgstr "مدیریت آگهی‌ها"
+
+msgid "Template Manager"
+msgstr "مدیریت قالب‌ها"
+
+msgid "System Settings"
+msgstr "تنظیمات سیستم"
+
+msgid "Powered by"
+msgstr "طراحی توسط"
+
+# --- Dashboard ---
+
+msgid "Dashboard Home"
+msgstr "داشبورد"
+
+msgid "Analytics & Command Center"
+msgstr "تحلیل‌ها و مرکز فرمان"
+
+msgid "Real-time pulse, performance analytics, and operational shortcuts."
+msgstr "نبض لحظه‌ای، تحلیل عملکرد و میانبرهای عملیاتی."
+
+msgid "Total Ads"
+msgstr "کل آگهی‌ها"
+
+msgid "Last month"
+msgstr "ماه گذشته"
+
+msgid "this week"
+msgstr "این هفته"
+
+msgid "Active Channels"
+msgstr "کانال‌های فعال"
+
+msgid "Connected Telegram channels"
+msgstr "کانال‌های تلگرام متصل"
+
+msgid "Templates Ready"
+msgstr "قالب‌های آماده"
+
+msgid "Active and ready to publish"
+msgstr "فعال و آماده انتشار"
+
+msgid "System Health"
+msgstr "سلامت سیستم"
+
+msgid "Worker"
+msgstr "ورکر"
+
+msgid "Online"
+msgstr "آنلاین"
+
+msgid "Offline"
+msgstr "آفلاین"
+
+msgid "Telegram Bot"
+msgstr "ربات تلگرام"
+
+msgid "Connected"
+msgstr "متصل"
+
+msgid "Disconnected"
+msgstr "قطع"
+
+msgid "Instagram API"
+msgstr "API اینستاگرام"
+
+msgid "Valid"
+msgstr "معتبر"
+
+msgid "Expired"
+msgstr "منقضی"
+
+msgid "Database"
+msgstr "پایگاه داده"
+
+msgid "Healthy"
+msgstr "سالم"
+
+msgid "Error"
+msgstr "خطا"
+
+msgid "Status Breakdown"
+msgstr "وضعیت آگهی‌ها"
+
+msgid "Published"
+msgstr "منتشر شده"
+
+msgid "Draft"
+msgstr "پیش‌نویس"
+
+msgid "Failed"
+msgstr "ناموفق"
+
+msgid "7-Day Activity"
+msgstr "فعالیت ۷ روز اخیر"
+
+msgid "Daily created ads"
+msgstr "آگهی‌های روزانه"
+
+msgid "No data yet."
+msgstr "هنوز داده‌ای ثبت نشده."
+
+msgid "Action Hub"
+msgstr "مرکز عملیات"
+
+msgid "New Ad Campaign"
+msgstr "کمپین آگهی جدید"
+
+msgid "Design Template"
+msgstr "طراحی قالب"
+
+msgid "Manual Editor"
+msgstr "ویرایشگر دستی"
+
+msgid "Connect Channel"
+msgstr "اتصال کانال"
+
+msgid "Recent Activities"
+msgstr "فعالیت‌های اخیر"
+
+msgid "ago"
+msgstr "پیش"
+
+msgid "No activity recorded yet."
+msgstr "هنوز فعالیتی ثبت نشده."
