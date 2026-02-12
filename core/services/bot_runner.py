@@ -41,6 +41,31 @@ def _active_bots_qs(mode=None):
     return qs
 
 
+def _polling_bot_ids_one_per_token(bots_list):
+    """
+    Return bot IDs to start for polling, one per unique token.
+    Telegram allows only one getUpdates (long poll) per token; duplicate tokens cause HTTP 409.
+    """
+    seen_tokens = set()
+    result = []
+    for bot in bots_list:
+        try:
+            token = bot.get_decrypted_token()
+        except Exception:
+            token = ""
+        if not (token and token.strip()):
+            continue
+        if token in seen_tokens:
+            logger.info(
+                "Skipping bot_id=%s (@%s): same token as another bot; only one polling worker per token.",
+                bot.pk, getattr(bot, "username", "") or "?",
+            )
+            continue
+        seen_tokens.add(token)
+        result.append(bot.pk)
+    return result
+
+
 def _mark_stale_offline():
     """Mark bots offline if last_heartbeat > OFFLINE_THRESHOLD_SEC (only current env bots)."""
     try:
@@ -214,11 +239,14 @@ class BotRunnerManager:
         Check workers; apply requested_action; restart dead; mark stale offline.
         """
         _mark_stale_offline()
-        # Only POLLING bots for current environment
+        # Only POLLING bots for current environment; one worker per token to avoid Telegram 409
         try:
-            bots = list(
-                _active_bots_qs(mode=TelegramBot.Mode.POLLING).values_list("pk", "worker_pid", "requested_action")
-            )
+            bots_list = list(_active_bots_qs(mode=TelegramBot.Mode.POLLING))
+            allowed_bot_ids = set(_polling_bot_ids_one_per_token(bots_list))
+            bots = [
+                (b.pk, b.worker_pid, b.requested_action)
+                for b in bots_list
+            ]
         except Exception as e:
             logger.exception("supervisor_tick load bots: %s", e)
             return
@@ -230,9 +258,12 @@ class BotRunnerManager:
                 self._stop_bot_process(bot_id)
                 continue
             if requested_action == TelegramBot.RequestedAction.RESTART:
-                self.restart_bot(bot_id, debug=debug)
+                if bot_id in allowed_bot_ids:
+                    self.restart_bot(bot_id, debug=debug)
                 continue
             if requested_action == TelegramBot.RequestedAction.START:
+                if bot_id not in allowed_bot_ids:
+                    continue
                 if not proc or not proc.is_alive():
                     self.start_bot(bot_id, debug=debug)
                 else:
@@ -244,6 +275,9 @@ class BotRunnerManager:
                         pass
                 continue
             if proc and not proc.is_alive():
+                if bot_id not in allowed_bot_ids:
+                    self._processes.pop(bot_id, None)
+                    continue
                 self._processes.pop(bot_id, None)
                 try:
                     TelegramBot.objects.filter(pk=bot_id).update(
@@ -288,10 +322,11 @@ class BotRunnerManager:
                     "No active bot found for environment [%s]. Add a TelegramBot with environment=%s and is_active=True.",
                     CURRENT_ENVIRONMENT, CURRENT_ENVIRONMENT,
                 )
-            for bot in bots_list:
+            bot_ids_to_start = _polling_bot_ids_one_per_token(bots_list)
+            for bot_id in bot_ids_to_start:
                 if self._shutdown:
                     break
-                self.start_bot(bot.pk, debug=debug)
+                self.start_bot(bot_id, debug=debug)
         except Exception as e:
             logger.exception("Supervisor initial start: %s", e)
         last_webhook_check = 0.0
@@ -348,8 +383,9 @@ class BotRunnerManager:
                     "No active bot found for environment [%s]. Add a TelegramBot with environment=%s and is_active=True.",
                     CURRENT_ENVIRONMENT, CURRENT_ENVIRONMENT,
                 )
-            for bot in bots_list:
-                self.start_bot(bot.pk, debug=debug)
+            bot_ids_to_start = _polling_bot_ids_one_per_token(bots_list)
+            for bot_id in bot_ids_to_start:
+                self.start_bot(bot_id, debug=debug)
         except Exception as e:
             logger.exception("run_once start: %s", e)
         if self._telegram_mode == "webhook":

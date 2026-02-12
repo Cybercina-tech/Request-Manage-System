@@ -38,7 +38,13 @@ def site_config(request):
             pass
     environment = getattr(settings, 'ENVIRONMENT', 'PROD')
     theme_preference = getattr(config, 'theme_preference', 'light') or 'light'
-    return {'config': config, 'environment': environment, 'theme_preference': theme_preference}
+    is_instagram_enabled = getattr(config, 'is_instagram_enabled', False)
+    return {
+        'config': config,
+        'environment': environment,
+        'theme_preference': theme_preference,
+        'is_instagram_enabled': is_instagram_enabled,
+    }
 
 
 def static_version(request):

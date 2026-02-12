@@ -442,6 +442,11 @@ def post_to_instagram_view(request, uuid, target):
     target: 'feed' or 'story'
     Returns JSON { success, message }.
     """
+    # Guard: check if Instagram is enabled
+    config = SiteConfiguration.get_config()
+    if not getattr(config, 'is_instagram_enabled', False):
+        return JsonResponse({'success': False, 'message': 'Instagram is not enabled. Complete Instagram settings first.'}, status=400)
+
     ad = get_object_or_404(AdRequest, uuid=uuid)
     if target not in ('feed', 'story'):
         return JsonResponse({'success': False, 'message': 'Invalid target'}, status=400)
@@ -552,6 +557,7 @@ def settings_hub_section(request, section):
         'theme_preference': getattr(config, 'theme_preference', 'light') or 'light',
         'instagram_token_ok': instagram_token_ok,
         'instagram_token_expiry_days': instagram_token_expiry_days,
+        'is_instagram_enabled': getattr(config, 'is_instagram_enabled', False),
     }
     return render(request, 'core/settings_hub.html', context)
 
@@ -2047,6 +2053,11 @@ def api_instagram_post(request):
     Optional: scheduled_at (ISO) — schedules instead of posting immediately.
     Returns JSON { success, message, id } or { scheduled: true, pk }.
     """
+    # Guard: check if Instagram is enabled
+    config = SiteConfiguration.get_config()
+    if not getattr(config, 'is_instagram_enabled', False):
+        return JsonResponse({'success': False, 'message': 'Instagram is not enabled. Complete Instagram settings first.'}, status=400)
+
     from core.services.instagram import InstagramService
 
     data = get_request_payload(request)

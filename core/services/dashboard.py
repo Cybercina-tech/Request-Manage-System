@@ -124,7 +124,7 @@ def get_dashboard_context():
         or (getattr(config, "openai_api_key", None) or "").strip()
     )
     instagram_configured = bool(
-        (config.get_facebook_access_token() or "").strip()
+        getattr(config, 'is_instagram_enabled', False)
         or InstagramConfiguration.objects.filter(is_active=True).exclude(access_token_encrypted='').exists()
     )
     telegram_configured = active_bots > 0

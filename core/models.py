@@ -99,22 +99,34 @@ class SiteConfiguration(models.Model):
         help_text='Bot used to post to the default channel above (must have admin rights in that channel).',
     )
     # Instagram Business (for Post to Feed/Story; fallback if no InstagramConfiguration)
+    is_instagram_enabled = models.BooleanField(
+        default=False,
+        help_text='Auto-managed: True when all required Instagram fields are filled.',
+    )
     instagram_app_id = models.CharField(
         max_length=64,
+        null=True,
         blank=True,
+        default='',
         help_text='Facebook App ID (Meta for Developers).',
     )
     instagram_app_secret_encrypted = models.TextField(
+        null=True,
         blank=True,
+        default='',
         help_text='Facebook App Secret (encrypted at rest).',
     )
     instagram_business_id = models.CharField(
         max_length=64,
+        null=True,
         blank=True,
+        default='',
         help_text='Instagram Graph API user ID (Business account linked to Facebook Page).',
     )
     facebook_access_token_encrypted = models.TextField(
+        null=True,
         blank=True,
+        default='',
         help_text='Long-lived Facebook/Instagram access token (encrypted at rest).',
     )
     instagram_token_expires_at = models.DateTimeField(
@@ -124,7 +136,9 @@ class SiteConfiguration(models.Model):
     )
     instagram_oauth_state = models.CharField(
         max_length=128,
+        null=True,
         blank=True,
+        default='',
         help_text='CSRF state token for in-progress Instagram OAuth flow.',
     )
     # UI — Professional Light Theme (default) or Dark
@@ -217,9 +231,21 @@ class SiteConfiguration(models.Model):
                 "production_base_url": "Must be HTTPS (e.g. https://iraniu.ir). Required for Telegram webhook.",
             })
 
+    def _sync_instagram_enabled(self):
+        """Auto-toggle is_instagram_enabled based on required Instagram fields."""
+        required_fields_filled = all([
+            (self.instagram_app_id or '').strip(),
+            (self.instagram_app_secret_encrypted or '').strip(),
+            (self.instagram_business_id or '').strip(),
+            (self.facebook_access_token_encrypted or '').strip(),
+        ])
+        self.is_instagram_enabled = required_fields_filled
+
     def save(self, *args, **kwargs):
         if not self.pk and SiteConfiguration.objects.exists():
             return SiteConfiguration.objects.first()
+        # Auto-toggle Instagram status before saving
+        self._sync_instagram_enabled()
         result = super().save(*args, **kwargs)
         try:
             from django.core.cache import cache
@@ -230,7 +256,25 @@ class SiteConfiguration(models.Model):
 
     @classmethod
     def get_config(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+        """
+        Return the singleton SiteConfiguration, creating it with safe defaults
+        if it doesn't exist. Wrapped in try/except to never raise IntegrityError.
+        """
+        try:
+            obj, _ = cls.objects.get_or_create(pk=1, defaults={
+                'is_instagram_enabled': False,
+                'instagram_app_id': '',
+                'instagram_app_secret_encrypted': '',
+                'instagram_business_id': '',
+                'facebook_access_token_encrypted': '',
+                'instagram_oauth_state': '',
+            })
+        except Exception:
+            # Fallback: try to fetch existing, or create with minimal fields
+            obj = cls.objects.filter(pk=1).first()
+            if obj is None:
+                obj = cls(pk=1)
+                obj.save()
         return obj
 
     def get_instagram_app_secret(self) -> str:

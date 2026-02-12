@@ -5,7 +5,7 @@ Run: python manage.py runbots [options]
 - Loads all bots with mode=Polling from DB; for each, clear_webhook(drop_pending_updates=True) then start getUpdates loop.
 - Logs "Bot @Username is now polling..." per bot (in worker log and terminal when --once).
 - Multi-OS: paths via pathlib.
-- Lock mechanism prevents duplicate execution (e.g., if Cron Job starts while previous is still running).
+- File lock prevents duplicate execution (works across processes; cache is process-local with LocMem).
 """
 
 import os
@@ -20,6 +20,72 @@ from django.core.management.base import BaseCommand
 
 from core.models import TelegramBot
 from core.services.bot_runner import BotRunnerManager, run_bots_supervisor
+
+# File lock so only one runbots process runs (avoids Telegram 409 when two processes use same token).
+RUNBOTS_LOCK_FILENAME = "runbots.lock"
+
+
+def _acquire_file_lock(base_dir: Path):
+    """Acquire exclusive file lock under base_dir/logs/runbots.lock. Returns (lock_path, fd) or (None, error_msg)."""
+    log_dir = base_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = log_dir / RUNBOTS_LOCK_FILENAME
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as e:
+        return None, f"Cannot create lock file: {e}"
+    try:
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            except OSError:
+                try:
+                    with open(lock_path, "r") as f:
+                        existing_pid = f.read().strip()
+                except Exception:
+                    existing_pid = "?"
+                os.close(fd)
+                return None, f"Another runbots process is running (lock file PID: {existing_pid}). Stop it first to avoid Telegram 409 conflict."
+        else:
+            import fcntl
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                try:
+                    with open(lock_path, "r") as f:
+                        existing_pid = f.read().strip()
+                except Exception:
+                    existing_pid = "?"
+                os.close(fd)
+                return None, f"Another runbots process is running (lock file PID: {existing_pid}). Stop it first to avoid Telegram 409 conflict."
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+        return ((lock_path, fd), None)
+    except Exception as e:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        return (None, str(e))
+
+
+def _release_file_lock(lock_handle):
+    """Release file lock. lock_handle is (lock_path, fd) or None."""
+    if not lock_handle:
+        return
+    lock_path, fd = lock_handle
+    try:
+        if os.name != "nt":
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        try:
+            lock_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 class Command(BaseCommand):
@@ -55,22 +121,18 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         bot_ids = None  # Defined at start so finally block never sees UnboundLocalError
-        # Lock mechanism: prevent duplicate execution (e.g., Cron Job overlap)
-        LOCK_KEY = "runbots_execution_lock"
-        LOCK_TIMEOUT = 3600  # 1 hour (in case process crashes without releasing)
         current_pid = os.getpid()
+        base_dir = Path(settings.BASE_DIR)
 
-        # Try to acquire lock
-        lock_acquired = cache.add(LOCK_KEY, current_pid, timeout=LOCK_TIMEOUT)
-        if not lock_acquired:
-            existing_pid = cache.get(LOCK_KEY)
-            self.stdout.write(
-                self.style.ERROR(
-                    f"Another runbots process is already running (PID: {existing_pid}). "
-                    f"Exiting to prevent duplicate bots. If this is stale, wait {LOCK_TIMEOUT}s or clear cache."
-                )
-            )
+        # File lock: only one runbots process system-wide (cache is process-local with LocMem)
+        file_lock_handle, file_lock_err = _acquire_file_lock(base_dir)
+        if file_lock_err:
+            self.stdout.write(self.style.ERROR(file_lock_err))
             sys.exit(1)
+
+        LOCK_KEY = "runbots_execution_lock"
+        LOCK_TIMEOUT = 3600
+        lock_acquired = cache.add(LOCK_KEY, current_pid, timeout=LOCK_TIMEOUT)
 
         try:
             log_dir = (options.get("log_dir") or "").strip()
@@ -153,7 +215,8 @@ class Command(BaseCommand):
                 # Re-raise exceptions; finally block will handle cleanup
                 raise
         finally:
-            # Release lock and mark system status as inactive (watchdog)
+            # Release file lock and cache lock; mark system status as inactive
+            _release_file_lock(file_lock_handle)
             cache.delete(LOCK_KEY)
             try:
                 from core.models import SystemStatus

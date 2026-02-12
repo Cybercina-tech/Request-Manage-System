@@ -81,7 +81,8 @@ class SiteConfigurationAdmin(admin.ModelAdmin):
             'fields': ('approval_message_template', 'rejection_message_template', 'submission_ack_message'),
         }),
         ('Instagram', {
-            'fields': ('instagram_business_id', 'facebook_access_token_encrypted'),
+            'fields': ('is_instagram_enabled', 'instagram_app_id', 'instagram_business_id', 'facebook_access_token_encrypted'),
+            'description': 'is_instagram_enabled is auto-managed: it becomes True when all required Instagram fields are filled.',
         }),
     )
     filter_horizontal = ()
@@ -232,7 +233,7 @@ class TelegramBotAdmin(admin.ModelAdmin):
         'worker_pid', 'worker_started_at', 'last_error', 'status', 'webhook_secret_token',
     ]
     exclude = ['bot_token_encrypted']
-    actions = ['activate_webhook_mode', 'delete_webhook_action', 'check_webhook_status_action', 'add_dev_bot_action']
+    actions = ['activate_webhook_mode', 'delete_webhook_action', 'check_webhook_status_action']
 
     def last_error_short(self, obj):
         if not obj.last_error:
@@ -303,28 +304,6 @@ class TelegramBotAdmin(admin.ModelAdmin):
             lines.append(f"{bot.name}: url={url}, pending_updates={pending}")
         if lines:
             self.message_user(request, " | ".join(lines), level=admin.constants.SUCCESS)
-
-    @admin.action(description='Add Dev Bot (Iraniu_dev_bot)')
-    def add_dev_bot_action(self, request, queryset):
-        """Create the Dev Bot if it does not exist (username Iraniu_dev_bot, environment DEV)."""
-        if TelegramBot.objects.filter(environment=TelegramBot.Environment.DEV, username="Iraniu_dev_bot").exists():
-            self.message_user(request, "Dev Bot (@Iraniu_dev_bot) already exists.", level=admin.constants.WARNING)
-            return
-        bot = TelegramBot(
-            name="Dev Bot",
-            username="Iraniu_dev_bot",
-            environment=TelegramBot.Environment.DEV,
-            is_active=True,
-            status=TelegramBot.Status.OFFLINE,
-            mode=TelegramBot.Mode.POLLING,
-        )
-        bot.save()
-        self.message_user(
-            request,
-            "Dev Bot (@Iraniu_dev_bot) created without token. Set bot token from Bots page before use.",
-            level=admin.constants.SUCCESS,
-        )
-
 
 @admin.register(TelegramChannel)
 class TelegramChannelAdmin(admin.ModelAdmin):

@@ -169,7 +169,10 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
     # Instagram Feed + Story
     # ──────────────────────────────────────────────
     instagram_ok = False
-    if feed_url:
+    config = SiteConfiguration.get_config()
+    if not getattr(config, 'is_instagram_enabled', False):
+        logger.info("post_manager.distribute_ad: Instagram disabled, skipping for ad %s", ad_obj.uuid)
+    elif feed_url:
         try:
             # Feed post
             result = create_container(feed_url, caption[:2200], is_story=False)

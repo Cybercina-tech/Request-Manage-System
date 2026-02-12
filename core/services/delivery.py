@@ -68,10 +68,20 @@ class DeliveryService:
                 ok = DeliveryService._send_telegram(ad)
             elif channel == 'telegram_channel':
                 ok = DeliveryService._send_telegram_channel(ad, log)
-            elif channel == 'instagram':
-                ok = DeliveryService._send_instagram(ad, log)
-            elif channel == 'instagram_story':
-                ok = DeliveryService._send_instagram_story(ad, log)
+            elif channel in ('instagram', 'instagram_story'):
+                # Skip Instagram delivery if not enabled in SiteConfiguration
+                from core.models import SiteConfiguration
+                config = SiteConfiguration.get_config()
+                if not getattr(config, 'is_instagram_enabled', False):
+                    logger.info("DeliveryService.send: Instagram disabled, skipping channel=%s for ad %s", channel, ad.uuid)
+                    log.status = DeliveryLog.DeliveryStatus.FAILED
+                    log.error_message = 'Instagram is not enabled (incomplete configuration)'
+                    log.save(update_fields=['status', 'error_message'])
+                    return False
+                if channel == 'instagram':
+                    ok = DeliveryService._send_instagram(ad, log)
+                else:
+                    ok = DeliveryService._send_instagram_story(ad, log)
             else:  # api
                 ok = DeliveryService._send_api(ad)
 
@@ -204,9 +214,9 @@ class DeliveryService:
         channel_handle = (getattr(config, "telegram_channel_handle", "") or "").strip()
         bot_username = (getattr(config, "telegram_bot_username", "") or "").strip()
         if not channel_handle:
-            channel_handle = "@Iraniu_ads"
+            channel_handle = "@iraniu_bot"
         if not bot_username:
-            bot_username = "Iraniu_ads_bot"
+            bot_username = "iraniu_bot"
         # Ensure @ prefix for display
         bot_display = bot_username if bot_username.startswith("@") else f"@{bot_username}"
 
