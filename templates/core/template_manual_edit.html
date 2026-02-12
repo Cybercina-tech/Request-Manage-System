@@ -118,6 +118,40 @@
 .status-box {
   margin-top: .75rem;
 }
+/* Layout toggle */
+.layout-toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.layout-toggle-group a {
+  padding: .45rem .9rem;
+  text-decoration: none;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-body);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+.layout-toggle-group a:last-child { border-right: none; }
+.layout-toggle-group a.active {
+  background: var(--primary-color);
+  color: #fff;
+}
+.layout-toggle-group a:hover:not(.active) {
+  background: rgba(59,130,246,0.08);
+}
+.safety-zone-label {
+  font-size: .75rem;
+  color: rgba(255,80,80,0.7);
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+}
 @media (max-width: 1100px) {
   .manual-grid { grid-template-columns: 1fr; }
   .preview-panel { position: static; }
@@ -132,17 +166,38 @@
       <h1 class="mb-1" style="color: var(--text-primary); font-weight: 600;">High-Precision Manual Editor</h1>
       <p class="text-muted mb-0">{{ template.name }} — Numeric control with zero-latency live canvas preview.</p>
     </div>
-    <a href="{% url 'template_tester' %}" class="btn btn-outline-secondary">Back to Template Manager</a>
+    <div class="d-flex align-items-center gap-2">
+      <div class="layout-toggle-group">
+        <a href="{% url 'template_manual_edit' template.pk %}?layout=POST" class="{% if not is_story %}active{% endif %}">
+          <i class="fa-solid fa-square"></i> Post (4:5)
+        </a>
+        <a href="{% url 'template_manual_edit' template.pk %}?layout=STORY" class="{% if is_story %}active{% endif %}">
+          <i class="fa-solid fa-mobile-screen-button"></i> Story (9:16)
+        </a>
+      </div>
+      <a href="{% url 'template_tester' %}" class="btn btn-outline-secondary">Back to Template Manager</a>
+    </div>
   </div>
+
+  {% if is_story %}
+  <div class="alert alert-info d-flex align-items-center gap-2 mb-3 py-2" style="font-size: .88rem;">
+    <i class="fa-solid fa-mobile-screen-button"></i>
+    <span>
+      <strong>Story Layout (1080 &times; 1920)</strong> — Safety zones: top 250px (profile icon) and bottom 250px (send message bar) are marked in red.
+      Content should stay between Y={{ story_safe_top }} and Y={{ canvas_h|add:"-250" }}.
+    </span>
+    <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="btnAutoStory">Auto-Generate from Post</button>
+  </div>
+  {% endif %}
 
   <div class="manual-grid">
     <form id="manualEditorForm" class="control-panel">
       {% csrf_token %}
       <input type="hidden" name="action" id="formAction" value="save">
+      <input type="hidden" name="layout_mode" value="{{ layout_mode }}">
       <input type="hidden" name="preview_category" id="preview_category_hidden" value="">
       <input type="hidden" name="preview_description" id="preview_description_hidden" value="">
       <input type="hidden" name="preview_phone" id="preview_phone_hidden" value="">
-      <input type="hidden" name="preview_price" id="preview_price_hidden" value="">
 
       <div class="mb-3">
         <h5 style="color: var(--text-primary); font-weight: 600;">Preview Content</h5>
@@ -156,13 +211,9 @@
             <label class="form-label">Description (Farsi)</label>
             <textarea id="preview_description" class="form-control preview-content-input" rows="3" dir="rtl">این یک متن نمونه برای پیش‌نمایش زنده است. موقعیت و اندازه را به‌صورت عددی تنظیم کنید.</textarea>
           </div>
-          <div class="col-6">
+          <div class="col-12">
             <label class="form-label">Phone</label>
             <input type="text" id="preview_phone" class="form-control preview-content-input" value="09123456789">
-          </div>
-          <div class="col-6">
-            <label class="form-label">Price</label>
-            <input type="text" id="preview_price" class="form-control preview-content-input" value="۱۲,۰۰۰,۰۰۰ تومان" dir="rtl">
           </div>
         </div>
       </div>
@@ -174,7 +225,6 @@
             <option value="cat">Category</option>
             <option value="desc">Description</option>
             <option value="phone">Phone</option>
-            <option value="price">Price</option>
           </select>
         </div>
         <button type="button" class="btn btn-outline-primary" id="btnApplyToAll">Apply to All</button>
@@ -182,14 +232,14 @@
       </div>
 
       <div class="layer-controls accordion" id="layerAccordion">
-        {% with c=cat d=desc p=phone_coord pr=price_coord %}
+        {% with c=cat d=desc p=phone_coord %}
         <div class="accordion-item">
           <h2 class="accordion-header">
             <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#layerCategory">Category Layer</button>
           </h2>
           <div id="layerCategory" class="accordion-collapse collapse show">
             <div class="accordion-body">
-              {% include "core/partials/layer_controls.html" with prefix="cat" title="Category" x=c.x|default:0 y=c.y|default:0 size=c.size|default:48 color=c.color|default:"#FFFFFF" max_width=c.max_width|default:700 align=c.align|default:"right" %}
+              {% include "core/partials/layer_controls.html" with prefix="cat" title="Category" x=c.x|default:0 y=c.y|default:0 size=c.size|default:90 color=c.color|default:"#EEFF00" max_width=c.max_width|default:700 align=c.align|default:"center" bold=c.bold %}
             </div>
           </div>
         </div>
@@ -200,7 +250,7 @@
           </h2>
           <div id="layerDescription" class="accordion-collapse collapse">
             <div class="accordion-body">
-              {% include "core/partials/layer_controls.html" with prefix="desc" title="Description" x=d.x|default:0 y=d.y|default:0 size=d.size|default:32 color=d.color|default:"#FFFFFF" max_width=d.max_width|default:800 align=d.align|default:"right" %}
+              {% include "core/partials/layer_controls.html" with prefix="desc" title="Description" x=d.x|default:0 y=d.y|default:0 size=d.size|default:55 color=d.color|default:"#FFFFFF" max_width=d.max_width|default:650 align=d.align|default:"center" bold=d.bold %}
             </div>
           </div>
         </div>
@@ -211,18 +261,7 @@
           </h2>
           <div id="layerPhone" class="accordion-collapse collapse">
             <div class="accordion-body">
-              {% include "core/partials/layer_controls.html" with prefix="phone" title="Phone" x=p.x|default:0 y=p.y|default:0 size=p.size|default:28 color=p.color|default:"#FFFF00" max_width=p.max_width|default:550 align=p.align|default:"right" %}
-            </div>
-          </div>
-        </div>
-
-        <div class="accordion-item">
-          <h2 class="accordion-header">
-            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#layerPrice">Price Layer</button>
-          </h2>
-          <div id="layerPrice" class="accordion-collapse collapse">
-            <div class="accordion-body">
-              {% include "core/partials/layer_controls.html" with prefix="price" title="Price" x=pr.x|default:0 y=pr.y|default:0 size=pr.size|default:30 color=pr.color|default:"#00E5FF" max_width=pr.max_width|default:550 align=pr.align|default:"right" %}
+              {% include "core/partials/layer_controls.html" with prefix="phone" title="Phone" x=p.x|default:0 y=p.y|default:0 size=p.size|default:50 color=p.color|default:"#131111" max_width=p.max_width|default:550 align=p.align|default:"center" bold=p.bold %}
             </div>
           </div>
         </div>
@@ -231,9 +270,12 @@
 
       <div class="sticky-save-footer">
         <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
-          <span class="small text-muted">Tip: use <code>Shift + Arrow</code> in numeric inputs for 10px jumps.</span>
+          <span class="small text-muted">
+            Editing: <strong>{{ layout_mode }}</strong> layout ({{ canvas_w }}&times;{{ canvas_h }})
+            &middot; Tip: <code>Shift + Arrow</code> for 10px jumps.
+          </span>
           <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary" id="btnSave">Save Changes</button>
+            <button type="submit" class="btn btn-primary" id="btnSave">Save {{ layout_mode }}</button>
             <button type="button" class="btn btn-outline-secondary" id="btnSaveTest">Save + Test Render</button>
           </div>
         </div>
@@ -247,24 +289,37 @@
 
     <aside class="preview-panel">
       <div class="preview-toolbar">
-        <div class="form-check form-switch m-0">
-          <input class="form-check-input" type="checkbox" id="gridToggle">
-          <label class="form-check-label" for="gridToggle">Grid Overlay (100px)</label>
+        <div class="d-flex align-items-center gap-3">
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="gridToggle">
+            <label class="form-check-label" for="gridToggle">Grid</label>
+          </div>
+          {% if is_story %}
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="safeZoneToggle" checked>
+            <label class="form-check-label" for="safeZoneToggle">Safety Zones</label>
+          </div>
+          {% endif %}
         </div>
         <div style="min-width: 180px;">
-          <label class="form-label mb-1">Zoom <span id="zoomLabel">100%</span></label>
-          <input type="range" class="form-range" id="zoomRange" min="50" max="200" step="10" value="100">
+          <label class="form-label mb-1">Zoom <span id="zoomLabel">{% if is_story %}50{% else %}100{% endif %}%</span></label>
+          <input type="range" class="form-range" id="zoomRange" min="20" max="200" step="5" value="{% if is_story %}50{% else %}100{% endif %}">
         </div>
       </div>
 
       <div class="preview-stage">
         {% if background_url %}
-        <canvas id="liveCanvas" width="{{ img_width }}" height="{{ img_height }}"></canvas>
+        <canvas id="liveCanvas" width="{{ canvas_w }}" height="{{ canvas_h }}"></canvas>
         {% else %}
         <p class="text-muted p-3 mb-0">No background image is available for this template.</p>
         {% endif %}
       </div>
-      <p class="small text-muted mt-2 mb-0">Canvas: {{ img_width }} × {{ img_height }} px</p>
+      <p class="small text-muted mt-2 mb-0">
+        Canvas: {{ canvas_w }} &times; {{ canvas_h }} px
+        {% if is_story %}
+        &middot; Safe area: Y {{ story_safe_top }}–{{ canvas_h|add:"-250" }}
+        {% endif %}
+      </p>
 
       <div id="testImageResult" class="mt-3 d-none">
         <h6 style="color: var(--text-primary);">Server Test Image</h6>
@@ -275,7 +330,7 @@
 </section>
 
 {% if background_url %}
-<img id="bgSource" src="{{ background_url }}" alt="Background source" style="display:none;">
+<img id="bgSource" src="{{ background_url }}" alt="Background source" style="display:none;" crossorigin="anonymous">
 {% endif %}
 {% endblock %}
 
@@ -286,11 +341,17 @@
   var canvas = document.getElementById('liveCanvas');
   var bgImg = document.getElementById('bgSource');
   var csrf = document.querySelector('#manualEditorForm [name=csrfmiddlewaretoken]') ? document.querySelector('#manualEditorForm [name=csrfmiddlewaretoken]').value : '';
-  var imgW = {{ img_width }};
-  var imgH = {{ img_height }};
+  var canvasW = {{ canvas_w }};
+  var canvasH = {{ canvas_h }};
+  var isStory = {{ is_story|yesno:"true,false" }};
+  var safeTop = {{ story_safe_top|default:0 }};
+  var safeBottom = {{ story_safe_bottom|default:0 }};
+  var srcImgW = {{ img_width }};
+  var srcImgH = {{ img_height }};
   var rafId = null;
 
-  var defaults = {{ default_coords|safe }};
+  var defaults = {{ default_coords_json|safe }};
+  var storyDefaults = {{ default_story_coords_json|safe }};
 
   function byId(id) { return document.getElementById(id); }
   function getLayer(prefix) {
@@ -299,18 +360,29 @@
       y: parseFloat((byId(prefix + '_y') || {}).value || 0),
       size: parseFloat((byId(prefix + '_size') || {}).value || 24),
       color: ((byId(prefix + '_color_hex') || {}).value || '#FFFFFF').trim(),
-      maxWidth: parseFloat((byId(prefix + '_max_width') || {}).value || imgW),
-      align: ((byId(prefix + '_align') || {}).value || 'right').toLowerCase()
+      maxWidth: parseFloat((byId(prefix + '_max_width') || {}).value || canvasW),
+      align: ((byId(prefix + '_align') || {}).value || 'right').toLowerCase(),
+      bold: ((byId(prefix + '_bold') || {}).value || '0') === '1'
     };
   }
   function setLayer(prefix, cfg) {
-    if (byId(prefix + '_x')) byId(prefix + '_x').value = cfg.x;
-    if (byId(prefix + '_y')) byId(prefix + '_y').value = cfg.y;
-    if (byId(prefix + '_size')) byId(prefix + '_size').value = cfg.size;
+    if (byId(prefix + '_x')) byId(prefix + '_x').value = Math.round(cfg.x);
+    if (byId(prefix + '_y')) byId(prefix + '_y').value = Math.round(cfg.y);
+    if (byId(prefix + '_size')) byId(prefix + '_size').value = Math.round(cfg.size);
     if (byId(prefix + '_color_hex')) byId(prefix + '_color_hex').value = cfg.color;
     if (byId(prefix + '_color_picker')) byId(prefix + '_color_picker').value = cfg.color;
-    if (byId(prefix + '_max_width')) byId(prefix + '_max_width').value = cfg.maxWidth;
+    if (byId(prefix + '_max_width')) byId(prefix + '_max_width').value = Math.round(cfg.maxWidth || cfg.max_width || canvasW);
     if (byId(prefix + '_align')) byId(prefix + '_align').value = cfg.align;
+    // Bold
+    var isBold = !!(cfg.bold);
+    if (byId(prefix + '_bold')) byId(prefix + '_bold').value = isBold ? '1' : '0';
+    var boldBtn = byId(prefix + '_bold_btn');
+    if (boldBtn) {
+      boldBtn.classList.toggle('active', isBold);
+      boldBtn.style.background = isBold ? 'var(--primary-color)' : 'var(--bg-body)';
+      boldBtn.style.color = isBold ? '#fff' : 'var(--text-primary)';
+      boldBtn.style.borderColor = isBold ? 'var(--primary-color)' : 'var(--border-color)';
+    }
   }
 
   function wrapRtlText(ctx, text, maxWidth, fontPx) {
@@ -341,11 +413,12 @@
     var safeSize = Number.isFinite(cfg.size) ? Math.max(1, cfg.size) : 24;
     var safeX = Number.isFinite(cfg.x) ? cfg.x : 0;
     var safeY = Number.isFinite(cfg.y) ? cfg.y : 0;
-    var safeMax = Number.isFinite(cfg.maxWidth) ? Math.max(1, cfg.maxWidth) : imgW;
+    var safeMax = Number.isFinite(cfg.maxWidth) ? Math.max(1, cfg.maxWidth) : canvasW;
     var align = (cfg.align === 'left' || cfg.align === 'center' || cfg.align === 'right') ? cfg.align : 'right';
     var color = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(cfg.color || '') ? cfg.color : '#FFFFFF';
+    var weight = cfg.bold ? 'bold ' : '';
 
-    ctx.font = safeSize + 'px VazirFallback, Vazirmatn, Vazir, Samim, Tahoma, sans-serif';
+    ctx.font = weight + safeSize + 'px VazirFallback, Vazirmatn, Vazir, Samim, Tahoma, sans-serif';
     ctx.fillStyle = color;
     ctx.textBaseline = 'top';
     ctx.direction = 'rtl';
@@ -367,11 +440,51 @@
     }
   }
 
+  function drawSafetyZones(ctx) {
+    if (!isStory) return;
+    var toggle = byId('safeZoneToggle');
+    if (toggle && !toggle.checked) return;
+
+    // Top safety zone
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 50, 50, 0.12)';
+    ctx.fillRect(0, 0, canvasW, safeTop);
+    // Bottom safety zone
+    ctx.fillRect(0, canvasH - safeBottom, canvasW, safeBottom);
+
+    // Dashed border lines
+    ctx.setLineDash([12, 6]);
+    ctx.strokeStyle = 'rgba(255, 80, 80, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, safeTop);
+    ctx.lineTo(canvasW, safeTop);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, canvasH - safeBottom);
+    ctx.lineTo(canvasW, canvasH - safeBottom);
+    ctx.stroke();
+
+    // Labels
+    ctx.setLineDash([]);
+    ctx.font = '20px sans-serif';
+    ctx.fillStyle = 'rgba(255, 80, 80, 0.6)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PROFILE ICON ZONE (unsafe)', canvasW / 2, safeTop / 2);
+    ctx.fillText('SEND MESSAGE BAR (unsafe)', canvasW / 2, canvasH - safeBottom / 2);
+    ctx.restore();
+  }
+
   function applyWarnings() {
-    var layers = ['cat', 'desc', 'phone', 'price'];
+    var layers = ['cat', 'desc', 'phone'];
     layers.forEach(function(prefix) {
       var l = getLayer(prefix);
-      var out = l.x < 0 || l.y < 0 || l.x > imgW || l.y > imgH;
+      var out = l.x < 0 || l.y < 0 || l.x > canvasW || l.y > canvasH;
+      // In story mode, also warn if inside safety zones
+      if (isStory) {
+        out = out || l.y < safeTop || l.y > (canvasH - safeBottom);
+      }
       ['x', 'y', 'max_width'].forEach(function(field) {
         var input = byId(prefix + '_' + field);
         if (input) input.classList.toggle('coord-warn', out);
@@ -385,17 +498,49 @@
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bgImg, 0, 0, imgW, imgH);
 
+    if (isStory) {
+      // Draw dark background first, then the source image centered
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+
+      // Simulate blurred background: draw scaled/dimmed source
+      var bgScale = Math.max(canvasW / srcImgW, canvasH / srcImgH);
+      var bgW = Math.round(srcImgW * bgScale);
+      var bgH = Math.round(srcImgH * bgScale);
+      var bgX = Math.round((canvasW - bgW) / 2);
+      var bgY = Math.round((canvasH - bgH) / 2);
+      ctx.save();
+      ctx.filter = 'blur(15px) brightness(0.35)';
+      ctx.drawImage(bgImg, bgX, bgY, bgW, bgH);
+      ctx.restore();
+
+      // Draw centered source image (fit within safe area)
+      var fitScale = Math.min(canvasW / srcImgW, canvasH / srcImgH);
+      var maxFitH = canvasH - safeTop - safeBottom + 100;
+      if (srcImgH * fitScale > maxFitH) fitScale = maxFitH / srcImgH;
+      var newW = Math.round(srcImgW * fitScale);
+      var newH = Math.round(srcImgH * fitScale);
+      var pasteX = Math.round((canvasW - newW) / 2);
+      var pasteY = Math.round((canvasH - newH) / 2);
+      ctx.drawImage(bgImg, pasteX, pasteY, newW, newH);
+    } else {
+      ctx.drawImage(bgImg, 0, 0, canvasW, canvasH);
+    }
+
+    // Safety zone overlays (Story only)
+    drawSafetyZones(ctx);
+
+    // Grid overlay
     if (byId('gridToggle') && byId('gridToggle').checked) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.18)';
       ctx.lineWidth = 1;
-      for (var x = 100; x < imgW; x += 100) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, imgH); ctx.stroke();
+      for (var x = 100; x < canvasW; x += 100) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke();
       }
-      for (var y = 100; y < imgH; y += 100) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(imgW, y); ctx.stroke();
+      for (var y = 100; y < canvasH; y += 100) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvasW, y); ctx.stroke();
       }
       ctx.restore();
     }
@@ -403,7 +548,6 @@
     drawLayer(ctx, getLayer('cat'), (byId('preview_category') || {}).value || '', false);
     drawLayer(ctx, getLayer('desc'), (byId('preview_description') || {}).value || '', true);
     drawLayer(ctx, getLayer('phone'), (byId('preview_phone') || {}).value || '', false);
-    drawLayer(ctx, getLayer('price'), (byId('preview_price') || {}).value || '', false);
 
     applyWarnings();
   }
@@ -417,7 +561,6 @@
     if (byId('preview_category_hidden')) byId('preview_category_hidden').value = (byId('preview_category') || {}).value || '';
     if (byId('preview_description_hidden')) byId('preview_description_hidden').value = (byId('preview_description') || {}).value || '';
     if (byId('preview_phone_hidden')) byId('preview_phone_hidden').value = (byId('preview_phone') || {}).value || '';
-    if (byId('preview_price_hidden')) byId('preview_price_hidden').value = (byId('preview_price') || {}).value || '';
   }
 
   function bindColorSync(prefix) {
@@ -430,6 +573,22 @@
     });
     picker.addEventListener('input', function() {
       hex.value = picker.value;
+      queueRender();
+    });
+  }
+
+  function bindBoldToggle(prefix) {
+    var btn = byId(prefix + '_bold_btn');
+    var hidden = byId(prefix + '_bold');
+    if (!btn || !hidden) return;
+    btn.addEventListener('click', function() {
+      var isBold = hidden.value === '1';
+      isBold = !isBold;
+      hidden.value = isBold ? '1' : '0';
+      btn.classList.toggle('active', isBold);
+      btn.style.background = isBold ? 'var(--primary-color)' : 'var(--bg-body)';
+      btn.style.color = isBold ? '#fff' : 'var(--text-primary)';
+      btn.style.borderColor = isBold ? 'var(--primary-color)' : 'var(--border-color)';
       queueRender();
     });
   }
@@ -489,6 +648,14 @@
             byId('testImage').src = data.test_image_url;
             if (byId('testImageResult')) byId('testImageResult').classList.remove('d-none');
           }
+          // If auto_story returned new coords, apply them
+          if (data.coords) {
+            var c = data.coords;
+            if (c.category) setLayer('cat', {x: c.category.x, y: c.category.y, size: c.category.size, color: c.category.color, maxWidth: c.category.max_width || canvasW, align: c.category.align || 'center', bold: c.category.bold});
+            if (c.description) setLayer('desc', {x: c.description.x, y: c.description.y, size: c.description.size, color: c.description.color, maxWidth: c.description.max_width || canvasW, align: c.description.align || 'center', bold: c.description.bold});
+            if (c.phone) setLayer('phone', {x: c.phone.x, y: c.phone.y, size: c.phone.size, color: c.phone.color, maxWidth: c.phone.max_width || canvasW, align: c.phone.align || 'center', bold: c.phone.bold});
+            queueRender();
+          }
         } else {
           showStatus('error', (data.errors && data.errors.join(', ')) || data.message || 'Save failed.');
         }
@@ -504,11 +671,18 @@
   }
   if (byId('btnSaveTest')) byId('btnSaveTest').addEventListener('click', function() { submitForm('save_test'); });
 
+  // Auto-generate Story coords from Post
+  if (byId('btnAutoStory')) {
+    byId('btnAutoStory').addEventListener('click', function() {
+      submitForm('auto_story');
+    });
+  }
+
   if (byId('btnApplyToAll')) {
     byId('btnApplyToAll').addEventListener('click', function() {
       var src = (byId('applySourceLayer') || {}).value || 'cat';
       var cfg = getLayer(src);
-      ['cat', 'desc', 'phone', 'price'].forEach(function(prefix) {
+      ['cat', 'desc', 'phone'].forEach(function(prefix) {
         if (prefix === src) return;
         setLayer(prefix, cfg);
       });
@@ -518,21 +692,18 @@
 
   if (byId('btnResetDefaults')) {
     byId('btnResetDefaults').addEventListener('click', function() {
+      var d = isStory ? storyDefaults : defaults;
       setLayer('cat', {
-        x: defaults.category.x || 0, y: defaults.category.y || 0, size: defaults.category.size || 48,
-        color: defaults.category.color || '#FFFFFF', maxWidth: defaults.category.max_width || 700, align: defaults.category.align || 'right'
+        x: d.category.x || 0, y: d.category.y || 0, size: d.category.size || 90,
+        color: d.category.color || '#EEFF00', maxWidth: d.category.max_width || 700, align: d.category.align || 'center', bold: d.category.bold
       });
       setLayer('desc', {
-        x: defaults.description.x || 0, y: defaults.description.y || 0, size: defaults.description.size || 32,
-        color: defaults.description.color || '#FFFFFF', maxWidth: defaults.description.max_width || 800, align: defaults.description.align || 'right'
+        x: d.description.x || 0, y: d.description.y || 0, size: d.description.size || 55,
+        color: d.description.color || '#FFFFFF', maxWidth: d.description.max_width || 650, align: d.description.align || 'center', bold: d.description.bold
       });
       setLayer('phone', {
-        x: defaults.phone.x || 0, y: defaults.phone.y || 0, size: defaults.phone.size || 28,
-        color: defaults.phone.color || '#FFFF00', maxWidth: defaults.phone.max_width || 550, align: defaults.phone.align || 'right'
-      });
-      setLayer('price', {
-        x: defaults.price.x || 0, y: defaults.price.y || 0, size: defaults.price.size || 30,
-        color: defaults.price.color || '#00E5FF', maxWidth: defaults.price.max_width || 550, align: defaults.price.align || 'right'
+        x: d.phone.x || 0, y: d.phone.y || 0, size: d.phone.size || 50,
+        color: d.phone.color || '#131111', maxWidth: d.phone.max_width || 550, align: d.phone.align || 'center', bold: d.phone.bold
       });
       queueRender();
     });
@@ -541,16 +712,26 @@
   if (byId('zoomRange') && canvas) {
     byId('zoomRange').addEventListener('input', function() {
       var zoom = parseInt(byId('zoomRange').value || '100', 10);
-      canvas.style.width = Math.round((imgW * zoom) / 100) + 'px';
-      canvas.style.height = Math.round((imgH * zoom) / 100) + 'px';
+      canvas.style.width = Math.round((canvasW * zoom) / 100) + 'px';
+      canvas.style.height = Math.round((canvasH * zoom) / 100) + 'px';
       if (byId('zoomLabel')) byId('zoomLabel').textContent = zoom + '%';
       queueRender();
     });
+    // Apply initial zoom
+    var initZoom = parseInt(byId('zoomRange').value || '100', 10);
+    canvas.style.width = Math.round((canvasW * initZoom) / 100) + 'px';
+    canvas.style.height = Math.round((canvasH * initZoom) / 100) + 'px';
   }
 
-  ['cat', 'desc', 'phone', 'price'].forEach(bindColorSync);
+  ['cat', 'desc', 'phone'].forEach(bindColorSync);
+  ['cat', 'desc', 'phone'].forEach(bindBoldToggle);
   bindStepButtons();
   bindKeyboardJump();
+
+  // Safety zone toggle
+  if (byId('safeZoneToggle')) {
+    byId('safeZoneToggle').addEventListener('change', function() { queueRender(); });
+  }
 
   document.querySelectorAll('input, select, textarea').forEach(function(el) {
     if (el.id === 'formAction') return;

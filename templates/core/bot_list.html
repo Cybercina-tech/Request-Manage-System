@@ -24,7 +24,7 @@
   <div class="card-body">
     <h6 class="text-uppercase text-muted small mb-2" style="letter-spacing: 0.08em;">System Core</h6>
     <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-      <h5 class="mb-0 text-light d-flex align-items-center gap-2">
+      <h5 class="mb-0 d-flex align-items-center gap-2" style="color: var(--text-primary);">
         <i class="fa-solid fa-circle-check text-success" aria-hidden="true" title="Verified default bot"></i>
         <span>{{ default_bot.name }}</span>
       </h5>
@@ -73,7 +73,7 @@
       {% csrf_token %}
       <label class="form-label text-muted small">Update Token (masked)</label>
       <div class="input-group input-group-responsive" style="max-width: 420px;">
-        <input type="password" class="form-control bg-dark border-secondary text-light" name="bot_token" id="defaultBotToken" placeholder="Paste new bot token (masked)" autocomplete="off">
+        <input type="password" class="form-control" name="bot_token" id="defaultBotToken" placeholder="Paste new bot token (masked)" autocomplete="off">
         <button type="button" class="input-group-text bg-dark border-secondary text-muted toggle-password" id="toggleDefaultBotToken" style="cursor:pointer" title="Show/hide" aria-label="Toggle token visibility"><i class="fa-regular fa-eye icon" aria-hidden="true"></i></button>
         <button type="submit" class="btn btn-soul" id="defaultBotTokenBtn">Update & sync webhook</button>
       </div>
@@ -93,7 +93,7 @@
 
 <div class="card-soul">
   <div class="table-responsive">
-    <table class="table table-dark table-hover mb-0">
+    <table class="table table-soul table-hover mb-0">
       <thead>
         <tr>
           <th>Name</th>

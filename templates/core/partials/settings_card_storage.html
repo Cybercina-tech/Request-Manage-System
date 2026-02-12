@@ -1,0 +1,77 @@
+<div class="settings-hub-card-header">
+  <h2><i class="fa-solid fa-hard-drive me-2"></i>Storage Cleanup</h2>
+  <p>Delete old generated ad and story images to free up disk space. Templates, fonts, and essential assets are never deleted.</p>
+</div>
+<div class="settings-hub-card-body">
+  <form id="storageSettingsForm" onsubmit="return false;">
+    {% csrf_token %}
+    <div class="row g-3">
+      <!-- Retention Days Setting -->
+      <div class="col-md-6">
+        <label class="form-label fw-semibold" style="color: var(--text-primary);">
+          <i class="fa-solid fa-calendar-days me-1"></i> Cleanup Retention (Days)
+        </label>
+        <input
+          type="number"
+          class="form-control"
+          name="days"
+          id="cleanupRetentionDays"
+          value="{{ config.cleanup_retention_days|default:7 }}"
+          min="1"
+          max="365"
+          step="1"
+          placeholder="7"
+        >
+        <div class="form-text" style="color: var(--text-secondary);">
+          Files older than this many days will be deleted. Minimum: 1 day.
+        </div>
+      </div>
+
+      <!-- Info Box -->
+      <div class="col-md-6">
+        <label class="form-label fw-semibold" style="color: var(--text-primary);">
+          <i class="fa-solid fa-shield-halved me-1"></i> Safety Info
+        </label>
+        <div class="p-3 rounded" style="background: rgba(59,130,246,0.07); border: 1px solid rgba(59,130,246,0.2);">
+          <ul class="mb-0 small" style="color: var(--text-secondary); padding-left: 1.1rem;">
+            <li>Only generated images (ad_*.png, story_*.png) are deleted</li>
+            <li>Templates, fonts, and .gitkeep files are <strong>never</strong> touched</li>
+            <li>Directory structures remain intact</li>
+            <li>Requires Admin / Superuser privileges</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Action Area -->
+      <div class="col-12">
+        <hr style="border-color: var(--border-color);">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+          <div>
+            <h6 class="mb-1" style="color: var(--text-primary);">Manual Cleanup</h6>
+            <p class="small mb-0" style="color: var(--text-secondary);">
+              Permanently delete generated images older than the specified retention period.
+            </p>
+          </div>
+          <a href="#" class="btn btn-outline-danger px-4" id="cleanupGoBtn">
+            <i class="fa-solid fa-trash-can me-1"></i> Clear Old Assets Now
+          </a>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+(function() {
+  var goBtn = document.getElementById('cleanupGoBtn');
+  var daysInput = document.getElementById('cleanupRetentionDays');
+  if (!goBtn || !daysInput) return;
+
+  goBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    var days = parseInt(daysInput.value) || 7;
+    if (days < 1) days = 1;
+    window.location.href = '{% url "cleanup_generated_media" %}?days=' + days;
+  });
+})();
+</script>

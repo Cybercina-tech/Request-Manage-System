@@ -22,6 +22,7 @@
       <thead>
         <tr>
           <th>Name</th>
+          <th>نام فارسی</th>
           <th>Slug</th>
           <th style="width: 100px">Color</th>
           <th>Status</th>
@@ -32,6 +33,7 @@
         {% for cat in categories %}
         <tr data-category-id="{{ cat.pk }}">
           <td class="align-middle">{{ cat.name }}</td>
+          <td class="align-middle" dir="rtl" style="font-family: 'Vazir','VazirFallback','Tahoma',sans-serif;">{{ cat.name_fa|default:"—" }}</td>
           <td class="align-middle"><code>{{ cat.slug }}</code></td>
           <td class="align-middle">
             <span class="badge badge-cat-dynamic" style="--cat-color: {{ cat.color }};">{{ cat.color }}</span>
@@ -53,7 +55,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="5" class="text-center text-muted py-4">No categories yet. Add one to get started.</td>
+          <td colspan="6" class="text-center text-muted py-4">No categories yet. Add one to get started.</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -2,41 +2,64 @@
   <div class="col-6">
     <label class="form-label">{{ title }} X</label>
     <div class="input-step-wrap">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="down" data-step="10" title="-10">-10</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="down" data-step="1" title="-1">-</button>
       <input type="number" class="form-control" id="{{ prefix }}_x" name="{{ prefix }}_x" value="{{ x|default:0 }}" step="1">
-      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="down" data-step="1">-</button>
-      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="up" data-step="10">+10</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="up" data-step="1" title="+1">+</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_x" data-dir="up" data-step="10" title="+10">+10</button>
     </div>
   </div>
   <div class="col-6">
     <label class="form-label">{{ title }} Y</label>
     <div class="input-step-wrap">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="down" data-step="10" title="-10">-10</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="down" data-step="1" title="-1">-</button>
       <input type="number" class="form-control" id="{{ prefix }}_y" name="{{ prefix }}_y" value="{{ y|default:0 }}" step="1">
-      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="down" data-step="1">-</button>
-      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="up" data-step="10">+10</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="up" data-step="1" title="+1">+</button>
+      <button class="step-btn" type="button" data-target="{{ prefix }}_y" data-dir="up" data-step="10" title="+10">+10</button>
     </div>
   </div>
-  <div class="col-6">
+  <div class="col-4">
     <label class="form-label">Font Size</label>
-    <input type="number" class="form-control" id="{{ prefix }}_size" name="{{ prefix }}_size" value="{{ size|default:24 }}" step="1" min="1">
+    <div class="input-step-wrap">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_size" data-dir="down" data-step="1" title="-1">-</button>
+      <input type="number" class="form-control" id="{{ prefix }}_size" name="{{ prefix }}_size" value="{{ size|default:24 }}" step="1" min="1">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_size" data-dir="up" data-step="1" title="+1">+</button>
+    </div>
   </div>
-  <div class="col-6">
+  <div class="col-4">
+    <label class="form-label">Max Width</label>
+    <div class="input-step-wrap">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_max_width" data-dir="down" data-step="10" title="-10">-10</button>
+      <input type="number" class="form-control" id="{{ prefix }}_max_width" name="{{ prefix }}_max_width" value="{{ max_width|default:800 }}" step="1" min="1">
+      <button class="step-btn" type="button" data-target="{{ prefix }}_max_width" data-dir="up" data-step="10" title="+10">+10</button>
+    </div>
+  </div>
+  <div class="col-4">
     <label class="form-label">Alignment</label>
     <select class="form-select" id="{{ prefix }}_align" name="{{ prefix }}_align">
-      <option value="right" {% if align == 'right' %}selected{% endif %}>Right</option>
+      <option value="right" {% if align == 'right' %}selected{% endif %}>Right (RTL)</option>
       <option value="center" {% if align == 'center' %}selected{% endif %}>Center</option>
       <option value="left" {% if align == 'left' %}selected{% endif %}>Left</option>
     </select>
   </div>
   <div class="col-6">
     <label class="form-label">Color (Hex)</label>
-    <input type="text" class="form-control" id="{{ prefix }}_color_hex" name="{{ prefix }}_color" value="{{ color|default:'#FFFFFF' }}">
+    <div class="d-flex gap-1 align-items-center">
+      <input type="text" class="form-control" id="{{ prefix }}_color_hex" name="{{ prefix }}_color" value="{{ color|default:'#FFFFFF' }}">
+      <input type="color" class="form-control form-control-color flex-shrink-0" id="{{ prefix }}_color_picker" value="{{ color|default:'#FFFFFF' }}" style="width: 42px; height: 38px;">
+    </div>
   </div>
-  <div class="col-6">
-    <label class="form-label">Color Picker</label>
-    <input type="color" class="form-control form-control-color" id="{{ prefix }}_color_picker" value="{{ color|default:'#FFFFFF' }}">
-  </div>
-  <div class="col-12">
-    <label class="form-label">Max Width</label>
-    <input type="number" class="form-control" id="{{ prefix }}_max_width" name="{{ prefix }}_max_width" value="{{ max_width|default:800 }}" step="1" min="1">
+  <div class="col-6 d-flex align-items-end">
+    <button type="button"
+            class="btn w-100 bold-toggle-btn{% if bold %} active{% endif %}"
+            id="{{ prefix }}_bold_btn"
+            data-prefix="{{ prefix }}"
+            title="Toggle Bold"
+            style="font-weight: 900; letter-spacing: .5px; border: 1px solid var(--border-color); border-radius: 6px; height: 38px;
+                   {% if bold %}background: var(--primary-color); color: #fff; border-color: var(--primary-color);{% else %}background: var(--bg-body); color: var(--text-primary);{% endif %}">
+      <i class="fa-solid fa-bold me-1"></i> Bold
+    </button>
+    <input type="hidden" id="{{ prefix }}_bold" name="{{ prefix }}_bold" value="{% if bold %}1{% else %}0{% endif %}">
   </div>
 </div>

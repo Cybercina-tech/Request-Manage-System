@@ -296,31 +296,121 @@ def send_photo(
     chat_id: int,
     photo: str,
     caption: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
     max_retries: int = MAX_RETRIES,
 ) -> Tuple[bool, Optional[int], Optional[str]]:
     """
     Send a photo to a chat/channel via Telegram Bot API.
-    photo: HTTP URL of the image or file_id of existing Telegram file.
+
+    photo can be:
+      - An absolute local file path  → uploaded as multipart/form-data
+      - An HTTP(S) URL                → sent as JSON payload
+      - A Telegram file_id            → sent as JSON payload
+
+    parse_mode: Optional 'HTML' or 'Markdown' for caption formatting.
+    reply_markup: Optional inline keyboard dict (InlineKeyboardMarkup).
     Returns (success, message_id, error_message).
     """
+    import os
+
     if not token or not chat_id or not photo:
         logger.warning("send_photo: missing token, chat_id, or photo")
         return False, None, "Missing token, chat_id, or photo"
+
+    photo = (photo or "").strip()
+    is_local_file = os.path.isfile(photo)
+
     session = _create_session()
-    payload = {"chat_id": chat_id, "photo": (photo or "").strip()}
-    if caption is not None:
-        payload["caption"] = caption[:1024]
+    url = f"{TELEGRAM_API_BASE}/bot{token}/sendPhoto"
+    masked_token = _mask_token(token)
+    error = None
+
     for attempt in range(max_retries + 1):
-        success, result, error = _make_request(
-            session, "POST", "sendPhoto", token, json_data=payload
-        )
-        if success and result is not None:
-            message_id = result.get("message_id") if isinstance(result, dict) else None
-            return True, message_id, None
+        try:
+            if is_local_file:
+                # ---- Upload local file using multipart/form-data ----
+                import json as _json
+                data: Dict[str, Any] = {"chat_id": chat_id}
+                if caption is not None:
+                    data["caption"] = caption[:1024]
+                if parse_mode:
+                    data["parse_mode"] = parse_mode
+                if reply_markup:
+                    data["reply_markup"] = _json.dumps(reply_markup)
+                with open(photo, "rb") as photo_file:
+                    files = {"photo": photo_file}
+                    response = session.post(
+                        url,
+                        data=data,
+                        files=files,
+                        timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                    )
+            else:
+                # ---- URL or file_id: use JSON payload ----
+                payload: Dict[str, Any] = {"chat_id": chat_id, "photo": photo}
+                if caption is not None:
+                    payload["caption"] = caption[:1024]
+                if parse_mode:
+                    payload["parse_mode"] = parse_mode
+                if reply_markup:
+                    payload["reply_markup"] = reply_markup
+                response = session.post(
+                    url,
+                    json=payload,
+                    timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+                )
+
+            # ---- Process response ----
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("ok"):
+                    result = resp_data.get("result")
+                    message_id = result.get("message_id") if isinstance(result, dict) else None
+                    return True, message_id, None
+                else:
+                    error = resp_data.get("description", "Unknown Telegram API error")
+            else:
+                try:
+                    resp_json = response.json() if response.text else {}
+                    error = (resp_json.get("description") or response.text or "")[:300]
+                except Exception:
+                    error = (response.text or "")[:300]
+
+            # ---- Forbidden: bot not a channel member → clear admin instruction ----
+            if error and "forbidden" in error.lower():
+                if "bot is not a member" in error.lower() or "bot was kicked" in error.lower():
+                    logger.error(
+                        "⛔ ADMIN ACTION REQUIRED: Bot is not a member of channel %s. "
+                        "Please open the channel settings in Telegram and add the bot "
+                        "as an Administrator with 'Post Messages' permission.  token=%s",
+                        chat_id, masked_token,
+                    )
+                else:
+                    logger.warning(
+                        "send_photo Forbidden: chat_id=%s token=%s: %s",
+                        chat_id, masked_token, error,
+                    )
+                return False, None, error
+
+        except SSLError as e:
+            error = f"SSL error: {e}"
+            logger.error("send_photo SSL: chat_id=%s token=%s: %s", chat_id, masked_token, e)
+        except (ConnectionError, Timeout) as e:
+            error = f"Network error: {e}"
+            logger.error("send_photo network: chat_id=%s token=%s: %s", chat_id, masked_token, e)
+        except RequestException as e:
+            error = f"Request error: {e}"
+            logger.error("send_photo request: chat_id=%s token=%s: %s", chat_id, masked_token, e)
+        except Exception as e:
+            error = f"Unexpected error: {e}"
+            logger.exception("send_photo unexpected: chat_id=%s token=%s", chat_id, masked_token)
+
         if attempt < max_retries:
             wait_time = BACKOFF_FACTOR * (2 ** attempt)
-            logger.debug("send_photo retry %s/%s: %s", attempt + 1, max_retries, error)
+            logger.debug("send_photo retry %s/%s after %.1fs: %s", attempt + 1, max_retries, wait_time, error)
             time.sleep(wait_time)
+
     logger.warning("send_photo failed after %s attempts: %s", max_retries + 1, error)
     return False, None, error
 
@@ -360,9 +450,18 @@ def edit_message_text(
             or "400" in str(error)
             or "bad request" in error_str
         ):
+            # Classify the failure reason for clearer diagnostics
+            if "message to edit not found" in error_str:
+                reason = "message deleted by user or not found"
+            elif "can't be edited" in error_str:
+                reason = "message too old (>48h) or is a system/service message"
+            elif "message is not modified" in error_str:
+                reason = "text unchanged (no-op)"
+            else:
+                reason = "bad request (possibly not bot's own message)"
             logger.warning(
-                "edit_message_text failed (message not editable): chat_id=%s message_id=%s error=%s",
-                chat_id, message_id, error,
+                "edit_message_text failed (%s): chat_id=%s message_id=%s error=%s",
+                reason, chat_id, message_id, error,
             )
             return False
         if attempt < max_retries:

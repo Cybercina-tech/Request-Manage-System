@@ -177,9 +177,9 @@ class VerificationCodeAdmin(admin.ModelAdmin):
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug', 'color', 'is_active', 'order']
+    list_display = ['name', 'name_fa', 'slug', 'color', 'is_active', 'order']
     list_filter = ['is_active']
-    search_fields = ['name', 'slug']
+    search_fields = ['name', 'name_fa', 'slug']
     list_editable = ['is_active', 'order']
 
 
@@ -448,120 +448,14 @@ class AdTemplateAdmin(admin.ModelAdmin):
         return extra + urls
 
     def template_coordinate_lab_view(self, request, object_id):
-        from django.http import JsonResponse
-        from django.shortcuts import get_object_or_404, render
-        import json
+        """Redirect to the new Manual Coordinate Editor (drag-and-drop removed)."""
+        from django.shortcuts import get_object_or_404, redirect
+        from django.urls import reverse
 
         tpl = get_object_or_404(AdTemplate, pk=object_id)
+        return redirect(reverse('template_manual_edit', args=[tpl.pk]))
 
-        if request.method == 'POST':
-            action = request.POST.get('action') or request.headers.get('X-Action')
-            if action == 'save':
-                try:
-                    raw = request.body.decode('utf-8') if request.body else '{}'
-                    if request.POST.get('coordinates'):
-                        coords = json.loads(request.POST.get('coordinates'))
-                    else:
-                        coords = json.loads(raw) if raw.strip() else {}
-                    if coords:
-                        existing = dict(tpl.coordinates or {})
-                        for key in ('category', 'description', 'phone'):
-                            if key in coords and isinstance(coords[key], dict):
-                                existing[key] = {**(existing.get(key) or {}), **coords[key]}
-                        tpl.coordinates = existing
-                        tpl.save(update_fields=['coordinates', 'updated_at'])
-                    return JsonResponse({'success': True})
-                except Exception as e:
-                    return JsonResponse({'success': False, 'message': str(e)}, status=400)
-            if action == 'preview':
-                from core.services.image_engine import create_ad_image
-                from django.conf import settings
-                from pathlib import Path
-
-                category = request.POST.get('category', 'Category')
-                text = request.POST.get('text', 'Sample ad text')
-                phone = request.POST.get('phone', '+98 912 345 6789')
-                bg_file = request.session.get('coord_lab_temp_background_path')
-                if bg_file and Path(bg_file).exists():
-                    path_str = create_ad_image(tpl.pk, category, text, phone, background_file=bg_file)
-                else:
-                    path_str = create_ad_image(tpl.pk, category, text, phone)
-                if not path_str:
-                    return JsonResponse({'success': False, 'message': 'Image generation failed'}, status=500)
-                media_root = Path(getattr(settings, 'MEDIA_ROOT', '') or settings.BASE_DIR / 'media')
-                media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
-                try:
-                    rel = Path(path_str).resolve().relative_to(Path(media_root).resolve())
-                    url = f'{request.scheme}://{request.get_host()}{media_url}/{rel.as_posix()}'
-                except ValueError:
-                    url = f'{media_url}/generated_ads/{Path(path_str).name}'
-                return JsonResponse({'success': True, 'url': url})
-            return JsonResponse({'success': False, 'message': 'Unknown action'}, status=400)
-
-        # GET: show lab (optionally use temp background from Template Tester upload)
-        from pathlib import Path
-        from django.conf import settings as django_settings
-
-        background_url = ''
-        img_width, img_height = 1080, 1080
-        use_temp = request.GET.get('use_temp_background') and request.session.get('coord_lab_temp_background_path')
-        temp_path = request.session.get('coord_lab_temp_background_path') if use_temp else None
-
-        if use_temp and temp_path:
-            path = Path(temp_path)
-            if path.exists():
-                try:
-                    media_root = Path(getattr(django_settings, 'MEDIA_ROOT', '') or django_settings.BASE_DIR / 'media')
-                    rel = path.resolve().relative_to(media_root.resolve())
-                    media_url = (getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
-                    background_url = f'{request.scheme}://{request.get_host()}{media_url}/{rel.as_posix()}'
-                    from PIL import Image
-                    with open(path, 'rb') as fh:
-                        img = Image.open(fh)
-                        img_width, img_height = img.size
-                except Exception:
-                    pass
-        if not background_url and tpl.background_image:
-            try:
-                background_url = tpl.background_image.url
-                from PIL import Image
-                with tpl.background_image.open('rb') as fh:
-                    img = Image.open(fh)
-                    img_width, img_height = img.size
-            except Exception:
-                background_url = ''
-        if not background_url:
-            # Use default template image (static/images/default_template/Template.png)
-            default_rel = "static/images/default_template/Template.png"
-            default_path = Path(django_settings.BASE_DIR) / default_rel
-            if default_path.exists():
-                try:
-                    from django.templatetags.static import static
-                    static_url = static('images/default_template/Template.png')
-                    if static_url:
-                        background_url = request.build_absolute_uri(static_url)
-                    from PIL import Image
-                    with open(default_path, 'rb') as fh:
-                        img = Image.open(fh)
-                        img_width, img_height = img.size
-                except Exception:
-                    pass
-
-        coords = tpl.coordinates or {}
-        context = {
-            **self.admin_site.each_context(request),
-            'title': f'Coordinate Lab — {tpl.name}',
-            'template': tpl,
-            'template_id': tpl.pk,
-            'background_url': background_url,
-            'image_width': img_width,
-            'image_height': img_height,
-            'coordinates': coords,
-            'opts': self.model._meta,
-        }
-        return render(request, 'admin/core/adtemplate/coordinate_lab.html', context)
-
-    @admin.action(description='Open Coordinate Lab')
+    @admin.action(description='Open Coordinate Editor')
     def open_coordinate_lab_action(self, request, queryset):
         from django.shortcuts import redirect
         from django.urls import reverse
@@ -569,5 +463,4 @@ class AdTemplateAdmin(admin.ModelAdmin):
         if not first:
             self.message_user(request, 'Select at least one template.', level=admin.constants.WARNING)
             return
-        url = reverse('admin:core_adtemplate_coordinate_lab', args=[first.pk])
-        return redirect(url)
+        return redirect(reverse('template_manual_edit', args=[first.pk]))

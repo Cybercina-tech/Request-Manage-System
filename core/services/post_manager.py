@@ -3,6 +3,9 @@ Iraniu — Distribute approved ads: generate image, post to Telegram and Instagr
 Telegram: uses Site Configuration default channel (telegram_channel_id + default_telegram_bot) when
 is_channel_active; otherwise falls back to TelegramChannel (is_default, current environment).
 Uses AdTemplate (is_active=True) for image generation and Instagram Graph API for Feed + Story.
+
+NOTE: For automatic distribution on approval, see DeliveryService in core/services/delivery.py.
+This module's distribute_ad() is kept for the manual "Preview & Publish" flow.
 """
 
 import logging
@@ -10,7 +13,7 @@ from typing import Optional
 
 from django.conf import settings
 
-from core.models import AdRequest, AdTemplate, SiteConfiguration, TelegramChannel
+from core.models import AdRequest, AdTemplate, SiteConfiguration, TelegramChannel, FORMAT_STORY
 from core.notifications import send_notification
 from core.services.telegram_client import send_message, send_photo
 from core.services.image_engine import create_ad_image, make_story_image
@@ -73,10 +76,11 @@ def get_default_channel() -> Optional[TelegramChannel]:
 
 def distribute_ad(ad_obj: AdRequest) -> bool:
     """
+    Manual distribution (from Preview & Publish page):
     1. Generate ad image from active AdTemplate (create_ad_image).
     2. Upload to Telegram (send_photo with image URL, or send_message if no image).
     3. Upload as Instagram Post (create_container + publish_media).
-    4. Upload as Instagram Story 9:16 (make_story_image then create_container + publish_media).
+    4. Upload as Instagram Story 9:16 (create_ad_image with format_type='STORY').
 
     Returns True if at least Telegram send succeeded (or image generation + Instagram succeeded), False otherwise.
     """
@@ -87,13 +91,18 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
         logger.debug("post_manager.distribute_ad: ad %s not approved, status=%s", ad_obj.uuid, ad_obj.status)
         return False
 
-    category = ad_obj.get_category_display() if hasattr(ad_obj, "get_category_display") else (ad_obj.category.name if ad_obj.category else "Other")
+    # Use Persian category name (name_fa) with fallback
+    category_fa = ""
+    if ad_obj.category:
+        category_fa = getattr(ad_obj.category, 'name_fa', '') or ad_obj.category.name
+    if not category_fa:
+        category_fa = ad_obj.get_category_display() if hasattr(ad_obj, "get_category_display") else "Other"
     text = (ad_obj.content or "").strip()
     contact = getattr(ad_obj, "contact_snapshot", None) or {}
     phone = (contact.get("phone") or "").strip() if isinstance(contact, dict) else ""
     if not phone and getattr(ad_obj, "user_id", None) and ad_obj.user:
         phone = (ad_obj.user.phone_number or "").strip()
-    caption = f"{category}\n\n{text}"
+    caption = f"{category_fa}\n\n{text}"
     if phone:
         caption += f"\n\n📱 {phone}"
 
@@ -101,12 +110,14 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
     feed_path = None
     if template:
         try:
-            feed_path = create_ad_image(template.pk, category, text, phone)
+            feed_path = create_ad_image(template.pk, category_fa, text, phone)
         except Exception as exc:
             logger.exception("post_manager.distribute_ad: image generation failed ad=%s: %s", ad_obj.uuid, exc)
     feed_url = _path_to_public_url(feed_path) if feed_path else None
 
-    # Prefer Site Configuration default channel when is_channel_active
+    # ──────────────────────────────────────────────
+    # Telegram Channel
+    # ──────────────────────────────────────────────
     chat_id, token, _ = _channel_from_site_config()
     if token is None or chat_id is None:
         channel = get_default_channel()
@@ -154,9 +165,13 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
                 link="/settings/hub/telegram/",
             )
 
+    # ──────────────────────────────────────────────
+    # Instagram Feed + Story
+    # ──────────────────────────────────────────────
     instagram_ok = False
     if feed_url:
         try:
+            # Feed post
             result = create_container(feed_url, caption[:2200], is_story=False)
             if result.get("success") and result.get("creation_id"):
                 pub = publish_media(result["creation_id"])
@@ -181,7 +196,19 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
                     link="/settings/hub/instagram/",
                 )
 
-            story_path = make_story_image(feed_path) if feed_path else None
+            # Story — use format_type='STORY' (auto Y+285 offset) for proper 9:16 rendering
+            story_path = None
+            if template:
+                try:
+                    story_path = create_ad_image(
+                        template.pk, category_fa, text, phone,
+                        format_type=FORMAT_STORY,
+                    )
+                except Exception as exc:
+                    logger.warning("post_manager.distribute_ad: story image gen failed ad=%s: %s", ad_obj.uuid, exc)
+                    # Fallback: old make_story_image approach
+                    story_path = make_story_image(feed_path) if feed_path else None
+
             story_url = _path_to_public_url(story_path) if story_path else None
             if story_url:
                 story_result = create_container(story_url, "", is_story=True)
@@ -197,4 +224,3 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
             logger.exception("post_manager.distribute_ad: Instagram delivery crashed ad=%s: %s", ad_obj.uuid, exc)
 
     return telegram_ok or instagram_ok
-

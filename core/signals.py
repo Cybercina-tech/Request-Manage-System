@@ -3,9 +3,12 @@ Iraniu — Django signals.
 
 - post_save on AdminProfile: when created or is_notified set to True (first time), send welcome Telegram message.
 - post_save on AdRequest: when a new request is created, notify all admins with Persian message and panel link.
+- pre_save / post_save on AdRequest: detect status change to APPROVED and trigger distribution
+  as a safety net (normally approve_one_ad handles this, but this covers Django Admin manual saves).
 """
 
 import logging
+import threading
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 
@@ -18,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 # Store previous is_notified per AdminProfile pk for post_save (updates only).
 _admin_old_is_notified: dict[int, bool] = {}
+
+# Store previous ad status per AdRequest pk to detect transitions to APPROVED.
+_ad_old_status: dict[int, str] = {}
+# Track ads currently being approved via approve_one_ad (to avoid double-distribution).
+_ads_approving_via_action: set[int] = set()
 
 WELCOME_MESSAGE = (
     "🎉 خوش آمدید! شما اکنون به عنوان مدیر سیستم انتخاب شدید. "
@@ -62,6 +70,54 @@ def on_admin_profile_save(sender, instance, created, **kwargs):
             )
     except Exception as e:
         logger.exception("on_admin_profile_save: unexpected error: %s", e)
+
+
+@receiver(pre_save, sender=AdRequest)
+def _ad_request_pre_save(sender, instance, **kwargs):
+    """Remember old status so post_save can detect transitions to APPROVED."""
+    if instance.pk:
+        try:
+            old = AdRequest.objects.only('status').get(pk=instance.pk)
+            _ad_old_status[instance.pk] = old.status
+        except AdRequest.DoesNotExist:
+            pass
+
+
+@receiver(post_save, sender=AdRequest)
+def on_ad_status_changed_to_approved(sender, instance, created, **kwargs):
+    """
+    Safety-net: if an ad transitions to APPROVED outside of approve_one_ad
+    (e.g., Django Admin manual save), trigger background distribution.
+    approve_one_ad marks the ad pk in _ads_approving_via_action to avoid duplicates.
+    """
+    if created:
+        # New ad — handled separately by on_ad_request_created below
+        _ad_old_status.pop(instance.pk, None)
+        return
+
+    old_status = _ad_old_status.pop(instance.pk, None)
+    if old_status == instance.status:
+        return  # no status change
+    if instance.status != AdRequest.Status.APPROVED:
+        return  # not approving
+
+    # If approve_one_ad already triggered distribution, skip
+    if instance.pk in _ads_approving_via_action:
+        _ads_approving_via_action.discard(instance.pk)
+        return
+
+    logger.info(
+        "Signal: ad %s changed to APPROVED (from %s) outside approve_one_ad — triggering distribution",
+        instance.uuid, old_status,
+    )
+    from core.services.ad_actions import _run_full_delivery
+    thread = threading.Thread(
+        target=_run_full_delivery,
+        args=(instance.pk,),
+        name=f"signal-distribute-{instance.uuid}",
+        daemon=True,
+    )
+    thread.start()
 
 
 @receiver(post_save, sender=AdRequest)

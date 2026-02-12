@@ -270,6 +270,48 @@ body.theme-light {
   color: var(--text-primary) !important;
 }
 
+/* Light theme: Approve button (btn-success) */
+.theme-light .btn-success {
+  background-color: #10B981 !important;
+  border-color: #10B981 !important;
+  color: #fff !important;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+}
+.theme-light .btn-success:hover {
+  background-color: #059669 !important;
+  border-color: #059669 !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Light theme: Reject button (btn-hot) */
+.theme-light .btn-hot {
+  background: #FEF2F2 !important;
+  color: #DC2626 !important;
+  border: 1px solid #FECACA !important;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.08);
+}
+.theme-light .btn-hot:hover {
+  background: #FEE2E2 !important;
+  color: #B91C1C !important;
+  border-color: #FCA5A5 !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.15);
+  transform: translateY(-1px);
+}
+
+/* Light theme: Request revision / gold button */
+.theme-light .btn-gold {
+  background: #FFFBEB !important;
+  color: #B45309 !important;
+  border: 1px solid #FDE68A !important;
+}
+.theme-light .btn-gold:hover {
+  background: #FEF3C7 !important;
+  color: #92400E !important;
+  border-color: #FCD34D !important;
+}
+
 /* Light theme: sidebar — white or high-contrast nav */
 .theme-light .sidebar {
   background: #FFFFFF;
@@ -330,24 +372,85 @@ body.theme-light {
   background: var(--primary-hover);
 }
 
-/* Light theme: tables */
-.theme-light .table,
-.theme-light .table-soul {
-  background: var(--bg-card) !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--border-color);
+/* Light theme: inline code and <code> elements in tables */
+.theme-light code {
+  background: #EFF6FF;
+  color: #1E40AF;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  border: 1px solid #DBEAFE;
 }
-.theme-light .table-soul thead th {
-  background: #F8FAFC;
+.theme-dark code {
+  background: rgba(124, 77, 255, 0.1);
+  color: #C4B5FD;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  border: 1px solid rgba(124, 77, 255, 0.2);
+}
+
+/* Light theme: category badges and dynamic badges */
+.theme-light .badge-cat-dynamic {
+  background: color-mix(in srgb, var(--cat-color, #3B82F6) 12%, #FFFFFF);
+  color: color-mix(in srgb, var(--cat-color, #3B82F6) 80%, #000);
+  border: 1px solid color-mix(in srgb, var(--cat-color, #3B82F6) 30%, transparent);
+}
+
+/* Light theme: badge styles */
+.theme-light .badge.bg-info {
+  background: #DBEAFE !important;
+  color: #1E40AF !important;
+}
+.theme-light .badge.bg-secondary {
+  background: #F1F5F9 !important;
+  color: #475569 !important;
+}
+.theme-light .badge.bg-success {
+  background: #D1FAE5 !important;
+  color: #065F46 !important;
+}
+.theme-light .badge.bg-danger {
+  background: #FEE2E2 !important;
+  color: #991B1B !important;
+}
+.theme-light .badge.bg-primary {
+  background: #DBEAFE !important;
+  color: #1E40AF !important;
+}
+.theme-light .badge.bg-warning {
+  background: #FEF3C7 !important;
+  color: #92400E !important;
+}
+
+/* Light theme: btn-outline-primary in tables */
+.theme-light .btn-outline-primary {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+.theme-light .btn-outline-primary:hover {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+/* Light theme: form controls */
+.theme-light .form-control,
+.theme-light .form-select {
+  background: #FFFFFF;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-color);
-}
-.theme-light .table-soul tbody td {
   border-color: var(--border-color);
 }
-.theme-light .table-soul tbody tr:hover {
-  background: #F8FAFC !important;
-  box-shadow: none;
+.theme-light .form-control:focus,
+.theme-light .form-select:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.15);
+}
+
+/* Light theme: card-soul */
+.theme-light .card-soul {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Light theme: success/warning/danger badges and alerts */
@@ -1274,10 +1377,10 @@ li {
 }
 
 /* ============================================
-   TABLES — Soulful Dark Theme
+   TABLES — Theme-aware (Dark + Light)
    ============================================ */
 
-/* Global Bootstrap table overrides — ensure no blue/white backgrounds */
+/* Global Bootstrap table overrides */
 .table {
   background: var(--bg-surface) !important;
   color: var(--text-main) !important;
@@ -1292,22 +1395,35 @@ li {
   color: var(--text-main) !important;
 }
 
-.table tbody td {
+.theme-dark .table tbody td {
   background: transparent !important;
   color: var(--text-main) !important;
   border-color: rgba(255, 255, 255, 0.04) !important;
 }
 
-/* Table — Ad list */
+.theme-light .table tbody td {
+  background: transparent !important;
+  color: var(--text-main) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Table — Soulful (theme-aware) */
 .table-soul {
   background: var(--bg-surface) !important;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(124, 77, 255, 0.1);
   color: var(--text-main) !important;
 }
 
-.table-soul thead th {
+.theme-dark .table-soul {
+  border: 1px solid rgba(124, 77, 255, 0.1);
+}
+
+.theme-light .table-soul {
+  border: 1px solid var(--border-color);
+}
+
+.theme-dark .table-soul thead th {
   background: rgba(124, 77, 255, 0.1);
   color: var(--text-main);
   font-weight: 600;
@@ -1315,28 +1431,48 @@ li {
   border-bottom: 1px solid rgba(124, 77, 255, 0.1);
 }
 
+.theme-light .table-soul thead th {
+  background: #F1F5F9;
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 1rem 1.25rem;
+  border-bottom: 2px solid var(--border-color);
+}
+
 .table-soul tbody tr {
   transition: all 0.3s ease;
 }
 
-.table-soul tbody tr:hover {
+.theme-dark .table-soul tbody tr:hover {
   background: rgba(124, 77, 255, 0.06);
   box-shadow: 0 0 20px rgba(124, 77, 255, 0.08);
+}
+
+.theme-light .table-soul tbody tr:hover {
+  background: #F8FAFC !important;
+  box-shadow: none;
 }
 
 .table-soul tbody {
   background: var(--bg-surface) !important;
 }
 
-/* Ensure empty state cell also uses dark background */
+/* Ensure empty state cell also uses theme background */
 .table-soul tbody td.empty-state-cell {
   background: var(--bg-surface) !important;
 }
 
-.table-soul tbody td {
+.theme-dark .table-soul tbody td {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid rgba(255,255,255,0.04);
   vertical-align: middle;
+}
+
+.theme-light .table-soul tbody td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  color: var(--text-primary);
 }
 
 /* Row Hover — Lift Effect */
@@ -1344,10 +1480,16 @@ li {
   transition: all 0.3s ease;
 }
 
-.table-soul tbody tr.ad-main-row:hover {
+.theme-dark .table-soul tbody tr.ad-main-row:hover {
   transform: translateY(-2px);
   background: rgba(124, 77, 255, 0.05) !important;
   box-shadow: 0 4px 12px rgba(124, 77, 255, 0.15);
+}
+
+.theme-light .table-soul tbody tr.ad-main-row:hover {
+  transform: translateY(-1px);
+  background: #EFF6FF !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
 }
 
 /* AI Flagged Row — Pulsing Border */

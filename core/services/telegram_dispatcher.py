@@ -7,6 +7,8 @@ and sending the reply. Both the webhook view and the polling worker MUST call th
 """
 
 import logging
+import time
+
 from django.core.cache import cache
 
 from core.models import TelegramBot, TelegramMessageLog
@@ -24,6 +26,15 @@ logger = logging.getLogger(__name__)
 LAST_PROCESSED_UPDATE_ID_KEY = "last_processed_update_id"
 PROCESSING_LOCK_PREFIX = "telegram_update_lock_"
 PROCESSING_LOCK_TIMEOUT = 120  # seconds
+
+# ── Stale message tracking ────────────────────────────────────────────
+# Telegram does not allow editing messages older than ~48 h, or messages
+# that have been deleted / are not from the bot.  When an edit fails we
+# store the failed message_id so we never waste another API call on it.
+STALE_MESSAGE_IDS_KEY = "stale_message_ids"
+LAST_BOT_MSG_TIMESTAMP_KEY = "last_bot_message_ts"
+MAX_STALE_IDS = 20  # keep list bounded
+MAX_MESSAGE_AGE_SECONDS = 48 * 3600  # Telegram's hard limit for editing
 
 
 def acquire_processing_lock(bot_id: int, update_id: int) -> bool:
@@ -48,6 +59,44 @@ def should_skip_duplicate_update(session, update_id: int | None) -> bool:
     if last is None:
         return False
     return update_id <= last
+
+
+def _is_message_stale(session, message_id: int) -> bool:
+    """
+    Return True if `message_id` was previously marked as non-editable,
+    or if the message is older than Telegram's 48-hour edit window.
+    """
+    if message_id is None:
+        return True
+    ctx = session.context or {}
+    # Check explicit stale list (prior edit failures)
+    if message_id in ctx.get(STALE_MESSAGE_IDS_KEY, []):
+        return True
+    # Check age: if this is the last bot message and it's too old, skip edit
+    last_ts = ctx.get(LAST_BOT_MSG_TIMESTAMP_KEY)
+    if last_ts and message_id == ctx.get("last_bot_message_id"):
+        if time.time() - last_ts > MAX_MESSAGE_AGE_SECONDS:
+            return True
+    return False
+
+
+def _mark_message_stale(session, message_id: int) -> None:
+    """
+    Record `message_id` as non-editable so future callbacks on the same
+    message skip the edit attempt entirely (breaking the retry loop).
+    NOTE: does NOT call session.save(); the caller must persist.
+    """
+    if message_id is None:
+        return
+    ctx = session.context or {}
+    stale_ids = ctx.get(STALE_MESSAGE_IDS_KEY, [])
+    if message_id not in stale_ids:
+        stale_ids.append(message_id)
+        # Keep the list bounded to avoid unbounded growth
+        if len(stale_ids) > MAX_STALE_IDS:
+            stale_ids = stale_ids[-MAX_STALE_IDS:]
+        ctx[STALE_MESSAGE_IDS_KEY] = stale_ids
+        session.context = ctx
 
 
 def _get_telegram_user_id(body: dict) -> int:
@@ -214,23 +263,37 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
     if text_out:
         try:
             if edit_previous:
-                ok = edit_message_text_via_bot(
-                    chat_id,
-                    response["message_id"],
-                    text_out,
-                    bot,
-                    reply_markup=reply_markup,
-                )
-                if ok:
-                    sent_message_id = response["message_id"]
-                else:
-                    logger.warning(
-                        "process_update_payload edit failed, sending new message bot_id=%s chat_id=%s",
-                        bot_id, chat_id,
+                target_msg_id = response["message_id"]
+
+                # ── Stale-message guard: skip edit if we already know it will fail ──
+                if _is_message_stale(session, target_msg_id):
+                    logger.info(
+                        "process_update_payload skipping edit (stale msg) bot_id=%s chat_id=%s msg_id=%s",
+                        bot_id, chat_id, target_msg_id,
                     )
                     sent_message_id = send_telegram_message_via_bot(
                         chat_id, text_out, bot, reply_markup=reply_markup
                     )
+                else:
+                    ok = edit_message_text_via_bot(
+                        chat_id,
+                        target_msg_id,
+                        text_out,
+                        bot,
+                        reply_markup=reply_markup,
+                    )
+                    if ok:
+                        sent_message_id = target_msg_id
+                    else:
+                        # Mark this message so we never try to edit it again
+                        _mark_message_stale(session, target_msg_id)
+                        logger.warning(
+                            "process_update_payload edit failed, marked msg_id=%s stale, sending new message bot_id=%s chat_id=%s",
+                            target_msg_id, bot_id, chat_id,
+                        )
+                        sent_message_id = send_telegram_message_via_bot(
+                            chat_id, text_out, bot, reply_markup=reply_markup
+                        )
             else:
                 sent_message_id = send_telegram_message_via_bot(
                     chat_id, text_out, bot, reply_markup=reply_markup
@@ -242,6 +305,7 @@ def process_update_payload(bot: TelegramBot, update_dict: dict) -> None:
             if sent_message_id is not None:
                 ctx = session.context or {}
                 ctx["last_bot_message_id"] = sent_message_id
+                ctx[LAST_BOT_MSG_TIMESTAMP_KEY] = time.time()
                 ctx[LAST_PROCESSED_UPDATE_ID_KEY] = update_id
                 session.context = ctx
                 session.save(update_fields=["context"])

@@ -120,18 +120,41 @@
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">
+          <span class="nav-section-label">{% trans "Main" %}</span>
           <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
             <i class="fa-solid fa-home icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Home" %}
           </a>
-          <a href="{% url 'ad_list' %}" class="{% if request.resolver_match.url_name == 'ad_list' %}active{% endif %}">
+          <a href="{% url 'ad_list' %}" class="{% if request.resolver_match.url_name == 'ad_list' or request.resolver_match.url_name == 'ad_detail' %}active{% endif %}">
             <i class="fa-solid fa-rectangle-ad icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Ads Manager" %}
           </a>
-          <a href="{% url 'template_tester' %}" class="{% if request.resolver_match.url_name == 'template_tester' %}active{% endif %}">
+          <a href="{% url 'categories' %}" class="{% if request.resolver_match.url_name == 'categories' or request.resolver_match.url_name == 'category_edit' %}active{% endif %}">
+            <i class="fa-solid fa-tags icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "Categories" %}
+          </a>
+          <a href="{% url 'template_tester' %}" class="{% if request.resolver_match.url_name == 'template_tester' or request.resolver_match.url_name == 'template_manual_edit' %}active{% endif %}">
             <i class="fa-solid fa-layer-group icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Template Manager" %}
           </a>
+        </div>
+        <div class="nav-section">
+          <span class="nav-section-label">{% trans "Operations" %}</span>
+          <a href="{% url 'bot_list' %}" class="{% if request.resolver_match.url_name == 'bot_list' or request.resolver_match.url_name == 'bot_edit' %}active{% endif %}">
+            <i class="fa-solid fa-robot icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "Bots" %}
+          </a>
+          <a href="{% url 'delivery_list' %}" class="{% if request.resolver_match.url_name == 'delivery_list' %}active{% endif %}">
+            <i class="fa-solid fa-paper-plane icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "Delivery Logs" %}
+          </a>
+          <a href="{% url 'admin_management_list' %}" class="{% if request.resolver_match.url_name == 'admin_management_list' or request.resolver_match.url_name == 'admin_management_edit' %}active{% endif %}">
+            <i class="fa-solid fa-users-gear icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "Admin Management" %}
+          </a>
+        </div>
+        <div class="nav-section">
+          <span class="nav-section-label">{% trans "System" %}</span>
           <a href="{% url 'settings' %}" class="{% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name|slice:':14' == 'settings_hub_' %}active{% endif %}">
             <i class="fa-solid fa-cog icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "System Settings" %}

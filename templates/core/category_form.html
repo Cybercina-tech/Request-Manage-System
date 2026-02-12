@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{# Category Create/Edit — Soulful form with color picker #}
+{# Category Create/Edit — Polished form with color picker and Persian name #}
 
 {% block title %}{% if category %}Edit {{ category.name }}{% else %}Add Category{% endif %}{% endblock %}
 
@@ -19,43 +19,71 @@
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
     {% if category %}Edit Category{% else %}Add Category{% endif %}
   </h1>
-  <a href="{% url 'categories' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back</a>
+  <a href="{% url 'categories' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to Categories</a>
 </div>
 
-<div class="card-soul" style="max-width: 480px;">
+<div class="card-soul p-4" style="max-width: 520px;">
   <form method="post" action="{% if category %}{% url 'category_edit' category.pk %}{% else %}{% url 'category_create' %}{% endif %}" id="categoryForm">
     {% if error %}<div class="alert alert-danger mb-3">{{ error }}</div>{% endif %}
     {% csrf_token %}
-    <div class="mb-3">
-      <label class="form-label">Name <span class="text-danger">*</span></label>
-      <input type="text" name="name" class="form-control" required value="{{ category.name|default:'' }}" placeholder="e.g. Real Estate">
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Slug</label>
-      <input type="text" name="slug" class="form-control" value="{{ category.slug|default:'' }}" placeholder="Auto-generated from name">
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Color</label>
-      <div class="d-flex align-items-center gap-2">
-        <input type="color" id="categoryColor" value="{{ category.color|default:'#7C4DFF' }}" class="form-control form-control-color" style="width: 60px; height: 38px;">
-        <input type="text" name="color" id="categoryColorText" value="{{ category.color|default:'#7C4DFF' }}" class="form-control" placeholder="#7C4DFF">
+
+    <fieldset class="mb-4">
+      <legend class="fs-6 fw-semibold mb-3" style="color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+        <i class="fa-solid fa-font me-1"></i> Names
+      </legend>
+      <div class="mb-3">
+        <label class="form-label" for="id_name">English Name <span class="text-danger">*</span></label>
+        <input type="text" name="name" id="id_name" class="form-control" required value="{{ category.name|default:'' }}" placeholder="e.g. Real Estate">
+        <small class="text-muted">Used as the primary name and for slug generation.</small>
       </div>
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Icon (optional)</label>
-      <input type="text" name="icon" class="form-control" value="{{ category.icon|default:'' }}" placeholder="e.g. home">
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Order</label>
-      <input type="number" name="order" class="form-control" value="{{ category.order|default:0 }}" min="0">
-    </div>
-    <div class="mb-4 form-check form-switch">
-      <input type="checkbox" name="is_active" class="form-check-input" id="categoryActive" {% if not category or category.is_active %}checked{% endif %}>
-      <label class="form-check-label" for="categoryActive">Active</label>
-    </div>
+      <div class="mb-3">
+        <label class="form-label" for="id_name_fa"><i class="fa-solid fa-language me-1 text-muted"></i> Persian Name (نام فارسی) <span class="text-danger">*</span></label>
+        <input type="text" name="name_fa" id="id_name_fa" class="form-control" dir="rtl" lang="fa" required value="{{ category.name_fa|default:'' }}" placeholder="مثلاً: املاک" style="font-family: 'Vazir', 'VazirFallback', 'Tahoma', sans-serif;">
+        <small class="text-muted">Persian translation used for ad banner image generation.</small>
+      </div>
+    </fieldset>
+
+    <fieldset class="mb-4">
+      <legend class="fs-6 fw-semibold mb-3" style="color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+        <i class="fa-solid fa-swatchbook me-1"></i> Appearance
+      </legend>
+      <div class="mb-3">
+        <label class="form-label" for="id_slug">Slug</label>
+        <input type="text" name="slug" id="id_slug" class="form-control" value="{{ category.slug|default:'' }}" placeholder="Auto-generated from name">
+        <small class="text-muted">Leave blank to auto-generate from name.</small>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Color</label>
+        <div class="d-flex align-items-center gap-2">
+          <input type="color" id="categoryColor" value="{{ category.color|default:'#7C4DFF' }}" class="form-control form-control-color" style="width: 60px; height: 38px; cursor: pointer;">
+          <input type="text" name="color" id="categoryColorText" value="{{ category.color|default:'#7C4DFF' }}" class="form-control" placeholder="#7C4DFF" style="max-width: 120px;">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="id_icon">Icon (optional)</label>
+        <input type="text" name="icon" id="id_icon" class="form-control" value="{{ category.icon|default:'' }}" placeholder="e.g. home, briefcase, car">
+        <small class="text-muted">FontAwesome icon name without the fa- prefix.</small>
+      </div>
+    </fieldset>
+
+    <fieldset class="mb-4">
+      <legend class="fs-6 fw-semibold mb-3" style="color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+        <i class="fa-solid fa-sliders me-1"></i> Options
+      </legend>
+      <div class="mb-3">
+        <label class="form-label" for="id_order">Display Order</label>
+        <input type="number" name="order" id="id_order" class="form-control" value="{{ category.order|default:0 }}" min="0" style="max-width: 120px;">
+      </div>
+      <div class="form-check form-switch">
+        <input type="checkbox" name="is_active" class="form-check-input" id="categoryActive" {% if not category or category.is_active %}checked{% endif %}>
+        <label class="form-check-label" for="categoryActive">Active</label>
+        <small class="text-muted d-block">Active categories appear in the Telegram bot and filters.</small>
+      </div>
+    </fieldset>
+
     <div class="d-flex gap-2">
       <button type="submit" class="btn btn-soul">
-        <i class="fa-solid fa-check icon" aria-hidden="true"></i> Save Category
+        <i class="fa-solid fa-check icon me-1" aria-hidden="true"></i> Save Category
       </button>
       <a href="{% url 'categories' %}" class="btn btn-secondary">Cancel</a>
     </div>

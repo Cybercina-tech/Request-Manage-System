@@ -95,8 +95,11 @@ class ConversationEngine:
         """
         session.last_activity = timezone.now()
         lang = session.language or "en"
-        # When we have a callback, we prefer to edit the same message
-        edit_previous = message_id is not None
+        # Only attempt to edit the message for callback queries (inline
+        # button presses) where message_id is the bot's own message.
+        # For regular text messages message_id is the *user's* message
+        # which the bot cannot edit — always send a new message instead.
+        edit_previous = callback_data is not None and message_id is not None
 
         # /start: plain reset or deep link resubmit_<uuid>
         if text and text.strip().lower().startswith("/start"):

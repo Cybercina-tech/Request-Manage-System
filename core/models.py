@@ -81,6 +81,11 @@ class SiteConfiguration(models.Model):
         blank=True,
         help_text='Display name for the default channel (e.g. "Live Ads Channel").',
     )
+    telegram_channel_handle = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text='Channel handle shown in captions (e.g. @YourChannel).',
+    )
     is_channel_active = models.BooleanField(
         default=False,
         help_text='When True, approved ads are posted to the channel above using the bot below.',
@@ -111,6 +116,16 @@ class SiteConfiguration(models.Model):
     facebook_access_token_encrypted = models.TextField(
         blank=True,
         help_text='Long-lived Facebook/Instagram access token (encrypted at rest).',
+    )
+    instagram_token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the current long-lived access token expires (auto-set on OAuth flow).',
+    )
+    instagram_oauth_state = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text='CSRF state token for in-progress Instagram OAuth flow.',
     )
     # UI — Professional Light Theme (default) or Dark
     theme_preference = models.CharField(
@@ -179,6 +194,10 @@ class SiteConfiguration(models.Model):
         choices=[('1w', '1 Week'), ('1m', '1 Month'), ('forever', 'Forever')],
         default='1m',
         help_text='How long generated images are retained.',
+    )
+    cleanup_retention_days = models.PositiveIntegerField(
+        default=7,
+        help_text='Number of days to keep generated images before manual cleanup (min 1).',
     )
     # Maintenance
     updated_at = models.DateTimeField(auto_now=True)
@@ -365,6 +384,12 @@ class Category(models.Model):
     """Dynamic category for ad requests. Replaces hardcoded choices."""
 
     name = models.CharField(max_length=64, help_text='Display name (e.g. Real Estate, Job)')
+    name_fa = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text='Persian name for image generation (e.g. فروش ویژه). Falls back to name if empty.',
+    )
     slug = models.SlugField(max_length=64, unique=True, help_text='URL-safe identifier; used as callback_data in bot')
     color = models.CharField(max_length=16, default='#7C4DFF', help_text='Hex color for badges (e.g. #7C4DFF)')
     icon = models.CharField(max_length=64, blank=True, help_text='Optional: Lucide/icon name')
@@ -377,7 +402,12 @@ class Category(models.Model):
         verbose_name_plural = 'Categories'
 
     def __str__(self):
-        return self.name
+        return self.name_fa or self.name
+
+    @property
+    def display_name_fa(self):
+        """Persian display name with fallback to English name."""
+        return self.name_fa or self.name
 
     def save(self, *args, **kwargs):
         if not self.slug and self.name:
@@ -849,7 +879,9 @@ class DeliveryLog(models.Model):
 
     class Channel(models.TextChoices):
         TELEGRAM = 'telegram', 'Telegram'
+        TELEGRAM_CHANNEL = 'telegram_channel', 'Telegram Channel'
         INSTAGRAM = 'instagram', 'Instagram'
+        INSTAGRAM_STORY = 'instagram_story', 'Instagram Story'
         API = 'api', 'API'
 
     ad = models.ForeignKey(
@@ -914,46 +946,75 @@ def default_adtemplate_coordinates():
     """
     Default coordinates JSON for AdTemplate.
     Keys:
-      - category: {x, y, size, color, font_path, align}
-      - description: {x, y, size, color, font_path, max_width, align}
-      - phone: {x, y, size, color, font_path, align}
-      - price: {x, y, size, color, font_path, align}
+      - category: {x, y, size, color, font_path, align, bold}
+      - description: {x, y, size, color, font_path, max_width, align, bold}
+      - phone: {x, y, size, color, font_path, align, bold}
     """
     return {
         'category': {
-            'x': 50,
-            'y': 50,
-            'size': 48,
-            'color': '#FFFFFF',
+            'x': 180,
+            'y': 288,
+            'size': 93,
+            'color': '#EEFF00',
             'font_path': '',
-            'align': 'right',
+            'max_width': 700,
+            'align': 'center',
+            'bold': True,
         },
         'description': {
-            'x': 50,
-            'y': 140,
-            'size': 32,
+            'x': 215,
+            'y': 598,
+            'size': 58,
             'color': '#FFFFFF',
             'font_path': '',
-            'max_width': 800,
-            'align': 'right',
+            'max_width': 650,
+            'align': 'center',
+            'bold': True,
         },
         'phone': {
-            'x': 50,
-            'y': 420,
-            'size': 28,
-            'color': '#FFFF00',
+            'x': 250,
+            'y': 1150,
+            'size': 50,
+            'color': '#131111',
             'font_path': '',
-            'align': 'right',
-        },
-        'price': {
-            'x': 50,
-            'y': 500,
-            'size': 30,
-            'color': '#00E5FF',
-            'font_path': '',
-            'align': 'right',
+            'max_width': 550,
+            'align': 'center',
+            'bold': True,
         },
     }
+
+
+# Instagram format constants
+FORMAT_POST = 'POST'   # 1080x1350 (4:5)
+FORMAT_STORY = 'STORY'  # 1080x1920 (9:16)
+
+FORMAT_DIMENSIONS = {
+    FORMAT_POST: (1080, 1350),
+    FORMAT_STORY: (1080, 1920),
+}
+
+# Story safety zones: top 250px (profile icon) and bottom 250px (send message bar)
+STORY_SAFE_TOP = 250
+STORY_SAFE_BOTTOM = 250
+
+
+STORY_Y_OFFSET = 285  # Pixels to shift Y-coordinates when converting post → story
+
+
+def default_story_coordinates():
+    """
+    Default story coordinates for 1080x1920 canvas.
+    Auto-generated from post defaults by adding STORY_Y_OFFSET to all Y values.
+    """
+    post = default_adtemplate_coordinates()
+    story = {}
+    for key, conf in post.items():
+        if isinstance(conf, dict):
+            story[key] = dict(conf)
+            story[key]['y'] = conf.get('y', 0) + STORY_Y_OFFSET
+        else:
+            story[key] = conf
+    return story
 
 
 class AdTemplate(models.Model):
@@ -977,8 +1038,16 @@ class AdTemplate(models.Model):
         default=default_adtemplate_coordinates,
         blank=True,
         help_text=(
-            'JSON with keys: category, description, phone, price. '
-            'Each contains x, y, size, color, font_path, align; description also has max_width.'
+            'JSON with keys: category, description, phone. '
+            'Each contains x, y, size, color, font_path, align, bold; description also has max_width.'
+        ),
+    )
+    story_coordinates = models.JSONField(
+        default=default_story_coordinates,
+        blank=True,
+        help_text=(
+            'Coordinates for Story format (1080x1920). Same structure as coordinates. '
+            'If empty, auto-generated from post coordinates using safety zone logic.'
         ),
     )
     is_active = models.BooleanField(default=True, help_text='Active templates are eligible for auto-selection.')

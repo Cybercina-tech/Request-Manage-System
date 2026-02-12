@@ -160,4 +160,20 @@ def post_to_instagram(
                 time.sleep(RETRY_DELAY_SECONDS)
 
     msg = str(last_error)[:500] if last_error else 'Unknown error'
+    error_code = None
+    if last_error:
+        err_resp = getattr(last_error, 'response', None)
+        if err_resp is not None and hasattr(err_resp, 'json'):
+            try:
+                error_code = err_resp.json().get('error', {}).get('code')
+            except Exception:
+                pass
+    try:
+        from core.notifications import send_notification
+        notif_msg = f'Instagram post failed: {msg}'
+        if error_code:
+            notif_msg = f'Instagram post failed (Error {error_code}): {msg}'
+        send_notification(level='error', message=notif_msg, add_to_active_errors=True)
+    except Exception as notif_err:
+        logger.warning('Could not send post-failure notification: %s', notif_err)
     return {'success': False, 'message': msg}

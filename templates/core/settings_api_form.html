@@ -4,11 +4,14 @@
 {% block title %}{% if is_create %}Add API client{% else %}Edit {{ client.name }}{% endif %}{% endblock %}
 
 {% block content %}
-<h1 class="mb-4" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-  {% if is_create %}Add API client{% else %}Edit {{ client.name }}{% endif %}
-</h1>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    {% if is_create %}Add API Client{% else %}Edit {{ client.name }}{% endif %}
+  </h1>
+  <a href="{% url 'settings_api' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to API Clients</a>
+</div>
 
-<form id="apiForm" class="form-soul card-soul" style="max-width: 480px;" action="{% if is_create %}{% url 'settings_api_create' %}{% else %}{% url 'settings_api_edit' client.pk %}{% endif %}" method="post">
+<form id="apiForm" class="form-soul card-soul p-4" style="max-width: 480px;" action="{% if is_create %}{% url 'settings_api_create' %}{% else %}{% url 'settings_api_edit' client.pk %}{% endif %}" method="post">
   {% csrf_token %}
   <div class="mb-3">
     <label class="form-label">Name</label>

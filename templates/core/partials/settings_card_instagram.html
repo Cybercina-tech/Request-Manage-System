@@ -3,6 +3,17 @@
   <p>Configure your Instagram Business API connection here. Use App ID and long-lived token from Meta for Developers.</p>
 </div>
 <div class="settings-hub-card-body">
+  {% if messages %}
+  <div class="mb-3">
+    {% for message in messages %}
+      <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert" style="font-size:0.9rem;">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <form id="instagramCardForm">
     {% csrf_token %}
     <input type="hidden" name="section" value="instagram">
@@ -20,7 +31,7 @@
       </div>
       <div class="col-md-6">
         <label class="form-label" style="color: var(--text-primary);">Instagram Business ID</label>
-        <input type="text" class="form-control" name="instagram_business_id" value="{{ instagram_form.initial.instagram_business_id|default:'' }}" placeholder="Instagram Graph API user ID">
+        <input type="text" class="form-control" name="instagram_business_id" value="{{ instagram_form.initial.instagram_business_id|default:'' }}" placeholder="Auto-filled on Connect">
       </div>
       <div class="col-md-6">
         <label class="form-label d-flex align-items-center gap-2" style="color: var(--text-primary);">
@@ -36,15 +47,50 @@
           <button class="btn btn-outline-secondary toggle-password" type="button" data-target="long_lived_access_token"><i class="fa-regular fa-eye"></i></button>
         </div>
       </div>
+
+      {% if config.instagram_token_expires_at %}
       <div class="col-12">
-        <button type="button" class="btn btn-outline-primary" id="instagramCheckBtn">Check Connection</button>
-        <span id="instagramCheckResult" class="ms-2 small"></span>
+        <div class="d-flex align-items-center gap-2 p-2 rounded" style="background: var(--bg-body); border: 1px solid var(--border-color); font-size: 0.88rem;">
+          <i class="fa-regular fa-clock" style="color: var(--text-secondary);"></i>
+          <span style="color: var(--text-secondary);">Token expires:</span>
+          <strong id="tokenExpiryDate" style="color: var(--text-primary);">{{ config.instagram_token_expires_at|date:"M d, Y H:i" }}</strong>
+          {% if instagram_token_expiry_days is not None %}
+            {% if instagram_token_expiry_days <= 7 %}
+              <span class="status-badge expired"><i class="fa-solid fa-triangle-exclamation"></i> {{ instagram_token_expiry_days }} days left</span>
+            {% elif instagram_token_expiry_days <= 14 %}
+              <span class="status-badge" style="background: rgba(234,179,8,0.15); color: #ca8a04; box-shadow: 0 0 0 1px rgba(234,179,8,0.3);"><i class="fa-solid fa-clock"></i> {{ instagram_token_expiry_days }} days left</span>
+            {% else %}
+              <span class="status-badge active"><i class="fa-solid fa-check"></i> {{ instagram_token_expiry_days }} days left</span>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="col-12">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <button type="button" class="btn btn-outline-primary" id="instagramCheckBtn">
+            <i class="fa-solid fa-plug"></i> Check Connection
+          </button>
+          <a href="{% url 'instagram_oauth_connect' %}" class="btn btn-primary" id="instagramConnectBtn"
+             onclick="return confirm('This will redirect you to Meta to authorize your Instagram account. Continue?');">
+            <i class="fa-brands fa-instagram"></i>
+            {% if instagram_token_ok %}Refresh Token{% else %}Connect Instagram{% endif %}
+          </a>
+          <button type="button" class="btn btn-outline-secondary" id="instagramPermissionsBtn">
+            <i class="fa-solid fa-shield-check"></i> Check Permissions
+          </button>
+          <span id="instagramCheckResult" class="ms-2 small"></span>
+        </div>
       </div>
     </div>
   </form>
 </div>
-<div class="settings-hub-card-footer">
+<div class="settings-hub-card-footer d-flex justify-content-between align-items-center">
   <button type="button" class="btn btn-soul" id="instagramSaveBtn">Save Changes</button>
+  <small style="color: var(--text-secondary);">
+    Save App ID & Secret first, then click <strong>Connect Instagram</strong> to auto-generate the token.
+  </small>
 </div>
 
 <script>
@@ -52,6 +98,8 @@
   var form = document.getElementById('instagramCardForm');
   if (!form) return;
   var csrf = (window.settingsHub && window.settingsHub.csrf) || (form.querySelector('[name=csrfmiddlewaretoken]') && form.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  /* Toggle password visibility */
   form.querySelectorAll('.toggle-password').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var name = btn.getAttribute('data-target');
@@ -61,8 +109,12 @@
       btn.querySelector('i').className = input.type === 'password' ? 'fa-regular fa-eye' : 'fa-regular fa-eye-slash';
     });
   });
+
+  /* Check Connection */
   document.getElementById('instagramCheckBtn').addEventListener('click', function() {
     var resultEl = document.getElementById('instagramCheckResult');
+    resultEl.textContent = 'Checking...';
+    resultEl.style.color = 'var(--text-secondary)';
     var fd = new FormData(form);
     fd.set('long_lived_access_token', form.querySelector('[name=long_lived_access_token]').value);
     fetch('{% url "check_instagram_connection" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })
@@ -73,6 +125,30 @@
       })
       .catch(function() { resultEl.textContent = 'Request failed'; resultEl.style.color = '#dc2626'; });
   });
+
+  /* Check Permissions (Dry Run) */
+  var permBtn = document.getElementById('instagramPermissionsBtn');
+  if (permBtn) {
+    permBtn.addEventListener('click', function() {
+      var resultEl = document.getElementById('instagramCheckResult');
+      resultEl.textContent = 'Checking permissions...';
+      resultEl.style.color = 'var(--text-secondary)';
+      fetch('{% url "instagram_check_permissions" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: ''
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          resultEl.textContent = d.message || (d.success ? 'OK' : 'Failed');
+          resultEl.style.color = d.success && d.has_publish ? 'var(--success-color)' : '#ca8a04';
+          if (!d.success) resultEl.style.color = '#dc2626';
+        })
+        .catch(function() { resultEl.textContent = 'Request failed'; resultEl.style.color = '#dc2626'; });
+    });
+  }
+
+  /* Save Changes */
   document.getElementById('instagramSaveBtn').addEventListener('click', function() {
     var fd = new FormData(form);
     fetch('{% url "settings_save" %}', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrf } })

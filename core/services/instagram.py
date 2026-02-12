@@ -262,13 +262,25 @@ class InstagramService:
         err = last_error or Exception('Unknown error')
         err_resp = getattr(err, 'response', None)
         msg = str(err)[:500]
+        error_code = None
         if err_resp is not None and hasattr(err_resp, 'json'):
             try:
                 body = err_resp.json()
-                msg = body.get('error', {}).get('message', msg)[:500]
+                error_obj = body.get('error', {})
+                msg = error_obj.get('message', msg)[:500]
+                error_code = error_obj.get('code')
             except Exception:
                 pass
         logger.exception('Instagram post_ad: all retries failed: %s', msg)
+        # Fire internal notification with Meta error code
+        try:
+            from core.notifications import send_notification
+            notif_msg = f'Instagram post failed for ad {ad.uuid}: {msg}'
+            if error_code:
+                notif_msg = f'Instagram post failed (Error {error_code}): {msg}'
+            send_notification(level='error', message=notif_msg, add_to_active_errors=True)
+        except Exception as notif_err:
+            logger.warning('Could not send post-failure notification: %s', notif_err)
         return {'success': False, 'message': msg}
 
     @staticmethod
@@ -345,4 +357,21 @@ class InstagramService:
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_DELAY_SECONDS)
         msg = str(last_error)[:500] if last_error else 'Unknown error'
+        error_code = None
+        if last_error:
+            err_resp = getattr(last_error, 'response', None)
+            if err_resp is not None and hasattr(err_resp, 'json'):
+                try:
+                    error_code = err_resp.json().get('error', {}).get('code')
+                except Exception:
+                    pass
+        # Fire internal notification with Meta error code
+        try:
+            from core.notifications import send_notification
+            notif_msg = f'Instagram post_custom failed: {msg}'
+            if error_code:
+                notif_msg = f'Instagram post_custom failed (Error {error_code}): {msg}'
+            send_notification(level='error', message=notif_msg, add_to_active_errors=True)
+        except Exception as notif_err:
+            logger.warning('Could not send post-failure notification: %s', notif_err)
         return {'success': False, 'message': msg}

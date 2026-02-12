@@ -67,6 +67,20 @@
               {{ form.phone_number }}
             </div>
 
+            <div class="mb-3">
+              <label class="form-label">Output Format</label>
+              <div class="d-flex gap-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="format_type" id="fmt_post" value="POST" checked>
+                  <label class="form-check-label" for="fmt_post"><i class="fa-solid fa-square me-1"></i> Post (4:5)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="format_type" id="fmt_story" value="STORY">
+                  <label class="form-check-label" for="fmt_story"><i class="fa-solid fa-mobile-screen-button me-1"></i> Story (9:16)</label>
+                </div>
+              </div>
+            </div>
+
             <div class="mb-4">
               <label class="form-label" for="id_test_background">Upload temporary background</label>
               {{ form.test_background }}
@@ -87,17 +101,14 @@
       <div class="card card-soul">
         <div class="card-header custom-card-header">2. Edit layout</div>
         <div class="card-body">
-          <p class="text-muted mb-2">Position Category, Text, and Phone labels on the template.</p>
+          <p class="text-muted mb-2">Position Category, Description and Phone layers on the template with numeric precision controls and live preview.</p>
           <div class="d-flex flex-wrap gap-2">
-            <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}" class="btn btn-soul btn-sm rounded-3">
-              <i class="fa-solid fa-crosshairs me-1" aria-hidden="true"></i> Coordinate Lab (Drag & Drop)
+            <a href="{% url 'template_manual_edit' template.pk %}?layout=POST" class="btn btn-primary btn-sm rounded-3" style="background: var(--primary-color); border-color: var(--primary-color);">
+              <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i> Edit Post Layout
             </a>
-            <a href="{% url 'template_manual_edit' template.pk %}" class="btn btn-primary btn-sm rounded-3" style="background: var(--primary-color); border-color: var(--primary-color);">
-              <i class="fa-solid fa-keyboard me-1" aria-hidden="true"></i> Manual Coordinate Editor
+            <a href="{% url 'template_manual_edit' template.pk %}?layout=STORY" class="btn btn-outline-primary btn-sm rounded-3">
+              <i class="fa-solid fa-mobile-screen-button me-1" aria-hidden="true"></i> Edit Story Layout
             </a>
-            {% if used_custom_background %}
-            <a href="{% url 'admin:core_adtemplate_coordinate_lab' template.pk %}?use_temp_background=1" class="btn btn-outline-primary btn-sm rounded-3">Use this background in Coordinate Lab</a>
-            {% endif %}
           </div>
         </div>
       </div>

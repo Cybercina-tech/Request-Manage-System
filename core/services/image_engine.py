@@ -5,137 +5,212 @@ Features:
 - Uses Pillow for compositing.
 - Uses arabic_reshaper + bidi.get_display for proper Persian text rendering.
 - Reads coordinates from AdTemplate.coordinates JSON.
+- Supports dual format: POST (1080x1350 / 4:5) and STORY (1080x1920 / 9:16).
+- Story format: blurred background fill + automatic Y+285 offset (no separate JSON needed).
+- Three text layers: Category, Description, Phone.
 """
 
 import logging
+import os
 import uuid
 from pathlib import Path
 
 from django.conf import settings
 
-from core.models import AdTemplate, default_adtemplate_coordinates
+from core.models import (
+    AdTemplate,
+    default_adtemplate_coordinates,
+    FORMAT_POST,
+    FORMAT_STORY,
+    FORMAT_DIMENSIONS,
+    STORY_SAFE_TOP,
+    STORY_SAFE_BOTTOM,
+    STORY_Y_OFFSET,
+)
 
 logger = logging.getLogger(__name__)
 
 # Default template background (used when AdTemplate has no background_image)
 DEFAULT_TEMPLATE_IMAGE_REL = "static/images/default_template/Template.png"
 
+# ── HARD-LINKED Persian font (Vazirmatn Regular) — the ONLY font for Farsi text ──
+# No searching, no guessing, no fallback to Pillow default.
+# If this file is missing the process STOPS immediately.
+PERSIAN_FONT_PATH = os.path.join(settings.BASE_DIR, "Persian.ttf")
+assert os.path.exists(PERSIAN_FONT_PATH), (
+    f"FATAL: Persian.ttf not found at {PERSIAN_FONT_PATH!r}\n"
+    "Place the Persian.ttf font file in the project root directory.\n"
+    "Image generation CANNOT proceed without it."
+)
+
 
 def _ensure_deps():
+    """Import Pillow or fail fast. Returns (Image, ImageDraw, ImageFont, ImageFilter)."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
     except ImportError:  # pragma: no cover - runtime guard
-        logger.warning("Pillow not installed; run: pip install Pillow")
+        logger.critical("Pillow not installed; run: pip install Pillow")
         return None, None, None, None
-
-    try:
-        import arabic_reshaper  # type: ignore
-        from bidi.algorithm import get_display  # type: ignore
-    except ImportError:  # pragma: no cover - runtime guard
-        logger.warning(
-            "Persian text deps not installed; run: pip install arabic-reshaper python-bidi"
-        )
-        return Image, ImageDraw, ImageFont, (None, None)
-
-    return Image, ImageDraw, ImageFont, (arabic_reshaper, get_display)
+    return Image, ImageDraw, ImageFont, ImageFilter
 
 
-def _shape_persian(text: str, reshaper, get_display):
+# ── Nuclear Persian text shaping ─────────────────────────────────────
+# No dependency passing, no fallback.  Imports directly; fails loud.
+
+def _shape_persian(text: str) -> str:
     """
-    Process Persian/Arabic text: Reshape (join letters) + BiDi (RTL direction).
-    
-    Step A: Reshaping - Convert logical characters to visual shapes (joining letters)
-            Supports special Farsi characters: پ، چ، ژ، گ (Pe, Che, Zhe, Gaf)
-    Step B: BiDi Algorithm - Fix Right-to-Left direction
-    Step C: Returns processed text ready for Pillow rendering
-    
-    This ensures:
-    - Letters are joined correctly (not separate)
-    - Text direction is Right-to-Left
-    - Special Farsi characters render properly
+    Process Persian/Arabic text for Pillow rendering.
+
+    1. arabic_reshaper with strict Persian configuration:
+       connects isolated letters into proper presentation forms.
+    2. bidi get_display: reverses visual order for RTL so Pillow
+       draws left-to-right correctly.
+
+    Raises ImportError if arabic-reshaper / python-bidi are missing.
     """
     if not text:
         return ""
-    if not reshaper or not get_display:
-        logger.warning("Persian text deps missing; text may render incorrectly")
-        return text
-    try:
-        # Step A: Reshape (join letters into proper visual forms)
-        reshaped = reshaper.reshape(text)
-        # Step B: BiDi algorithm (fix RTL direction)
-        bidi_text = get_display(reshaped)
-        return bidi_text
-    except Exception as e:
-        logger.error("Failed to shape Persian text '%s': %s", text[:50], e)
-        return text
+
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+
+    configuration = {
+        'delete_harakat': True,
+        'support_ligatures': True,
+        'use_unshaped_instead_of_isolated': False,
+    }
+    reshaper = arabic_reshaper.ArabicReshaper(configuration=configuration)
+
+    # 1. Reshape (connect letters)
+    reshaped_text = reshaper.reshape(text)
+
+    # 2. Bidi (fix Right-to-Left order)
+    bidi_text = get_display(reshaped_text)
+
+    return bidi_text
 
 
-def _load_font(base_font_path: str | None, font_path_override: str | None, ImageFont, size: int):
+def _normalize_to_western_digits(text: str) -> str:
     """
-    Load a TrueType font with explicit Persian font fallback.
-    
-    Order:
-      1. font_path in coordinates (absolute or BASE_DIR-relative)
-      2. template.font_file
-      3. Persian fonts (Persian.ttf, Vazir.ttf, Samim.ttf, Tehran.ttf)
-      4. Generic fallback (DejaVuSans)
-    
-    If no Persian font is found, logs a clear error but returns default font.
+    Convert Persian/Arabic numerals (۰-۹, ٠-٩) to Western Arabic (0-9).
+    This ensures phone numbers always render with Latin digits regardless of
+    which font is used.
     """
-    paths = []
+    if not text:
+        return text
+    _PERSIAN = "۰۱۲۳۴۵۶۷۸۹"
+    _ARABIC = "٠١٢٣٤٥٦٧٨٩"
+    _WESTERN = "0123456789"
+    table = str.maketrans(_PERSIAN + _ARABIC, _WESTERN * 2)
+    return text.translate(table)
+
+
+def prepare_text(text: str, *, is_phone: bool = False) -> str:
+    """
+    Unified "smart text" helper for the image engine.
+
+    For Farsi text (is_phone=False):
+        - Reshape letters via arabic_reshaper (isolated → connected)
+        - Apply BiDi algorithm (RTL visual reordering)
+        - Result rendered with Persian.ttf
+
+    For phone numbers (is_phone=True):
+        - Convert Persian/Arabic digits to Western (0-9)
+        - Skip reshaping and BiDi (phone numbers are always LTR)
+        - Result rendered with English font
+    """
+    if not text:
+        return ""
+    if is_phone:
+        return _normalize_to_western_digits(text).strip()
+    return _shape_persian(text)
+
+
+def _resolve_absolute(p: Path) -> Path:
+    """Ensure a Path is absolute by resolving against BASE_DIR if needed."""
+    if p.is_absolute():
+        return p
+    return Path(settings.BASE_DIR) / p
+
+
+def _load_font(ImageFont, size: int):
+    """
+    Load Persian.ttf from the hard-linked PERSIAN_FONT_PATH.
+    Used for Category and Description layers (Farsi text).
+
+    No searching.  No fallback.  No Pillow default.
+    If the font cannot be loaded, the error propagates and image
+    generation stops — we NEVER render white boxes.
+    """
+    font = ImageFont.truetype(PERSIAN_FONT_PATH, size)
+    logger.debug("Loaded Persian font: %s (size %d)", PERSIAN_FONT_PATH, size)
+    return font
+
+
+def _load_english_font(font_path_override: str | None, ImageFont, size: int):
+    """
+    Load a Latin/English TrueType font for the Phone layer.
+
+    Search order:
+    1. Explicit override path (from coordinates JSON).
+    2. Project fonts: media/ad_templates/fonts/English.ttf, Roboto.ttf, etc.
+    3. System fonts: Arial, Segoe UI (Windows), DejaVuSans (Linux).
+    4. Pillow default.
+    """
+    paths: list[Path] = []
     base_dir = Path(settings.BASE_DIR)
-    persian_fonts_found = []
+    media_root = _resolve_absolute(
+        Path(getattr(settings, "MEDIA_ROOT", base_dir / "media"))
+    )
 
     if font_path_override:
-        p = Path(font_path_override)
-        if not p.is_absolute():
-            p = base_dir / font_path_override
+        p = _resolve_absolute(Path(font_path_override))
         paths.append(p)
 
-    if base_font_path:
-        paths.append(Path(base_font_path))
-
-    # Persian fonts (priority order)
-    persian_fonts = [
-        "static/fonts/Persian.ttf",
-        "static/fonts/Vazir.ttf",
-        "static/fonts/Samim.ttf",
-        "static/fonts/Tehran.ttf",
+    # Project English fonts
+    english_font_names = ["English.ttf", "Roboto.ttf", "Inter.ttf", "OpenSans.ttf"]
+    search_dirs = [
+        media_root / "ad_templates" / "fonts",
+        base_dir / "static" / "fonts",
     ]
-    
-    for rel in persian_fonts:
-        p = base_dir / rel
-        paths.append(p)
-        if p.exists():
-            persian_fonts_found.append(str(p))
+    for d in search_dirs:
+        for name in english_font_names:
+            paths.append(d / name)
 
-    # Generic fallback
-    paths.append(base_dir / "static/fonts/DejaVuSans.ttf")
+    # System fonts (common locations)
+    import platform
+    if platform.system() == "Windows":
+        win_fonts = Path("C:/Windows/Fonts")
+        for name in ["arial.ttf", "segoeui.ttf", "calibri.ttf", "verdana.ttf"]:
+            paths.append(win_fonts / name)
+    else:
+        # Linux / macOS
+        linux_dirs = [
+            Path("/usr/share/fonts/truetype/dejavu"),
+            Path("/usr/share/fonts/truetype/liberation"),
+            Path("/usr/share/fonts/TTF"),
+            Path("/System/Library/Fonts"),  # macOS
+        ]
+        for d in linux_dirs:
+            for name in ["DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]:
+                paths.append(d / name)
+
+    paths.append(base_dir / "static" / "fonts" / "DejaVuSans.ttf")
 
     for p in paths:
         try:
             if p.exists():
                 font = ImageFont.truetype(str(p), size)
-                # Log which font was loaded (helpful for debugging)
-                if any(pf in str(p) for pf in persian_fonts):
-                    logger.debug("Loaded Persian font: %s (size %d)", p.name, size)
+                logger.debug("Loaded English font for phone: %s (size %d)", p.name, size)
                 return font
         except OSError as e:
-            logger.debug("Failed to load font %s: %s", p, e)
+            logger.debug("Failed to load English font %s: %s", p, e)
             continue
 
-    # No font found - log clear error
-    if not persian_fonts_found:
-        logger.error(
-            "CRITICAL: No Persian font found! Persian text will render incorrectly. "
-            "Please ensure Persian.ttf, Vazir.ttf, or Samim.ttf exists in static/fonts/"
-        )
-    else:
-        logger.warning(
-            "No valid font found in paths; using Pillow default. "
-            "Persian fonts available: %s", ", ".join(persian_fonts_found)
-        )
-    
+    logger.warning(
+        "No English font found; phone numbers will use Pillow default. "
+        "Place English.ttf or Roboto.ttf in media/ad_templates/fonts/ for best results."
+    )
     return ImageFont.load_default()
 
 
@@ -168,58 +243,115 @@ def _coerce_int(value, *, default: int, minimum: int | None = None, maximum: int
     return number
 
 
-def _wrap_persian_text(draw, text: str, font, max_width: int, reshaper, get_display):
+def draw_spaced_text(
+    draw_obj,
+    text: str,
+    font,
+    color,
+    *,
+    x: int,
+    y: int,
+    align: str = "center",
+    area_width: int | None = None,
+    spacing_px: int = 3,
+    bold: bool = False,
+):
+    """
+    Draw text character-by-character with custom inter-character spacing.
+
+    Pillow's draw.text() has no letter-spacing option. This function manually
+    draws each character and shifts the cursor by (char_advance + spacing_px),
+    producing a "tracked" / "kerned" look that's more readable for phone numbers.
+
+    Args:
+        draw_obj: PIL ImageDraw instance.
+        text: The string to draw (already normalized — e.g. Western digits).
+        font: PIL ImageFont (TrueType) instance.
+        color: Fill color tuple, e.g. (19, 17, 17).
+        x: Left edge of the drawing area.
+        y: Top Y position of the text baseline.
+        align: "center", "left", or "right" — controls positioning within area_width.
+        area_width: Width of the area to align within. If None, uses total text width.
+        spacing_px: Extra pixels added between each character (default 3).
+        bold: If True, applies stroke for bold simulation.
+    """
+    if not text:
+        return
+
+    stroke_w = max(1, int(font.size * 0.06)) if bold else 0
+
+    # Step 1: Calculate total rendered width with spacing
+    char_advances: list[float] = []
+    for ch in text:
+        bbox = draw_obj.textbbox((0, 0), ch, font=font, stroke_width=stroke_w)
+        char_advances.append(bbox[2] - bbox[0])
+
+    num_gaps = max(0, len(text) - 1)
+    total_width = sum(char_advances) + (num_gaps * spacing_px)
+
+    # Step 2: Determine starting X based on alignment
+    aw = area_width if (area_width is not None and area_width > 0) else int(total_width)
+    if align == "center":
+        start_x = x + (aw - total_width) / 2
+    elif align == "right":
+        start_x = x
+    else:  # "left" — push to right edge (RTL-aware: "left" in our engine means right-aligned)
+        start_x = x + max(0, aw - total_width)
+
+    # Step 3: Draw each character individually
+    current_x = start_x
+    for i, ch in enumerate(text):
+        draw_obj.text(
+            (int(current_x), y),
+            ch,
+            fill=color,
+            font=font,
+            stroke_width=stroke_w,
+            stroke_fill=color,
+        )
+        current_x += char_advances[i]
+        if i < num_gaps:
+            current_x += spacing_px
+
+
+def _wrap_persian_text(draw, text: str, font, max_width: int):
     """
     Word-wrap Persian text to fit within max_width.
-    
-    CRITICAL: Each line must be reshaped INDIVIDUALLY after wrapping.
-    Do not reshape the whole block at once, as it breaks line breaks.
-    
-    Process:
-    1. Split text into words
-    2. Measure width of candidate line (reshaped for accurate measurement)
-    3. Wrap when exceeds max_width
-    4. Reshape each final line individually before returning
+    Each line is reshaped individually after wrapping via prepare_text().
     """
     if max_width <= 0:
-        return [_shape_persian(text, reshaper, get_display)] if text else []
+        return [prepare_text(text)] if text else []
 
     lines: list[str] = []
     for paragraph in (text or "").split("\n"):
         if not paragraph.strip():
             lines.append("")
             continue
-            
+
         words = paragraph.split()
         current: list[str] = []
-        
+
         for w in words:
-            # Build candidate line
             candidate_words = current + [w]
             candidate_text = " ".join(candidate_words)
-            
-            # Reshape candidate for accurate width measurement
-            shaped_candidate = _shape_persian(candidate_text, reshaper, get_display)
+            shaped_candidate = prepare_text(candidate_text)
             bbox = draw.textbbox((0, 0), shaped_candidate, font=font)
             width = bbox[2] - bbox[0]
-            
+
             if width <= max_width:
                 current.append(w)
             else:
-                # Line exceeds max_width; save current line and start new one
                 if current:
-                    # Reshape the completed line individually
                     line_text = " ".join(current)
-                    shaped_line = _shape_persian(line_text, reshaper, get_display)
+                    shaped_line = prepare_text(line_text)
                     lines.append(shaped_line)
                 current = [w]
-        
-        # Add remaining words as final line
+
         if current:
             line_text = " ".join(current)
-            shaped_line = _shape_persian(line_text, reshaper, get_display)
+            shaped_line = prepare_text(line_text)
             lines.append(shaped_line)
-    
+
     return lines
 
 
@@ -230,31 +362,146 @@ def _get_media_root() -> Path:
     return Path(media_root)
 
 
+# ---------------------------------------------------------------------------
+# Story coordinate adaptation: simple Y+285 offset
+# ---------------------------------------------------------------------------
+
+def get_story_coordinates(post_coords: dict, post_width: int = 1080, post_height: int = 1350) -> dict:
+    """
+    Convert post-format coordinates to story-format coordinates.
+
+    Simple approach: shift all Y values by +STORY_Y_OFFSET (285px).
+    This centers the post content within the 9:16 story frame.
+
+    Args:
+        post_coords: The post-format coordinates dict (category, description, phone).
+        post_width: Width of the post canvas (unused, kept for API compat).
+        post_height: Height of the post canvas (unused, kept for API compat).
+
+    Returns:
+        New coordinates dict with Y values shifted for 1080x1920 story canvas.
+    """
+    story_coords = {}
+    for layer_key, layer_conf in post_coords.items():
+        if not isinstance(layer_conf, dict):
+            story_coords[layer_key] = layer_conf
+            continue
+        new_conf = dict(layer_conf)
+        new_conf['y'] = layer_conf.get('y', 0) + STORY_Y_OFFSET
+        story_coords[layer_key] = new_conf
+    return story_coords
+
+
+def clamp_to_safety_zone(coords: dict, canvas_height: int = 1920) -> dict:
+    """
+    Ensure all Y coordinates in the given coords dict respect
+    the Story safety zones (top 250px, bottom 250px).
+    """
+    safe_top = STORY_SAFE_TOP
+    safe_bottom = canvas_height - STORY_SAFE_BOTTOM
+
+    clamped = {}
+    for layer_key, layer_conf in coords.items():
+        if not isinstance(layer_conf, dict):
+            clamped[layer_key] = layer_conf
+            continue
+        new_conf = dict(layer_conf)
+        y = new_conf.get('y', 0)
+        new_conf['y'] = max(safe_top, min(y, safe_bottom - new_conf.get('size', 32)))
+        clamped[layer_key] = new_conf
+
+    return clamped
+
+
+# ---------------------------------------------------------------------------
+# Background handling for Story format
+# ---------------------------------------------------------------------------
+
+def _build_story_canvas(img, Image, ImageFilter):
+    """
+    Build a 1080x1920 story canvas from the source image.
+
+    - If the image is already ~9:16, just resize to fit.
+    - If the image is square or non-9:16, create a blurred + darkened version
+      as background, then center the original image on top.
+    """
+    target_w, target_h = FORMAT_DIMENSIONS[FORMAT_STORY]
+    src_w, src_h = img.size
+    src_ratio = src_w / max(1, src_h)
+    target_ratio = target_w / target_h  # 0.5625
+
+    # If already close to 9:16 (within 10% tolerance), just resize
+    if abs(src_ratio - target_ratio) < 0.06:
+        return img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+    # Build blurred background: scale source to fill the entire 9:16 frame
+    bg_scale = max(target_w / src_w, target_h / src_h)
+    bg_w = int(src_w * bg_scale)
+    bg_h = int(src_h * bg_scale)
+    bg = img.resize((bg_w, bg_h), Image.Resampling.LANCZOS)
+
+    # Center-crop to target
+    left = (bg_w - target_w) // 2
+    top = (bg_h - target_h) // 2
+    bg = bg.crop((left, top, left + target_w, top + target_h))
+
+    # Apply heavy blur + darken
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
+    from PIL import ImageEnhance
+    enhancer = ImageEnhance.Brightness(bg)
+    bg = enhancer.enhance(0.35)  # 35% brightness (dark overlay)
+
+    # Scale the original image to fit within the target, preserving aspect ratio
+    fit_scale = min(target_w / src_w, target_h / src_h)
+    max_fit_h = target_h - STORY_SAFE_TOP - STORY_SAFE_BOTTOM + 100  # slight overflow OK
+    if src_h * fit_scale > max_fit_h:
+        fit_scale = max_fit_h / src_h
+
+    new_w = int(src_w * fit_scale)
+    new_h = int(src_h * fit_scale)
+    resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    # Center on canvas
+    paste_x = (target_w - new_w) // 2
+    paste_y = (target_h - new_h) // 2
+    bg.paste(resized, (paste_x, paste_y))
+
+    return bg
+
+
+# ---------------------------------------------------------------------------
+# Main image generation
+# ---------------------------------------------------------------------------
+
 def create_ad_image(
     template_id: int,
     category: str,
     text: str,
     phone: str,
-    price: str = "",
     *,
     background_file=None,
+    format_type: str = FORMAT_POST,
 ) -> str | None:
     """
     Generate ad image from an AdTemplate and return filesystem path.
 
-    - Loads AdTemplate by id for coordinates and fonts.
-    - background_file: optional override for the background image. Can be:
-      - str (path to a file),
-      - file-like object (e.g. UploadedFile, ContentFile),
-      - None to use the template's background_image.
-    - Renders category, description, and phone with Persian-aware shaping.
-    - Saves PNG into MEDIA_ROOT/generated_ads/ and returns absolute path.
+    Layers: Category, Description (body text), Phone.
+
+    Args:
+        template_id: Primary key of the AdTemplate.
+        category: Category text (e.g. 'فروش ویژه').
+        text: Description body text.
+        phone: Phone number text.
+        background_file: Optional override for background. Can be str path,
+                         file-like object, or None to use template's image.
+        format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
+
+    Returns:
+        Absolute filesystem path to the saved PNG, or None on failure.
     """
-    Image, ImageDraw, ImageFont, deps = _ensure_deps()
+    Image, ImageDraw, ImageFont, ImageFilter = _ensure_deps()
     if not Image:
         return None
-
-    reshaper, get_display = deps if isinstance(deps, tuple) else (None, None)
 
     try:
         tpl = AdTemplate.objects.get(pk=template_id)
@@ -263,7 +510,6 @@ def create_ad_image(
         return None
 
     if not background_file and not tpl.background_image:
-        # Use default template image so generation still works
         default_bg = Path(settings.BASE_DIR) / DEFAULT_TEMPLATE_IMAGE_REL
         if default_bg.exists():
             background_file = str(default_bg)
@@ -271,6 +517,7 @@ def create_ad_image(
             logger.warning("create_ad_image: template %s has no background_image and default %s not found", tpl.pk, default_bg)
             return None
 
+    # Load post coordinates from template
     coords = default_adtemplate_coordinates()
     try:
         user_coords = tpl.coordinates or {}
@@ -280,12 +527,17 @@ def create_ad_image(
     except Exception as e:
         logger.warning("create_ad_image: invalid coordinates for template %s: %s", tpl.pk, e)
 
+    # For Story: apply Y+285 offset to all coordinates (no separate JSON needed)
+    is_story = format_type == FORMAT_STORY
+    if is_story:
+        coords = get_story_coordinates(coords)
+
+    # Load source image
     try:
         if background_file is not None:
             if isinstance(background_file, (str, Path)):
                 img = Image.open(Path(background_file)).convert("RGB")
             else:
-                # file-like (UploadedFile, ContentFile, etc.)
                 img = Image.open(background_file).convert("RGB")
         elif tpl.background_image:
             bg_path = Path(tpl.background_image.path)
@@ -301,14 +553,18 @@ def create_ad_image(
         logger.warning("create_ad_image: failed to load background for template %s: %s", tpl.pk, e)
         return None
 
+    # For Story format, build the 9:16 canvas with blurred background
+    if is_story:
+        img = _build_story_canvas(img, Image, ImageFilter)
+
     draw = ImageDraw.Draw(img)
 
-    base_font_path = tpl.font_file.path if tpl.font_file else None
-
-    def _draw_aligned_line(draw_obj, txt: str, x: int, y: int, font_obj, color, align: str, max_w: int | None = None):
+    def _draw_aligned_line(draw_obj, txt: str, x: int, y: int, font_obj, color, align: str, max_w: int | None = None, bold: bool = False):
         if not txt:
             return
-        bbox = draw_obj.textbbox((0, 0), txt, font=font_obj)
+        # Bold simulation: use stroke_width to thicken the text
+        stroke_w = max(1, int(font_obj.size * 0.06)) if bold else 0
+        bbox = draw_obj.textbbox((0, 0), txt, font=font_obj, stroke_width=stroke_w)
         text_w = max(1, bbox[2] - bbox[0])
         area_w = max_w if (max_w is not None and max_w > 0) else text_w
         anchor_x = x
@@ -316,94 +572,113 @@ def create_ad_image(
             anchor_x = x + int((area_w - text_w) / 2)
         elif align == "left":
             anchor_x = x + int(max(0, area_w - text_w))
-        draw_obj.text((anchor_x, y), txt, fill=color, font=font_obj)
+        draw_obj.text(
+            (anchor_x, y), txt, fill=color, font=font_obj,
+            stroke_width=stroke_w, stroke_fill=color,
+        )
 
-    # Category
+    # ── Category Layer (Persian.ttf — Vazirmatn Regular, reshape+bidi) ──
     c_conf = coords.get("category", {})
     cat_font = _load_font(
-        base_font_path,
-        c_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(c_conf.get("size"), default=48, minimum=1, maximum=400),
+        _coerce_int(c_conf.get("size"), default=93, minimum=1, maximum=400),
     )
-    cat_color = _hex_to_rgb(c_conf.get("color") or "#FFFFFF")
+    cat_color = _hex_to_rgb(c_conf.get("color") or "#EEFF00")
     cat_x = _coerce_int(c_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
     cat_y = _coerce_int(c_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
-    cat_align = (c_conf.get("align") or "right").strip().lower()
+    cat_align = (c_conf.get("align") or "center").strip().lower()
     if cat_align not in ("left", "center", "right"):
-        cat_align = "right"
-    # Step A: Reshape + Step B: BiDi for Category text
-    cat_text = _shape_persian(category or "", reshaper, get_display)
+        cat_align = "center"
+    cat_max_w = _coerce_int(c_conf.get("max_width"), default=700, minimum=1, maximum=img.width * 2)
+    cat_bold = bool(c_conf.get("bold", True))
+    cat_text = prepare_text(category or "", is_phone=False)
     if cat_text:
-        _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align)
+        _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=cat_bold)
 
-    # Description (body)
+    # ── Description Layer (Persian.ttf — Vazirmatn Regular, reshape+bidi, multi-line) ──
     d_conf = coords.get("description", {})
     desc_font = _load_font(
-        base_font_path,
-        d_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(d_conf.get("size"), default=32, minimum=1, maximum=400),
+        _coerce_int(d_conf.get("size"), default=58, minimum=1, maximum=400),
     )
     desc_color = _hex_to_rgb(d_conf.get("color") or "#FFFFFF")
     desc_x = _coerce_int(d_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
     desc_y = _coerce_int(d_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
-    max_width = _coerce_int(d_conf.get("max_width"), default=800, minimum=1, maximum=img.width * 2)
-    desc_align = (d_conf.get("align") or "right").strip().lower()
+    max_width = _coerce_int(d_conf.get("max_width"), default=650, minimum=1, maximum=img.width * 2)
+    desc_align = (d_conf.get("align") or "center").strip().lower()
     if desc_align not in ("left", "center", "right"):
-        desc_align = "right"
+        desc_align = "center"
+    desc_bold = bool(d_conf.get("bold", True))
+    desc_stroke_w = max(1, int(desc_font.size * 0.06)) if desc_bold else 0
 
-    # Multi-line Description: Each line is already reshaped individually by _wrap_persian_text
-    wrapped_lines = _wrap_persian_text(draw, text or "", desc_font, max_width, reshaper, get_display)
+    wrapped_lines = _wrap_persian_text(draw, text or "", desc_font, max_width)
     for line in wrapped_lines:
-        # Line is already reshaped and BiDi-processed by _wrap_persian_text
-        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width)
-        bbox = draw.textbbox((0, 0), line, font=desc_font)
+        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width, bold=desc_bold)
+        bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=desc_stroke_w)
         desc_y += (bbox[3] - bbox[1]) + 6
 
-    # Phone
+    # ── Phone Layer (English font, LTR, Western digits) ──
     p_conf = coords.get("phone", {})
-    phone_font = _load_font(
-        base_font_path,
+    phone_font = _load_english_font(
         p_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(p_conf.get("size"), default=28, minimum=1, maximum=400),
+        _coerce_int(p_conf.get("size"), default=50, minimum=1, maximum=400),
     )
-    phone_color = _hex_to_rgb(p_conf.get("color") or "#FFFF00")
+    phone_color = _hex_to_rgb(p_conf.get("color") or "#131111")
     phone_x = _coerce_int(p_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
     phone_y = _coerce_int(p_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
-    phone_align = (p_conf.get("align") or "right").strip().lower()
+    phone_align = (p_conf.get("align") or "center").strip().lower()
     if phone_align not in ("left", "center", "right"):
-        phone_align = "right"
-    # Step A: Reshape + Step B: BiDi for Phone text
-    phone_text = _shape_persian(phone or "", reshaper, get_display)
+        phone_align = "center"
+    phone_max_w = _coerce_int(p_conf.get("max_width"), default=550, minimum=1, maximum=img.width * 2)
+    phone_bold = bool(p_conf.get("bold", True))
+    phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=1, minimum=0, maximum=20)
+    # Phone numbers: normalize digits to Western (0-9) and do NOT apply
+    # Persian reshaping/bidi — phone numbers are always LTR.
+    phone_text = prepare_text(phone or "", is_phone=True)
     if phone_text:
-        _draw_aligned_line(draw, phone_text, phone_x, phone_y, phone_font, phone_color, phone_align)
+        draw_spaced_text(
+            draw,
+            phone_text,
+            phone_font,
+            phone_color,
+            x=phone_x,
+            y=phone_y,
+            align=phone_align,
+            area_width=phone_max_w,
+            spacing_px=phone_spacing,
+            bold=phone_bold,
+        )
 
-    # Price (optional layer)
-    price_conf = coords.get("price", {})
-    price_font = _load_font(
-        base_font_path,
-        price_conf.get("font_path") or "",
-        ImageFont,
-        _coerce_int(price_conf.get("size"), default=30, minimum=1, maximum=400),
-    )
-    price_color = _hex_to_rgb(price_conf.get("color") or "#00E5FF")
-    price_x = _coerce_int(price_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
-    price_y = _coerce_int(price_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
-    price_align = (price_conf.get("align") or "right").strip().lower()
-    if price_align not in ("left", "center", "right"):
-        price_align = "right"
-    price_text = _shape_persian(price or "", reshaper, get_display)
-    if price_text:
-        _draw_aligned_line(draw, price_text, price_x, price_y, price_font, price_color, price_align)
+    # Draw safety zone guidelines for Story (debug aid — only when DEBUG)
+    if is_story and getattr(settings, 'DEBUG', False):
+        for zone_y in (STORY_SAFE_TOP, img.height - STORY_SAFE_BOTTOM):
+            for x in range(0, img.width, 20):
+                draw.line([(x, zone_y), (min(x + 10, img.width), zone_y)], fill=(255, 50, 50, 80), width=1)
+
+    # ── Debug signature: stamp the actual font path on the image (DEBUG only) ──
+    if getattr(settings, 'DEBUG', False):
+        try:
+            debug_font = ImageFont.truetype(PERSIAN_FONT_PATH, 16)
+        except Exception:
+            debug_font = ImageFont.load_default()
+        debug_label = f"FONT: {PERSIAN_FONT_PATH}"
+        dbbox = draw.textbbox((0, 0), debug_label, font=debug_font)
+        dw = dbbox[2] - dbbox[0]
+        draw.text(
+            (img.width - dw - 10, img.height - 24),
+            debug_label,
+            fill=(255, 0, 0),
+            font=debug_font,
+        )
 
     # Save
     media_root = _get_media_root()
     out_dir = media_root / "generated_ads"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"ad_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
+    prefix = "story" if is_story else "ad"
+    filename = f"{prefix}_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
     out_path = out_dir / filename
     try:
         img.save(out_path, format="PNG", optimize=True)
@@ -414,13 +689,136 @@ def create_ad_image(
     return str(out_path.resolve())
 
 
+# ---------------------------------------------------------------------------
+# High-level API: generate image from an Ad object
+# ---------------------------------------------------------------------------
+
+def generate_ad_image(ad, is_story: bool = False) -> str | None:
+    """
+    Generate an ad image directly from an AdRequest object.
+
+    Uses ad.category.name_fa (Persian) with fallback to ad.category.name.
+    Uses ad.content as description (truncated to 250 chars).
+    Uses phone from contact_snapshot or user profile.
+
+    Args:
+        ad: An AdRequest instance (must be approved).
+        is_story: If True, generates 1080x1920 story format.
+
+    Returns:
+        Filesystem path to the generated image, or None on failure.
+    """
+    template = AdTemplate.objects.filter(is_active=True).first()
+    if not template:
+        logger.warning("generate_ad_image: no active AdTemplate")
+        return None
+
+    # Category: prefer Persian name
+    category_text = ""
+    if ad.category:
+        category_text = getattr(ad.category, 'name_fa', '') or ad.category.name
+    if not category_text:
+        category_text = ad.get_category_display() if hasattr(ad, 'get_category_display') else "Other"
+
+    # Description: limit to 250 chars
+    description = (ad.content or "").strip()[:250]
+
+    # Phone: from contact_snapshot or user profile
+    contact = getattr(ad, 'contact_snapshot', None) or {}
+    phone = (contact.get('phone') or '').strip() if isinstance(contact, dict) else ''
+    if not phone and getattr(ad, 'user_id', None) and ad.user:
+        phone = (ad.user.phone_number or '').strip()
+
+    format_type = FORMAT_STORY if is_story else FORMAT_POST
+    return create_ad_image(template.pk, category_text, description, phone, format_type=format_type)
+
+
+def delete_old_assets(days: int = 7) -> dict:
+    """
+    Delete generated ad/story images older than *days*.
+
+    Targets:
+      - MEDIA_ROOT/generated_ads/   (ad_*.png, story_*.png)
+
+    Safety rules:
+      - Only deletes regular **files** — never directories.
+      - Skips essential assets: .gitkeep, fonts (*.ttf, *.otf, *.woff*),
+        template backgrounds (anything under ad_templates/), and any
+        file whose name starts with "Template".
+      - Never recurses into subdirectories.
+
+    Returns:
+        {"deleted_count": int, "freed_space_mb": float, "errors": int}
+    """
+    import time
+
+    if days < 1:
+        days = 1  # safety floor
+
+    media_root = _get_media_root()
+    target_dirs = [
+        media_root / "generated_ads",
+    ]
+
+    # File extensions and prefixes that must NEVER be deleted
+    PROTECTED_EXTENSIONS = {".ttf", ".otf", ".woff", ".woff2", ".json"}
+    PROTECTED_NAMES = {".gitkeep", ".gitignore", "README.md"}
+    PROTECTED_PREFIXES = ("Template",)
+
+    cutoff_ts = time.time() - (days * 86400)
+
+    deleted_count = 0
+    freed_bytes = 0
+    error_count = 0
+
+    for target_dir in target_dirs:
+        if not target_dir.exists() or not target_dir.is_dir():
+            continue
+
+        for file_path in target_dir.iterdir():
+            # Skip directories — never delete folder structures
+            if not file_path.is_file():
+                continue
+
+            fname = file_path.name
+
+            # Skip protected files
+            if fname in PROTECTED_NAMES:
+                continue
+            if file_path.suffix.lower() in PROTECTED_EXTENSIONS:
+                continue
+            if any(fname.startswith(pfx) for pfx in PROTECTED_PREFIXES):
+                continue
+
+            try:
+                stat = file_path.stat()
+                if stat.st_mtime < cutoff_ts:
+                    size = stat.st_size
+                    file_path.unlink(missing_ok=True)
+                    deleted_count += 1
+                    freed_bytes += size
+            except Exception as exc:
+                logger.warning("delete_old_assets: failed to remove %s: %s", file_path, exc)
+                error_count += 1
+
+    freed_mb = round(freed_bytes / (1024 * 1024), 2)
+    logger.info(
+        "delete_old_assets: deleted=%d, freed=%.2f MB, errors=%d (cutoff=%d days)",
+        deleted_count, freed_mb, error_count, days,
+    )
+    return {"deleted_count": deleted_count, "freed_space_mb": freed_mb, "errors": error_count}
+
+
 def make_story_image(feed_image_path: str) -> str | None:
     """
     Create a 9:16 (1080x1920) story image from a feed image.
-    Pastes the feed image centered and scaled to fit; background is black.
+
+    If the feed image is square (1:1), uses blurred+darkened background fill
+    instead of stretching. Otherwise scales to fit with black background.
+
     Returns filesystem path to the saved story image, or None on failure.
     """
-    Image, _, _, _ = _ensure_deps()
+    Image, _, _, ImageFilter = _ensure_deps()
     if not Image:
         return None
     path = Path(feed_image_path)
@@ -432,16 +830,9 @@ def make_story_image(feed_image_path: str) -> str | None:
     except Exception as e:
         logger.warning("make_story_image: failed to open feed image: %s", e)
         return None
-    w, h = feed.size
-    target_w, target_h = 1080, 1920
-    scale = min(target_w / w, target_h / h)
-    new_w = int(w * scale)
-    new_h = int(h * scale)
-    resized = feed.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-    x = (target_w - new_w) // 2
-    y = (target_h - new_h) // 2
-    canvas.paste(resized, (x, y))
+
+    canvas = _build_story_canvas(feed, Image, ImageFilter)
+
     media_root = _get_media_root()
     out_dir = media_root / "generated_ads"
     out_dir.mkdir(parents=True, exist_ok=True)

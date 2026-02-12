@@ -6,28 +6,35 @@
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
     Invite Member
   </h1>
-  <a href="{% url 'settings_hub_instagram' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back to Settings</a>
+  <a href="{% url 'settings' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to Settings</a>
 </div>
 
-<div class="card-soul mb-4" style="max-width: 420px;">
+<div class="card-soul p-4" style="max-width: 480px;">
+  <p class="text-muted mb-4">Send an invitation to a new team member. They will receive credentials via email.</p>
   {% if error %}
   <div class="alert alert-danger mb-3" role="alert">{{ error }}</div>
   {% endif %}
   <form method="post" action="{% url 'settings_invite_member' %}">
     {% csrf_token %}
     <div class="mb-3">
-      <label class="form-label" for="id_email">Email</label>
-      <input type="email" name="email" id="id_email" class="form-control" value="{{ email|default:'' }}" required>
+      <label class="form-label" for="id_email"><i class="fa-solid fa-envelope me-1 text-muted"></i> Email Address</label>
+      <input type="email" name="email" id="id_email" class="form-control" value="{{ email|default:'' }}" required placeholder="colleague@example.com">
     </div>
-    <div class="mb-3">
-      <label class="form-label" for="id_role">Role</label>
+    <div class="mb-4">
+      <label class="form-label" for="id_role"><i class="fa-solid fa-user-shield me-1 text-muted"></i> Role</label>
       <select name="role" id="id_role" class="form-select">
-        <option value="editor" {% if role == 'editor' %}selected{% endif %}>Editor</option>
-        <option value="viewer" {% if role == 'viewer' or not role %}selected{% endif %}>Viewer</option>
-        <option value="admin" {% if role == 'admin' %}selected{% endif %}>Admin</option>
+        <option value="viewer" {% if role == 'viewer' or not role %}selected{% endif %}>Viewer — Read-only access</option>
+        <option value="editor" {% if role == 'editor' %}selected{% endif %}>Editor — Can manage ads and categories</option>
+        <option value="admin" {% if role == 'admin' %}selected{% endif %}>Admin — Full access</option>
       </select>
+      <small class="text-muted mt-1 d-block">Choose the level of access for this member.</small>
     </div>
-    <button type="submit" class="btn btn-soul">Send Invitation</button>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-soul">
+        <i class="fa-solid fa-paper-plane icon me-1" aria-hidden="true"></i> Send Invitation
+      </button>
+      <a href="{% url 'settings' %}" class="btn btn-secondary">Cancel</a>
+    </div>
   </form>
 </div>
 {% endblock %}

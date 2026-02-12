@@ -1,9 +1,11 @@
 """
 Iraniu — Approve/reject ad actions. Single place for status update + delivery.
-Approval delivery (Telegram, Instagram, API) is delegated to DeliveryService.
+Approval delivery (Telegram DM, Channel post, Instagram, Story, API) is delegated to DeliveryService.
+Distribution to external platforms runs in a background thread so the admin UI stays responsive.
 """
 
 import logging
+import threading
 from django.utils import timezone
 
 from core.models import AdRequest, SiteConfiguration, TelegramSession
@@ -20,19 +22,119 @@ from core.services.delivery import DeliveryService
 logger = logging.getLogger(__name__)
 
 
+def _run_full_delivery(ad_pk: int) -> None:
+    """
+    Background worker: deliver the approved ad to every channel.
+    Runs in a separate thread so the admin save/approve action doesn't block
+    waiting for Telegram/Instagram API round-trips.
+
+    Each channel is independent — a failure in one does NOT stop the others.
+    After all channels complete, a summary notification is fired.
+    """
+    import django
+    django.setup()  # ensure Django is initialized in the thread
+
+    from core.models import AdRequest as AR, DeliveryLog
+    from core.notifications import send_notification
+
+    try:
+        ad = AR.objects.select_related('category', 'user', 'bot').get(pk=ad_pk)
+    except AR.DoesNotExist:
+        logger.error("_run_full_delivery: ad pk=%s not found", ad_pk)
+        return
+
+    # Max retries for slow/external channels (Telegram Channel, Instagram, Story)
+    MAX_CHANNEL_RETRIES = 3
+    RETRY_DELAY_SECONDS = 5
+
+    results = {}
+    for channel in DeliveryService.SUPPORTED_CHANNELS:
+        retries = MAX_CHANNEL_RETRIES if channel in DeliveryService.SLOW_CHANNELS else 0
+        ok = False
+        for attempt in range(retries + 1):
+            try:
+                ok = DeliveryService.send(ad, channel)
+                if ok:
+                    break
+            except Exception as e:
+                logger.exception(
+                    "_run_full_delivery channel=%s ad=%s attempt=%s/%s: %s",
+                    channel, ad.uuid, attempt + 1, retries + 1, e,
+                )
+            if attempt < retries:
+                import time
+                logger.info(
+                    "_run_full_delivery: retrying channel=%s ad=%s in %ss (attempt %s/%s)",
+                    channel, ad.uuid, RETRY_DELAY_SECONDS, attempt + 2, retries + 1,
+                )
+                time.sleep(RETRY_DELAY_SECONDS)
+        results[channel] = ok
+
+    # Build summary
+    succeeded = [ch for ch, ok in results.items() if ok]
+    failed = [ch for ch, ok in results.items() if not ok]
+
+    # Map channel codes to display names
+    display_names = {
+        'telegram': 'Telegram DM',
+        'telegram_channel': 'Telegram Channel',
+        'instagram': 'Instagram Post',
+        'instagram_story': 'Instagram Story',
+        'api': 'API',
+    }
+
+    if failed:
+        failed_names = ", ".join(display_names.get(ch, ch) for ch in failed)
+        succeeded_names = ", ".join(display_names.get(ch, ch) for ch in succeeded) if succeeded else "—"
+        try:
+            send_notification(
+                level='warning',
+                message=(
+                    f"آگهی {str(ad.uuid)[:8]} — توزیع ناقص.\n"
+                    f"✅ موفق: {succeeded_names}\n"
+                    f"❌ ناموفق: {failed_names}"
+                ),
+                link=f"/ad/{ad.uuid}/",
+            )
+        except Exception:
+            logger.exception("_run_full_delivery: notification error")
+    else:
+        try:
+            send_notification(
+                level='success',
+                message=f"آگهی {str(ad.uuid)[:8]} با موفقیت در تمامی پلتفرم‌ها منتشر شد.",
+                link=f"/ad/{ad.uuid}/",
+            )
+        except Exception:
+            logger.exception("_run_full_delivery: notification error")
+
+    logger.info(
+        "Distribution complete ad=%s succeeded=%s failed=%s",
+        ad.uuid,
+        succeeded,
+        failed,
+    )
+
+
 def approve_one_ad(ad: AdRequest, edited_content: str | None = None, approved_by=None) -> None:
     """
-    Set ad to approved, optionally update content, then send to all delivery channels.
+    Set ad to approved, optionally update content, then kick off distribution
+    to ALL delivery channels in a background thread.
+
     Caller must have already validated ad is in PENDING_AI or PENDING_MANUAL.
-    Delivery (Telegram, Instagram, API) and DeliveryLog are handled by DeliveryService.
+    Delivery (Telegram DM + Channel, Instagram Feed + Story, API) and DeliveryLog
+    are handled by DeliveryService inside the background thread.
     approved_by: optional User instance for audit logging (who approved and when).
     """
-    config = SiteConfiguration.get_config()
     if edited_content is not None:
         ad.content = clean_ad_text(edited_content)
     ad.status = AdRequest.Status.APPROVED
     ad.approved_at = timezone.now()
     ad.rejection_reason = ""
+
+    # Mark ad so the post_save signal in signals.py skips duplicate distribution
+    from core.signals import _ads_approving_via_action
+    _ads_approving_via_action.add(ad.pk)
     ad.save()
 
     if approved_by is not None:
@@ -43,11 +145,15 @@ def approve_one_ad(ad: AdRequest, edited_content: str | None = None, approved_by
             ad.approved_at,
         )
 
-    for channel in DeliveryService.SUPPORTED_CHANNELS:
-        try:
-            DeliveryService.send(ad, channel)
-        except Exception as e:
-            logger.exception("approve_one_ad delivery channel=%s ad=%s: %s", channel, ad.uuid, e)
+    # Launch distribution in background thread so admin UI is not blocked
+    thread = threading.Thread(
+        target=_run_full_delivery,
+        args=(ad.pk,),
+        name=f"distribute-{ad.uuid}",
+        daemon=True,
+    )
+    thread.start()
+    logger.info("Distribution thread started for ad=%s", ad.uuid)
 
 
 def reject_one_ad(ad: AdRequest, reason: str, rejected_by=None) -> None:

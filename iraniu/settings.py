@@ -227,3 +227,39 @@ if TELEGRAM_MODE not in ('polling', 'webhook'):
 
 # Auto-start bots with Django when TELEGRAM_MODE is polling. DISABLED for cPanel — use Cron Job with 'python manage.py runbots' instead.
 ENABLE_AUTO_BOTS = False  # Manual execution only via 'python manage.py runbots' (Cron Job)
+
+# Logging — separate Instagram API log for monitoring posts, OAuth, and errors.
+LOGS_DIR = BASE_DIR / 'logs'
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} [{levelname}] {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'instagram_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': str(LOGS_DIR / 'instagram.log'),
+            'maxBytes': 5 * 1024 * 1024,  # 5 MB
+            'backupCount': 3,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+    },
+    'loggers': {
+        'core.services.instagram': {
+            'handlers': ['console', 'instagram_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

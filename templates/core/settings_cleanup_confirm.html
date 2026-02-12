@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Storage Cleanup — Confirm{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="color: var(--text-primary);">
+    <i class="fa-solid fa-hard-drive me-2"></i>Storage Cleanup
+  </h1>
+  <a href="{% url 'settings_hub_storage' %}" class="btn btn-action">
+    <i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back to Settings
+  </a>
+</div>
+
+{% if result %}
+<!-- ── Result View ── -->
+{% if result.deleted_count > 0 %}
+<div class="alert d-flex align-items-start gap-3 mb-4" role="alert"
+     style="background: rgba(22,163,74,0.08); border: 1px solid rgba(22,163,74,0.3); border-radius: 10px; color: var(--text-primary);">
+  <i class="fa-solid fa-circle-check mt-1" style="color: var(--success-color); font-size: 1.5rem;"></i>
+  <div>
+    <h5 class="mb-1" style="color: var(--success-color);">Cleanup Complete</h5>
+    <p class="mb-0">
+      Successfully deleted <strong>{{ result.deleted_count }}</strong> file{{ result.deleted_count|pluralize }},
+      freed <strong>{{ result.freed_space_mb }} MB</strong> of disk space.
+    </p>
+    {% if result.errors > 0 %}
+    <p class="small mb-0 mt-1" style="color: var(--text-secondary);">
+      <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>
+      {{ result.errors }} file{{ result.errors|pluralize }} could not be removed (check server logs).
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="alert d-flex align-items-start gap-3 mb-4" role="alert"
+     style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.25); border-radius: 10px; color: var(--text-primary);">
+  <i class="fa-solid fa-circle-info mt-1" style="color: var(--primary-color); font-size: 1.5rem;"></i>
+  <div>
+    <h5 class="mb-1" style="color: var(--primary-color);">Nothing to Clean</h5>
+    <p class="mb-0">No generated images older than <strong>{{ days }}</strong> day{{ days|pluralize }} were found.</p>
+  </div>
+</div>
+{% endif %}
+
+<div class="d-flex gap-2">
+  <a href="{% url 'settings_hub_storage' %}" class="btn btn-soul">
+    <i class="fa-solid fa-arrow-left me-1"></i> Back to Storage Settings
+  </a>
+</div>
+
+{% else %}
+<!-- ── Confirmation View ── -->
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-4" role="alert">
+  <i class="fa-solid fa-triangle-exclamation icon" aria-hidden="true"></i>
+  <span>This will permanently delete generated images. This action cannot be undone.</span>
+</div>
+
+<div class="card-soul mb-4" style="max-width: 520px;">
+  <div class="p-4">
+    <h5 class="mb-3" style="color: var(--text-primary);">
+      <i class="fa-solid fa-trash-can text-danger me-2"></i>Confirm Cleanup
+    </h5>
+    <p style="color: var(--text-secondary);">
+      Are you sure you want to delete all generated images older than
+      <strong style="color: var(--text-primary);">{{ days }}</strong> day{{ days|pluralize }}?
+    </p>
+
+    <div class="p-3 rounded mb-3" style="background: rgba(59,130,246,0.07); border: 1px solid rgba(59,130,246,0.2);">
+      <p class="small fw-semibold mb-2" style="color: var(--text-primary);">
+        <i class="fa-solid fa-shield-halved me-1"></i> What will NOT be deleted:
+      </p>
+      <ul class="mb-0 small" style="color: var(--text-secondary); padding-left: 1.1rem;">
+        <li>Template backgrounds and configuration files</li>
+        <li>Font files (.ttf, .otf, .woff)</li>
+        <li>.gitkeep and directory structures</li>
+      </ul>
+    </div>
+
+    <form method="post" action="{% url 'cleanup_generated_media' %}">
+      {% csrf_token %}
+      <input type="hidden" name="days" value="{{ days }}">
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-danger">
+          <i class="fa-solid fa-trash-can me-1"></i> Yes, Delete Old Assets
+        </button>
+        <a href="{% url 'settings_hub_storage' %}" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

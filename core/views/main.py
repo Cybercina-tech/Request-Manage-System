@@ -2,6 +2,7 @@
 Iraniu — Staff-only views. Request/response only; business logic in services.
 """
 
+import json
 import logging
 import os
 import signal
@@ -46,6 +47,7 @@ from core.models import (
     ActivityLog,
     REJECTION_REASONS,
     REJECTION_REASONS_DETAIL,
+    default_adtemplate_coordinates,
 )
 from core.services import (
     clean_ad_text,
@@ -461,7 +463,7 @@ def post_to_instagram_view(request, uuid, target):
     return JsonResponse(result, status=200 if result.get('success') else 500)
 
 
-SETTINGS_HUB_SECTIONS = ('instagram', 'telegram', 'channels', 'design')
+SETTINGS_HUB_SECTIONS = ('instagram', 'telegram', 'channels', 'design', 'storage')
 
 
 @staff_member_required
@@ -529,6 +531,12 @@ def settings_hub_section(request, section):
     if config.get_facebook_access_token():
         instagram_token_ok, _ = validate_instagram_token(config.get_facebook_access_token())
 
+    # Token expiry days remaining
+    instagram_token_expiry_days = None
+    if config.instagram_token_expires_at:
+        delta = config.instagram_token_expires_at - timezone.now()
+        instagram_token_expiry_days = max(0, delta.days)
+
     context = {
         'config': config,
         'active_section': section,
@@ -543,6 +551,7 @@ def settings_hub_section(request, section):
         'font_options': font_options,
         'theme_preference': getattr(config, 'theme_preference', 'light') or 'light',
         'instagram_token_ok': instagram_token_ok,
+        'instagram_token_expiry_days': instagram_token_expiry_days,
     }
     return render(request, 'core/settings_hub.html', context)
 
@@ -785,43 +794,68 @@ def export_users_excel(request):
 
 
 @staff_member_required
-@require_http_methods(['POST'])
 def cleanup_generated_media(request):
-    """Delete generated images older than retention policy."""
+    """
+    Storage cleanup: GET shows confirmation page, POST executes deletion.
+
+    Only superusers and staff with ``can_edit_settings`` may trigger this.
+    """
+    from core.services.image_engine import delete_old_assets
+
+    # ── Permission gate: Admin / Superuser only ──
+    if not (request.user.is_superuser or request.user.has_perm('core.can_edit_settings')):
+        return HttpResponseForbidden('Permission denied. Admin privileges required.')
+
     config = SiteConfiguration.get_config()
-    retention = (request.POST.get('retention_policy') or config.retention_policy or '1m').strip()
-    if retention not in ('1w', '1m', 'forever'):
-        retention = config.retention_policy
 
-    config.retention_policy = retention
-    config.save(update_fields=['retention_policy', 'updated_at'])
+    # ── GET: show confirmation page ──
+    if request.method == 'GET':
+        raw_days = request.GET.get('days', '').strip()
+        try:
+            days = int(raw_days) if raw_days else config.cleanup_retention_days
+        except (TypeError, ValueError):
+            days = config.cleanup_retention_days
+        days = max(1, days)
+        return render(request, 'core/settings_cleanup_confirm.html', {
+            'days': days,
+            'config': config,
+        })
 
-    if retention == 'forever':
-        return JsonResponse({'status': 'success', 'deleted': 0, 'message': 'Retention set to Forever. No files deleted.'})
+    # ── POST: execute cleanup ──
+    raw_days = request.POST.get('days', '').strip()
+    try:
+        days = int(raw_days) if raw_days else config.cleanup_retention_days
+    except (TypeError, ValueError):
+        days = config.cleanup_retention_days
+    days = max(1, days)
 
-    cutoff = timezone.now() - (timedelta(days=7) if retention == '1w' else timedelta(days=30))
-    target_dir = Path(settings.MEDIA_ROOT) / 'generated_ads'
-    deleted = 0
-    if target_dir.exists():
-        for file_path in target_dir.glob('*'):
-            if not file_path.is_file():
-                continue
-            try:
-                mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=dt_timezone.utc)
-                if mtime < cutoff:
-                    file_path.unlink(missing_ok=True)
-                    deleted += 1
-            except Exception:
-                continue
+    # Persist the retention days setting if changed
+    if days != config.cleanup_retention_days:
+        config.cleanup_retention_days = days
+        config.save(update_fields=['cleanup_retention_days', 'updated_at'])
 
+    # Delegate to the service function
+    result = delete_old_assets(days=days)
+
+    # Audit log
     log_activity(
         user=request.user,
-        action='Cleaned generated media',
+        action='Manual storage cleanup',
         object_type='Media',
         object_repr='generated_ads',
-        metadata={'retention': retention, 'deleted': deleted},
+        metadata={
+            'days': days,
+            'deleted_count': result['deleted_count'],
+            'freed_space_mb': result['freed_space_mb'],
+            'errors': result['errors'],
+        },
     )
-    return JsonResponse({'status': 'success', 'deleted': deleted, 'message': f'{deleted} file(s) removed.'})
+
+    return render(request, 'core/settings_cleanup_confirm.html', {
+        'days': days,
+        'config': config,
+        'result': result,
+    })
 
 
 @staff_member_required
@@ -867,30 +901,40 @@ def reset_all_settings(request):
 
 
 @staff_member_required
-@require_http_methods(['POST'])
+@require_http_methods(['GET', 'POST'])
 def settings_change_password(request):
-    """Change password for current user. Returns JSON for Settings Hub toast."""
+    """Change password for current user. GET: form page; POST: validate & update."""
     from django.contrib.auth.password_validation import validate_password
     from django.core.exceptions import ValidationError as DjangoValidationError
-    User = get_user_model()
+
+    if request.method == 'GET':
+        return render(request, 'core/settings_change_password.html', {'error': None})
+
     old = (request.POST.get('old_password') or '').strip()
     new1 = (request.POST.get('new_password1') or '').strip()
     new2 = (request.POST.get('new_password2') or '').strip()
+    ctx = {}
     if not old:
-        return JsonResponse({'status': 'error', 'message': 'Current password is required.'}, status=400)
-    if not request.user.check_password(old):
-        return JsonResponse({'status': 'error', 'message': 'Current password is incorrect.'}, status=400)
-    if new1 != new2:
-        return JsonResponse({'status': 'error', 'message': 'New passwords do not match.'}, status=400)
-    if not new1:
-        return JsonResponse({'status': 'error', 'message': 'New password is required.'}, status=400)
-    try:
-        validate_password(new1, request.user)
-    except DjangoValidationError as e:
-        return JsonResponse({'status': 'error', 'message': '; '.join(e.messages)}, status=400)
+        ctx['error'] = 'Current password is required.'
+    elif not request.user.check_password(old):
+        ctx['error'] = 'Current password is incorrect.'
+    elif not new1:
+        ctx['error'] = 'New password is required.'
+    elif new1 != new2:
+        ctx['error'] = 'New passwords do not match.'
+    else:
+        try:
+            validate_password(new1, request.user)
+        except DjangoValidationError as e:
+            ctx['error'] = '; '.join(e.messages)
+    if ctx.get('error'):
+        return render(request, 'core/settings_change_password.html', ctx)
     request.user.set_password(new1)
     request.user.save(update_fields=['password'])
-    return JsonResponse({'status': 'success', 'message': 'Password changed successfully.'})
+    from django.contrib.auth import update_session_auth_hash
+    update_session_auth_hash(request, request.user)
+    messages.success(request, 'Password changed successfully.')
+    return redirect('settings')
 
 
 @staff_member_required
@@ -949,6 +993,135 @@ def check_instagram_connection(request):
         token = config.get_facebook_access_token() or ''
     ok, msg = validate_instagram_token(token)
     return JsonResponse({'success': ok, 'message': msg})
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def instagram_connect(request):
+    """
+    Initiate Instagram OAuth flow. Redirects user to Meta's authorization page.
+    Generates a CSRF state token and stores it in SiteConfiguration.
+    """
+    from core.services.instagram_oauth import generate_oauth_state, build_authorization_url
+
+    config = SiteConfiguration.get_config()
+    app_id = (config.instagram_app_id or '').strip()
+    if not app_id:
+        messages.error(request, 'Instagram App ID is not configured. Save it first in the Instagram Settings card.')
+        return redirect('settings_hub_instagram')
+
+    app_secret = config.get_instagram_app_secret()
+    if not app_secret:
+        messages.error(request, 'Instagram App Secret is not configured. Save it first in the Instagram Settings card.')
+        return redirect('settings_hub_instagram')
+
+    # Build the exact redirect URI (must match Meta Developer portal exactly)
+    redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
+
+    # Generate and store CSRF state
+    state = generate_oauth_state()
+    config.instagram_oauth_state = state
+    config.save(update_fields=['instagram_oauth_state'])
+
+    auth_url = build_authorization_url(app_id, redirect_uri, state)
+    log_activity(
+        user=request.user,
+        action='Initiated Instagram OAuth flow',
+        object_type='SiteConfiguration',
+        object_repr=f'pk={config.pk}',
+    )
+    return redirect(auth_url)
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def instagram_callback(request):
+    """
+    Instagram OAuth callback. Meta redirects here with ?code=AUTH_CODE&state=STATE.
+    Validates state, exchanges code for long-lived token, and saves to DB.
+    """
+    from core.services.instagram_oauth import perform_full_oauth_exchange
+    from core.notifications import send_notification
+
+    error = request.GET.get('error')
+    error_reason = request.GET.get('error_reason', '')
+    error_description = request.GET.get('error_description', '')
+    if error:
+        msg = f'Instagram authorization denied: {error_description or error_reason or error}'
+        logger.warning('Instagram OAuth callback error: %s', msg)
+        messages.error(request, msg)
+        return redirect('settings_hub_instagram')
+
+    code = (request.GET.get('code') or '').strip()
+    state = (request.GET.get('state') or '').strip()
+
+    if not code:
+        messages.error(request, 'Instagram OAuth callback: no authorization code received.')
+        return redirect('settings_hub_instagram')
+
+    # Validate CSRF state
+    config = SiteConfiguration.get_config()
+    stored_state = (config.instagram_oauth_state or '').strip()
+    if not stored_state or state != stored_state:
+        logger.warning('Instagram OAuth state mismatch: expected=%s got=%s', stored_state, state)
+        messages.error(request, 'Instagram OAuth security check failed (state mismatch). Please try again.')
+        config.instagram_oauth_state = ''
+        config.save(update_fields=['instagram_oauth_state'])
+        return redirect('settings_hub_instagram')
+
+    # Build redirect_uri (must be identical to the one in the initial request)
+    redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
+
+    result = perform_full_oauth_exchange(code, redirect_uri)
+
+    if result.get('success'):
+        messages.success(request, result.get('message', 'Instagram connected successfully.'))
+        send_notification(
+            level='success',
+            message=f"Instagram connected. Token expires {result.get('expires_at', '?')}.",
+            link=reverse('settings_hub_instagram'),
+        )
+        log_activity(
+            user=request.user,
+            action='Instagram OAuth completed — long-lived token saved',
+            object_type='SiteConfiguration',
+            object_repr=f'ig_user_id={result.get("ig_user_id", "?")}',
+        )
+    else:
+        err = result.get('error', 'Unknown error')
+        messages.error(request, f'Instagram OAuth failed: {err}')
+        send_notification(
+            level='error',
+            message=f'Instagram OAuth failed: {err}',
+            link=reverse('settings_hub_instagram'),
+        )
+
+    return redirect('settings_hub_instagram')
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def instagram_check_permissions(request):
+    """Dry-run: check which permissions the current Instagram token has (AJAX)."""
+    from core.services.instagram_oauth import check_token_permissions
+
+    config = SiteConfiguration.get_config()
+    token = config.get_facebook_access_token() or ''
+    if not token:
+        return JsonResponse({'success': False, 'message': 'No access token configured.'})
+
+    result = check_token_permissions(token)
+    if result.get('success'):
+        perms = result.get('permissions', [])
+        has_publish = result.get('has_publish', False)
+        return JsonResponse({
+            'success': True,
+            'permissions': perms,
+            'has_publish': has_publish,
+            'message': f"Granted: {', '.join(perms) if perms else 'none'}. "
+                       f"{'✅ Can publish.' if has_publish else '⚠️ instagram_content_publish NOT granted.'}",
+        })
+    return JsonResponse({'success': False, 'message': result.get('error', 'Check failed.')})
 
 
 @staff_member_required
@@ -1167,6 +1340,7 @@ def category_create(request):
     """Add a new category. GET: form page; POST: validate, save, redirect with success message."""
     if request.method == 'POST':
         name = (request.POST.get('name') or '').strip()
+        name_fa = (request.POST.get('name_fa') or '').strip()
         slug = (request.POST.get('slug') or '').strip()
         color = (request.POST.get('color') or '#7C4DFF').strip()
         icon = (request.POST.get('icon') or '').strip()
@@ -1183,7 +1357,7 @@ def category_create(request):
         if Category.objects.filter(slug=slug).exists():
             return render(request, 'core/category_form.html', {'category': None, 'error': 'Slug already exists'})
         Category.objects.create(
-            name=name, slug=slug, color=color or '#7C4DFF',
+            name=name, name_fa=name_fa, slug=slug, color=color or '#7C4DFF',
             icon=icon, is_active=is_active, order=order,
         )
         messages.success(request, 'Category added successfully!')
@@ -1197,6 +1371,7 @@ def category_edit(request, pk):
     category = get_object_or_404(Category, pk=pk)
     if request.method == 'POST':
         name = (request.POST.get('name') or '').strip()
+        name_fa = (request.POST.get('name_fa') or '').strip()
         slug = (request.POST.get('slug') or '').strip()
         color = (request.POST.get('color') or '#7C4DFF').strip()
         icon = (request.POST.get('icon') or '').strip()
@@ -1213,6 +1388,7 @@ def category_edit(request, pk):
         if Category.objects.filter(slug=slug).exclude(pk=pk).exists():
             return render(request, 'core/category_form.html', {'category': category, 'error': 'Slug already exists'})
         category.name = name
+        category.name_fa = name_fa
         category.slug = slug
         category.color = color or '#7C4DFF'
         category.icon = icon
@@ -2051,16 +2227,22 @@ def template_create(request):
         template = form.save(commit=False)
         # coordinates use model default (default_adtemplate_coordinates)
         template.save()
-        messages.success(request, f'Template "{template.name}" created. Position labels in the Coordinate Lab.')
-        return redirect(reverse('admin:core_adtemplate_coordinate_lab', args=[template.pk]))
+        messages.success(request, f'Template "{template.name}" created. Position labels in the Manual Editor.')
+        return redirect(reverse('template_manual_edit', args=[template.pk]))
     return render(request, 'core/template_create.html', {'form': form})
 
 
 @staff_member_required
 @require_http_methods(['GET', 'POST'])
 def template_manual_edit(request, template_id):
-    """High-precision manual editor with numeric controls and live canvas preview."""
+    """High-precision manual editor with numeric controls and live canvas preview. Supports POST and STORY layouts."""
     from PIL import Image
+    from core.models import (
+        default_story_coordinates,
+        FORMAT_POST, FORMAT_STORY, FORMAT_DIMENSIONS,
+        STORY_SAFE_TOP, STORY_SAFE_BOTTOM,
+    )
+    from core.services.image_engine import get_story_coordinates
 
     template = get_object_or_404(AdTemplate, pk=template_id)
 
@@ -2075,9 +2257,8 @@ def template_manual_edit(request, template_id):
                 img_width, img_height = img.size
         except Exception:
             pass
-    
+
     if not background_url:
-        # Use default template
         from django.templatetags.static import static
         default_rel = "static/images/default_template/Template.png"
         default_path = Path(settings.BASE_DIR) / default_rel
@@ -2091,8 +2272,21 @@ def template_manual_edit(request, template_id):
                     img_width, img_height = img.size
             except Exception:
                 pass
-    
-    # Load current coordinates and always merge with defaults to avoid null/undefined crashes
+
+    # Determine which layout mode is active (POST or STORY)
+    layout_mode = (request.GET.get('layout') or request.POST.get('layout_mode') or 'POST').upper()
+    if layout_mode not in (FORMAT_POST, FORMAT_STORY):
+        layout_mode = FORMAT_POST
+
+    is_story = layout_mode == FORMAT_STORY
+
+    # Canvas dimensions for the active layout
+    if is_story:
+        canvas_w, canvas_h = FORMAT_DIMENSIONS[FORMAT_STORY]
+    else:
+        canvas_w, canvas_h = img_width, img_height
+
+    # Load current coordinates (merge with defaults)
     coords = default_adtemplate_coordinates()
     user_coords = template.coordinates or {}
     if isinstance(user_coords, dict):
@@ -2100,13 +2294,24 @@ def template_manual_edit(request, template_id):
             if isinstance(user_coords.get(key), dict):
                 coords[key].update({k: v for k, v in user_coords[key].items() if v is not None})
 
+    # Load story coordinates
+    story_coords = default_story_coordinates()
+    user_story_coords = template.story_coordinates or {}
+    if isinstance(user_story_coords, dict):
+        for key in story_coords.keys():
+            if isinstance(user_story_coords.get(key), dict):
+                story_coords[key].update({k: v for k, v in user_story_coords[key].items() if v is not None})
+
+    # Active coords for the current layout mode
+    active_coords = story_coords if is_story else coords
+
     def _parse_align(value: str, default: str = 'right') -> str:
         v = (value or '').strip().lower()
         return v if v in ('left', 'center', 'right') else default
 
-    def _layer_config(prefix: str, base: dict, *, include_max_width: bool = False) -> dict:
-        min_x, max_x = -img_width, img_width * 2
-        min_y, max_y = -img_height, img_height * 2
+    def _layer_config(prefix: str, base: dict, *, include_max_width: bool = False, ref_w: int = 1080, ref_h: int = 1080) -> dict:
+        min_x, max_x = -ref_w, ref_w * 2
+        min_y, max_y = -ref_h, ref_h * 2
         parsed = {
             'x': parse_int_in_range(
                 request.POST.get(f'{prefix}_x', base.get('x', 0)),
@@ -2133,13 +2338,14 @@ def template_manual_edit(request, template_id):
             ),
             'font_path': (request.POST.get(f'{prefix}_font_path') or base.get('font_path') or '').strip(),
             'align': _parse_align(request.POST.get(f'{prefix}_align', base.get('align', 'right')), default='right'),
+            'bold': request.POST.get(f'{prefix}_bold', '1' if base.get('bold') else '0') == '1',
         }
         if include_max_width:
             parsed['max_width'] = parse_int_in_range(
-                request.POST.get(f'{prefix}_max_width', base.get('max_width', max(200, int(img_width * 0.6)))),
+                request.POST.get(f'{prefix}_max_width', base.get('max_width', max(200, int(ref_w * 0.6)))),
                 field_name=f'{prefix} max width',
                 minimum=1,
-                maximum=img_width * 2,
+                maximum=ref_w * 2,
             )
         return parsed
 
@@ -2148,29 +2354,32 @@ def template_manual_edit(request, template_id):
         if action in ('save', 'save_test'):
             try:
                 new_coords = {
-                    'category': _layer_config('cat', coords.get('category', {}), include_max_width=True),
-                    'description': _layer_config('desc', coords.get('description', {}), include_max_width=True),
-                    'phone': _layer_config('phone', coords.get('phone', {}), include_max_width=True),
-                    'price': _layer_config('price', coords.get('price', {}), include_max_width=True),
+                    'category': _layer_config('cat', active_coords.get('category', {}), include_max_width=True, ref_w=canvas_w, ref_h=canvas_h),
+                    'description': _layer_config('desc', active_coords.get('description', {}), include_max_width=True, ref_w=canvas_w, ref_h=canvas_h),
+                    'phone': _layer_config('phone', active_coords.get('phone', {}), include_max_width=True, ref_w=canvas_w, ref_h=canvas_h),
                 }
             except ValidationError as exc:
                 return JsonResponse({'status': 'error', 'errors': [str(exc)]}, status=400)
 
-            template.coordinates = new_coords
-            template.save(update_fields=['coordinates', 'updated_at'])
+            # Save to the appropriate coordinates field
+            if is_story:
+                template.story_coordinates = new_coords
+                template.save(update_fields=['story_coordinates', 'updated_at'])
+            else:
+                template.coordinates = new_coords
+                template.save(update_fields=['coordinates', 'updated_at'])
 
             if action == 'save_test':
                 from core.services.image_engine import create_ad_image
                 test_category = (request.POST.get('preview_category') or 'دسته‌بندی').strip()
                 test_desc = (request.POST.get('preview_description') or 'متن نمونه برای تست نمایش.').strip()
                 test_phone = (request.POST.get('preview_phone') or '+98 912 345 6789').strip()
-                test_price = (request.POST.get('preview_price') or '').strip()
                 test_path = create_ad_image(
                     template.pk,
                     category=test_category,
                     text=test_desc,
                     phone=test_phone,
-                    price=test_price,
+                    format_type=layout_mode,
                 )
                 if test_path:
                     media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
@@ -2178,27 +2387,40 @@ def template_manual_edit(request, template_id):
                     test_url = f"{request.scheme}://{request.get_host()}{media_url}/generated_ads/{rel}"
                     return JsonResponse({
                         'status': 'success',
-                        'message': 'Coordinates saved and test image generated.',
+                        'message': f'{"Story" if is_story else "Post"} coordinates saved and test image generated.',
                         'test_image_url': test_url,
                     })
                 return JsonResponse({
                     'status': 'success',
-                    'message': 'Coordinates saved, but test image generation failed.',
+                    'message': f'{"Story" if is_story else "Post"} coordinates saved, but test image generation failed.',
                 })
 
-            return JsonResponse({'status': 'success', 'message': 'Coordinates saved successfully.'})
+            return JsonResponse({'status': 'success', 'message': f'{"Story" if is_story else "Post"} coordinates saved successfully.'})
+
+        # Auto-generate story coords from post coords
+        if action == 'auto_story':
+            auto_story = get_story_coordinates(coords, img_width, img_height)
+            template.story_coordinates = auto_story
+            template.save(update_fields=['story_coordinates', 'updated_at'])
+            return JsonResponse({'status': 'success', 'message': 'Story coordinates auto-generated from post layout.', 'coords': auto_story})
 
     context = {
         'template': template,
         'background_url': background_url,
         'img_width': img_width,
         'img_height': img_height,
-        'coords': coords,
-        'cat': coords.get('category', {}),
-        'desc': coords.get('description', {}),
-        'phone_coord': coords.get('phone', {}),
-        'price_coord': coords.get('price', {}),
-        'default_coords': default_adtemplate_coordinates(),
+        'canvas_w': canvas_w,
+        'canvas_h': canvas_h,
+        'layout_mode': layout_mode,
+        'is_story': is_story,
+        'story_safe_top': STORY_SAFE_TOP,
+        'story_safe_bottom': STORY_SAFE_BOTTOM,
+        'coords': active_coords,
+        'cat': active_coords.get('category', {}),
+        'desc': active_coords.get('description', {}),
+        'phone_coord': active_coords.get('phone', {}),
+        'default_coords_json': json.dumps(default_adtemplate_coordinates()),
+        'default_story_coords_json': json.dumps(default_story_coordinates()),
     }
     return render(request, 'core/template_manual_edit.html', context)
 
@@ -2241,12 +2463,17 @@ def template_tester(request):
                         request.session[COORD_LAB_TEMP_BACKGROUND_KEY] = temp_bg_path
 
                 from core.services.image_engine import create_ad_image
+                from core.models import FORMAT_POST, FORMAT_STORY
+                fmt = (request.POST.get('format_type') or FORMAT_POST).upper()
+                if fmt not in (FORMAT_POST, FORMAT_STORY):
+                    fmt = FORMAT_POST
                 path_str = create_ad_image(
                     int(template_id),
                     category_text,
                     ad_text,
                     phone_number,
                     background_file=background_file,
+                    format_type=fmt,
                 )
                 if path_str:
                     media_url = (getattr(settings, 'MEDIA_URL', '/media/') or '/media/').rstrip('/')
@@ -2318,7 +2545,11 @@ def template_tester_preview(request):
     ad_text = request.GET.get('ad_text', 'Ad text')
     phone_number = request.GET.get('phone_number', '')
 
-    path_str = create_ad_image(int(template_id), category_text, ad_text, phone_number)
+    from core.models import FORMAT_POST, FORMAT_STORY
+    fmt = (request.GET.get('format_type') or FORMAT_POST).upper()
+    if fmt not in (FORMAT_POST, FORMAT_STORY):
+        fmt = FORMAT_POST
+    path_str = create_ad_image(int(template_id), category_text, ad_text, phone_number, format_type=fmt)
     if not path_str:
         return HttpResponse(status=500)
     with open(path_str, 'rb') as f:
