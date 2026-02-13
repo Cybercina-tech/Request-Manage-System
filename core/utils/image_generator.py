@@ -35,27 +35,42 @@ def _ensure_pillow():
 
 
 def _find_font(ImageFont, size: int, prefer_persian: bool = True):
-    """Find best font: Persian.ttf (default), then Vazir/Samim for Persian, else DejaVu/Arial."""
+    """Find best font for Persian text: Persian.ttf (static/fonts), then Vazir/Samim, else fallback."""
     persian_paths = [
         str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Persian.ttf'),
+        str(Path(settings.BASE_DIR) / 'Persian.ttf'),
         '/usr/share/fonts/truetype/vazir/Vazir.ttf',
-        '/usr/share/fonts/truetype/vazir/Vazir-Bold.ttf',
-        '/usr/share/fonts/truetype/samim/Samim.ttf',
-        '/usr/share/fonts/truetype/samim/Samim-Bold.ttf',
         str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Vazir.ttf'),
         str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Samim.ttf'),
     ]
     fallback_paths = [
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
         'C:/Windows/Fonts/arial.ttf',
-        'C:/Windows/Fonts/arialbd.ttf',
         'arial.ttf',
     ]
     paths = persian_paths + fallback_paths if prefer_persian else fallback_paths + persian_paths
     for path in paths:
         try:
             return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _find_english_font(ImageFont, size: int):
+    """Find English/Latin font for phone numbers."""
+    base = Path(settings.BASE_DIR)
+    paths = [
+        base / 'static' / 'fonts' / 'English.ttf',
+        base / 'static' / 'fonts' / 'Roboto.ttf',
+        Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
+        Path('C:/Windows/Fonts/arial.ttf'),
+        Path('C:/Windows/Fonts/segoeui.ttf'),
+    ]
+    for p in paths:
+        try:
+            if p.exists():
+                return ImageFont.truetype(str(p), size)
         except OSError:
             continue
     return ImageFont.load_default()
@@ -145,13 +160,13 @@ def generate_request_image(request_id: int, is_story: bool = False) -> str | Non
     accent_color = (255, 200, 80)
     y = padding
 
-    # Title: category name
-    title = ad.get_category_display() if ad.category else 'آگهی'
+    # Title: category name (Persian) — use Persian font
+    title = ad.get_category_display_fa() if hasattr(ad, 'get_category_display_fa') else (ad.get_category_display() if ad.category else 'آگهی')
     draw.text((padding, y), title[:80], fill=accent_color, font=font_title)
     bbox = draw.textbbox((0, 0), title, font=font_title)
     y += bbox[3] - bbox[1] + 20
 
-    # Description: content
+    # Description: content (Persian) — use Persian font
     content = (ad.content or '')[:1500]
     for line in _wrap_text(draw, content, font_body, max_text_width):
         draw.text((padding, y), line[:200], fill=text_color, font=font_body)
@@ -160,16 +175,17 @@ def generate_request_image(request_id: int, is_story: bool = False) -> str | Non
         if y > height - 150:
             break
 
-    # Phone (verified preferred)
+    # Phone: English/Latin font for numbers
     phone = ''
     contact = getattr(ad, 'contact_snapshot', None) or {}
     phone = (contact.get('phone') or '').strip()
     if not phone and ad.user_id:
         phone = (ad.user.phone_number or '').strip()
+    font_phone = _find_english_font(ImageFont, 36 if is_story else 32)
     if phone:
         y += 24
         label = f'📞 {phone}'
-        draw.text((padding, y), label[:60], fill=text_color, font=font_body)
+        draw.text((padding, y), label[:60], fill=text_color, font=font_phone)
         y += 50
 
     # Branding

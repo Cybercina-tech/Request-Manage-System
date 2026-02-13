@@ -33,14 +33,24 @@ logger = logging.getLogger(__name__)
 # Default template background (used when AdTemplate has no background_image)
 DEFAULT_TEMPLATE_IMAGE_REL = "static/images/default_template/Template.png"
 
-# ── HARD-LINKED Persian font (Vazirmatn Regular) — the ONLY font for Farsi text ──
-# No searching, no guessing, no fallback to Pillow default.
-# If this file is missing the process STOPS immediately.
-PERSIAN_FONT_PATH = os.path.join(settings.BASE_DIR, "Persian.ttf")
-assert os.path.exists(PERSIAN_FONT_PATH), (
-    f"FATAL: Persian.ttf not found at {PERSIAN_FONT_PATH!r}\n"
-    "Place the Persian.ttf font file in the project root directory.\n"
-    "Image generation CANNOT proceed without it."
+# ── Persian font for Category and Description (Farsi text) ──
+# Search order: static/fonts/Persian.ttf (recommended), then project root Persian.ttf.
+def _get_persian_font_path():
+    base = Path(settings.BASE_DIR)
+    for candidate in [
+        base / "static" / "fonts" / "Persian.ttf",
+        base / "Persian.ttf",
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+PERSIAN_FONT_PATH = _get_persian_font_path()
+assert PERSIAN_FONT_PATH, (
+    "FATAL: Persian.ttf not found.\n"
+    "Place Persian.ttf in static/fonts/ (recommended) or in the project root.\n"
+    "Image generation for category and message text cannot proceed without it."
 )
 
 
@@ -666,22 +676,6 @@ def create_ad_image(
             for x in range(0, img.width, 20):
                 draw.line([(x, zone_y), (min(x + 10, img.width), zone_y)], fill=(255, 50, 50, 80), width=1)
 
-    # ── Debug signature: stamp the actual font path on the image (DEBUG only) ──
-    if getattr(settings, 'DEBUG', False):
-        try:
-            debug_font = ImageFont.truetype(PERSIAN_FONT_PATH, 16)
-        except Exception:
-            debug_font = ImageFont.load_default()
-        debug_label = f"FONT: {PERSIAN_FONT_PATH}"
-        dbbox = draw.textbbox((0, 0), debug_label, font=debug_font)
-        dw = dbbox[2] - dbbox[0]
-        draw.text(
-            (img.width - dw - 10, img.height - 24),
-            debug_label,
-            fill=(255, 0, 0),
-            font=debug_font,
-        )
-
     # Save
     media_root = _get_media_root()
     out_dir = media_root / "generated_ads"
@@ -728,7 +722,7 @@ def generate_ad_image(ad, is_story: bool = False) -> str | None:
     if ad.category:
         category_text = getattr(ad.category, 'name_fa', '') or ad.category.name
     if not category_text:
-        category_text = ad.get_category_display() if hasattr(ad, 'get_category_display') else "Other"
+        category_text = ad.get_category_display_fa() if hasattr(ad, 'get_category_display_fa') else "سایر"
 
     # Description: limit to 250 chars
     description = (ad.content or "").strip()[:250]

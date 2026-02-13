@@ -110,7 +110,7 @@ class InstagramService:
             return ''
         parts = []
         if ad.category:
-            cat_label = ad.get_category_display()
+            cat_label = ad.get_category_display_fa()
             if include_emojis:
                 parts.append(f'📂 [{cat_label}]')
             else:

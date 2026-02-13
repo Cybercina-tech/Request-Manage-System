@@ -54,7 +54,7 @@
   <h2 class="h6 text-muted mb-2">Selected ({{ ads|length }})</h2>
   <ul class="list-unstyled small">
     {% for ad in ads %}
-    <li class="mb-1"><span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display }}</span> {{ ad.content|truncatewords:12 }}</li>
+    <li class="mb-1"><span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display_fa }}</span> {{ ad.content|truncatewords:12 }}</li>
     {% endfor %}
   </ul>
 </div>

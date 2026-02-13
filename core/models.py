@@ -546,6 +546,12 @@ class AdRequest(models.Model):
         """Display name for category (compatible with old get_category_display for choices)."""
         return self.category.name if self.category else 'Other'
 
+    def get_category_display_fa(self):
+        """Persian display name for category (name_fa or name). Use in UI/preview."""
+        if self.category:
+            return getattr(self.category, 'name_fa', '') or self.category.name
+        return 'سایر'
+
     def get_category_color(self):
         """Hex color for badge styling."""
         return (self.category.color or '#7C4DFF') if self.category else '#7C4DFF'

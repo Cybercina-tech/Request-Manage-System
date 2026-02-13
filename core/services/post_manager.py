@@ -96,7 +96,7 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
     if ad_obj.category:
         category_fa = getattr(ad_obj.category, 'name_fa', '') or ad_obj.category.name
     if not category_fa:
-        category_fa = ad_obj.get_category_display() if hasattr(ad_obj, "get_category_display") else "Other"
+        category_fa = ad_obj.get_category_display_fa() if hasattr(ad_obj, "get_category_display_fa") else "سایر"
     text = (ad_obj.content or "").strip()
     contact = getattr(ad_obj, "contact_snapshot", None) or {}
     phone = (contact.get("phone") or "").strip() if isinstance(contact, dict) else ""

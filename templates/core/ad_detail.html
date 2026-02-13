@@ -25,7 +25,7 @@
 {# —— Status & timestamps bar —— #}
 <div class="card-soul mb-3">
   <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
-    <span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display }}</span>
+    <span class="badge badge-cat-dynamic" style="--cat-color: {{ ad.get_category_color }};">{{ ad.get_category_display_fa }}</span>
     <span class="badge-glow {{ ad.status }}">
       {% if ad.status == 'approved' %}<i class="fa-solid fa-check icon" aria-hidden="true"></i>
       {% elif ad.status == 'rejected' %}<i class="fa-solid fa-times icon" aria-hidden="true"></i>

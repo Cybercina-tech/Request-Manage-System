@@ -39,30 +39,65 @@ def _hex_to_rgb(hex_color: str):
         return (255, 255, 255)
 
 
+def _persian_font_path():
+    """Path to Persian.ttf for category and message text (static/fonts preferred)."""
+    base = Path(settings.BASE_DIR)
+    for rel in ["static/fonts/Persian.ttf", "Persian.ttf"]:
+        p = base / rel
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _load_persian_font(ImageFont, size: int):
+    """Load Persian.ttf for category and ad text (Farsi). Fails if not found."""
+    path = _persian_font_path()
+    if path:
+        return ImageFont.truetype(path, size)
+    for rel in ["static/fonts/Vazir.ttf", "static/fonts/Samim.ttf"]:
+        p = Path(settings.BASE_DIR) / rel
+        if p.exists():
+            try:
+                return ImageFont.truetype(str(p), size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def _load_english_font(ImageFont, size: int):
+    """Load an English/Latin font for phone numbers."""
+    import platform
+    base = Path(settings.BASE_DIR)
+    media_root = getattr(settings, "MEDIA_ROOT", base / "media")
+    search = [
+        base / "static" / "fonts" / "English.ttf",
+        base / "static" / "fonts" / "Roboto.ttf",
+        Path(media_root) / "ad_templates" / "fonts" / "English.ttf",
+        Path(media_root) / "ad_templates" / "fonts" / "Roboto.ttf",
+    ]
+    if platform.system() == "Windows":
+        win_fonts = Path("C:/Windows/Fonts")
+        for name in ["arial.ttf", "segoeui.ttf"]:
+            search.append(win_fonts / name)
+    for p in search:
+        if p.exists():
+            try:
+                return ImageFont.truetype(str(p), size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
 def _load_font(template_obj, ImageFont, size: int):
-    """Load font from template's font_file, or fallback to default."""
-    if template_obj.font_file:
+    """Load font from template's font_file, or fallback to Persian for Farsi text."""
+    if getattr(template_obj, "font_file", None):
         try:
             path = template_obj.font_file.path
             if Path(path).exists():
                 return ImageFont.truetype(path, size)
         except (OSError, ValueError, AttributeError) as e:
             logger.warning("Could not load template font: %s", e)
-    # Default and fallback paths (Persian.ttf is the project default for Pillow)
-    base = Path(settings.BASE_DIR)
-    for rel in [
-        "static/fonts/Persian.ttf",
-        "static/fonts/Vazir.ttf",
-        "static/fonts/Samim.ttf",
-        "static/fonts/DejaVuSans.ttf",
-    ]:
-        path = base / rel
-        if path.exists():
-            try:
-                return ImageFont.truetype(str(path), size)
-            except OSError:
-                continue
-    return ImageFont.load_default()
+    return _load_persian_font(ImageFont, size)
 
 
 def _wrap_text(draw, text: str, font, max_width: int) -> list:
@@ -134,9 +169,11 @@ def generate_ad_image(template_obj, category_text: str, ad_text: str, phone_numb
 
     draw = ImageDraw.Draw(img)
 
+    # Category and message: Persian font (Persian.ttf or template font_file)
     font_category = _load_font(template_obj, ImageFont, template_obj.category_font_size)
     font_ad_text = _load_font(template_obj, ImageFont, template_obj.ad_text_font_size)
-    font_phone = _load_font(template_obj, ImageFont, template_obj.phone_font_size)
+    # Phone: always English/Latin font for numbers
+    font_phone = _load_english_font(ImageFont, template_obj.phone_font_size)
 
     color_cat = _hex_to_rgb(template_obj.category_text_color)
     color_ad = _hex_to_rgb(template_obj.ad_text_text_color)
