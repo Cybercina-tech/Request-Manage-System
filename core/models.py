@@ -571,11 +571,13 @@ class AdRequest(models.Model):
     # Instagram queue: when enable_instagram_queue is ON, ads are marked queued and sent by process_instagram_queue
     instagram_queue_status = models.CharField(
         max_length=16,
+        null=True,
         blank=True,
-        default='',
+        default='pending',
         db_index=True,
         choices=[
             ('', '—'),
+            ('pending', 'Pending'),
             ('queued', 'Queued'),
             ('sent', 'Sent'),
             ('failed', 'Failed'),
