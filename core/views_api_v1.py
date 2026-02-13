@@ -1,5 +1,5 @@
 """
-Iraniu — Partner API v1. Submit, status, list. Auth via X-API-KEY (middleware).
+Iraniu — Partner API v1. Submit, status, list, latest ads. Auth via X-API-KEY (middleware).
 All views assume request.api_client is set (middleware returns 401 otherwise).
 """
 
@@ -13,6 +13,7 @@ from core.models import AdRequest, Category, SiteConfiguration
 from core.view_utils import get_request_payload
 from core.services import clean_ad_text, run_ai_moderation
 from core.validators import validate_ad_content
+from core.services.instagram_api import get_absolute_media_url
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -139,3 +140,38 @@ def api_v1_list(request):
         for ad in page
     ]
     return JsonResponse({'results': results, 'count': count})
+
+
+@require_http_methods(['GET'])
+def api_v1_ads_latest(request):
+    """
+    GET /api/v1/ads/latest/
+    Returns the latest approved ads for public consumption (any valid API key).
+    Format: [{ "id", "category", "message", "image_url", "story_url", "created_at" }, ...]
+    Query: limit (default 50, max 100), offset (default 0).
+    """
+    if not getattr(request, 'api_client', None):
+        return JsonResponse({'error': 'Unauthorized', 'message': 'Invalid or missing API key.'}, status=401)
+    qs = AdRequest.objects.filter(status=AdRequest.Status.APPROVED).select_related('category').order_by('-created_at')
+    try:
+        limit = min(int(request.GET.get('limit', 50)), 100)
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.GET.get('offset', 0)))
+    except (ValueError, TypeError):
+        offset = 0
+    page = qs[offset:offset + limit]
+    results = []
+    for ad in page:
+        image_url = get_absolute_media_url(ad.generated_image) if ad.generated_image else None
+        story_url = get_absolute_media_url(ad.generated_story_image) if ad.generated_story_image else None
+        results.append({
+            'id': ad.pk,
+            'category': ad.category.name if ad.category else 'Other',
+            'message': ad.content or '',
+            'image_url': image_url or '',
+            'story_url': story_url or '',
+            'created_at': ad.created_at.isoformat() if ad.created_at else None,
+        })
+    return JsonResponse({'results': results, 'count': len(results)})

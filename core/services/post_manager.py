@@ -1,11 +1,10 @@
 """
-Iraniu — Distribute approved ads: generate image, post to Telegram and Instagram.
-Telegram: uses Site Configuration default channel (telegram_channel_id + default_telegram_bot) when
-is_channel_active; otherwise falls back to TelegramChannel (is_default, current environment).
-Uses AdTemplate (is_active=True) for image generation and Instagram Graph API for Feed + Story.
+Iraniu — Distribute approved ads: Telegram via DeliveryService (professional caption), Instagram via queue or direct.
+Telegram is always sent through DeliveryService.send(ad, 'telegram_channel') so only the professional
+caption (🚀 #آگهی_جدید) is used. Single-execution guard is in DeliveryService.
 
 NOTE: For automatic distribution on approval, see DeliveryService in core/services/delivery.py.
-This module's distribute_ad() is kept for the manual "Preview & Publish" flow.
+This module's distribute_ad() is for the manual "Preview & Publish" button; it delegates Telegram to DeliveryService.
 """
 
 import logging
@@ -13,12 +12,12 @@ from typing import Optional
 
 from django.conf import settings
 
-from core.models import AdRequest, SiteConfiguration, TelegramChannel
+from core.models import AdRequest, DeliveryLog, InstagramSettings, SiteConfiguration, TelegramChannel
 from core.notifications import send_notification
-from core.services.telegram_client import send_message, send_photo
 from core.services.image_engine import ensure_feed_image, ensure_story_image
 from core.services.instagram_client import create_container, publish_media
 from core.services.instagram_api import get_absolute_media_url
+from core.services.delivery import DeliveryService
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +76,11 @@ def get_default_channel() -> Optional[TelegramChannel]:
 def distribute_ad(ad_obj: AdRequest) -> bool:
     """
     Manual distribution (from Preview & Publish page):
-    1. Generate ad image from active AdTemplate (create_ad_image).
-    2. Upload to Telegram (send_photo with image URL, or send_message if no image).
-    3. Upload as Instagram Post (create_container + publish_media).
-    4. Upload as Instagram Story 9:16 (create_ad_image with format_type='STORY').
+    1. Telegram: delegated to DeliveryService.send(ad, 'telegram_channel') — professional caption only, single-execution guard there.
+    2. Generate Feed image for Instagram if needed.
+    3. Instagram Feed + Story: create_container + publish_media, or queue when enable_instagram_queue is ON.
 
-    Returns True if at least Telegram send succeeded (or image generation + Instagram succeeded), False otherwise.
+    Returns True if at least Telegram or Instagram succeeded, False otherwise.
     """
     if not isinstance(ad_obj, AdRequest):
         logger.warning("post_manager.distribute_ad: invalid ad type")
@@ -91,129 +89,86 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
         logger.debug("post_manager.distribute_ad: ad %s not approved, status=%s", ad_obj.uuid, ad_obj.status)
         return False
 
-    # Use Persian category name (name_fa) with fallback
-    category_fa = ""
-    if ad_obj.category:
-        category_fa = getattr(ad_obj.category, 'name_fa', '') or ad_obj.category.name
-    if not category_fa:
-        category_fa = ad_obj.get_category_display_fa() if hasattr(ad_obj, "get_category_display_fa") else "سایر"
-    text = (ad_obj.content or "").strip()
-    contact = getattr(ad_obj, "contact_snapshot", None) or {}
-    phone = (contact.get("phone") or "").strip() if isinstance(contact, dict) else ""
-    if not phone and getattr(ad_obj, "user_id", None) and ad_obj.user:
-        phone = (ad_obj.user.phone_number or "").strip()
-    caption = f"{category_fa}\n\n{text}"
-    if phone:
-        caption += f"\n\n📱 {phone}"
-
-    # Generate and attach Feed image (and optionally Story) so Instagram gets stable public URLs
+    # Generate Feed image so DeliveryService and Instagram have it
     ensure_feed_image(ad_obj)
     feed_url = get_absolute_media_url(ad_obj.generated_image) if ad_obj.generated_image else None
 
-    # ──────────────────────────────────────────────
-    # Telegram Channel
-    # ──────────────────────────────────────────────
-    chat_id, token, _ = _channel_from_site_config()
-    if token is None or chat_id is None:
-        channel = get_default_channel()
-        if channel:
-            try:
-                token = channel.bot_connection.get_decrypted_token()
-                chat_id = int(channel.channel_id.strip())
-            except Exception as e:
-                logger.warning("post_manager.distribute_ad: channel %s: %s", getattr(channel, "title", ""), e)
-    if not token or chat_id is None:
-        fallback_id = (getattr(settings, "TELEGRAM_DEFAULT_CHANNEL_ID", None) or "").strip()
-        if fallback_id:
-            from core.models import TelegramBot
-            env = getattr(settings, "ENVIRONMENT", "PROD")
-            default_bot = (
-                TelegramBot.objects.filter(environment=env, is_active=True)
-                .order_by("-is_default")
-                .first()
-            )
-            if default_bot:
-                try:
-                    token = default_bot.get_decrypted_token()
-                    chat_id = int(fallback_id)
-                except (ValueError, TypeError, Exception):
-                    pass
-    telegram_ok = False
-    if token and chat_id is not None:
-        try:
-            if feed_url:
-                telegram_ok, _, _ = send_photo(token, chat_id, feed_url, caption=caption[:1024])
-            else:
-                telegram_ok, _, _ = send_message(token, chat_id, caption[:4096])
-            if not telegram_ok:
-                logger.warning("post_manager.distribute_ad: Telegram send failed for ad %s", ad_obj.uuid)
-                send_notification(
-                    "error",
-                    "Telegram post failed for ad. Check bot token and channel permissions.",
-                    link="/settings/hub/telegram/",
-                )
-        except Exception as exc:
-            logger.exception("post_manager.distribute_ad: Telegram delivery crashed ad=%s: %s", ad_obj.uuid, exc)
-            send_notification(
-                "error",
-                f"Telegram delivery error: {exc!s}. Check bot and channel.",
-                link="/settings/hub/telegram/",
-            )
+    # Telegram Channel: single path — DeliveryService (professional caption, guard against duplicate post)
+    telegram_ok = DeliveryService.send(ad_obj, 'telegram_channel')
+    if not telegram_ok:
+        logger.warning("post_manager.distribute_ad: Telegram delivery failed for ad %s", ad_obj.uuid)
+        send_notification(
+            "error",
+            "Telegram post failed for ad. Check bot token and channel permissions.",
+            link="/settings/hub/telegram/",
+        )
 
     # ──────────────────────────────────────────────
     # Instagram Feed + Story (strict separation: Feed URL vs Story URL)
+    # When enable_instagram_queue is ON: queue instead of posting immediately.
     # ──────────────────────────────────────────────
     instagram_ok = False
     config = SiteConfiguration.get_config()
     if not getattr(config, 'is_instagram_enabled', False):
         logger.info("post_manager.distribute_ad: Instagram disabled, skipping for ad %s", ad_obj.uuid)
     else:
-        try:
-            if feed_url:
-                result = create_container(feed_url, caption[:2200], is_story=False)
-                if result.get("success") and result.get("creation_id"):
-                    pub = publish_media(result["creation_id"])
-                    if pub.get("success"):
-                        instagram_ok = True
-                        ad_obj.instagram_post_id = pub.get("id", "")
-                        ad_obj.is_instagram_published = True
-                        ad_obj.save(update_fields=["instagram_post_id", "is_instagram_published"])
-                        logger.info("post_manager.distribute_ad: Instagram Feed published for ad %s", ad_obj.uuid)
+        ig_settings = InstagramSettings.get_settings()
+        if getattr(ig_settings, 'enable_instagram_queue', False):
+            # Queue for scheduler; do not call Instagram API here
+            for ch in ('instagram', 'instagram_story'):
+                DeliveryLog.objects.create(ad=ad_obj, channel=ch, status=DeliveryLog.DeliveryStatus.QUEUED)
+            ad_obj.instagram_queue_status = 'queued'
+            ad_obj.save(update_fields=['instagram_queue_status'])
+            logger.info("post_manager.distribute_ad: Instagram queue ON, ad %s queued", ad_obj.uuid)
+            instagram_ok = True
+        else:
+            from core.services.instagram import InstagramService
+            instagram_caption = InstagramService.format_caption(ad_obj, lang='fa')[:2200]
+            try:
+                if feed_url:
+                    result = create_container(feed_url, instagram_caption, is_story=False)
+                    if result.get("success") and result.get("creation_id"):
+                        pub = publish_media(result["creation_id"])
+                        if pub.get("success"):
+                            instagram_ok = True
+                            ad_obj.instagram_post_id = pub.get("id", "")
+                            ad_obj.is_instagram_published = True
+                            ad_obj.save(update_fields=["instagram_post_id", "is_instagram_published"])
+                            logger.info("post_manager.distribute_ad: Instagram Feed published for ad %s", ad_obj.uuid)
+                        else:
+                            msg = pub.get("message") or "Unknown error"
+                            logger.warning("post_manager.distribute_ad: Instagram publish failed: %s", msg)
+                            send_notification(
+                                "error",
+                                f"Instagram post failed: {msg}. Click to refresh token.",
+                                link="/settings/hub/instagram/",
+                                add_to_active_errors=("token" in msg.lower() or "expired" in msg.lower()),
+                            )
                     else:
-                        msg = pub.get("message") or "Unknown error"
-                        logger.warning("post_manager.distribute_ad: Instagram publish failed: %s", msg)
+                        msg = result.get("message") or "Unknown error"
+                        logger.warning("post_manager.distribute_ad: Instagram container failed: %s", msg)
                         send_notification(
                             "error",
-                            f"Instagram post failed: {msg}. Click to refresh token.",
+                            f"Instagram container failed: {msg}. Click to fix.",
                             link="/settings/hub/instagram/",
-                            add_to_active_errors=("token" in msg.lower() or "expired" in msg.lower()),
                         )
-                else:
-                    msg = result.get("message") or "Unknown error"
-                    logger.warning("post_manager.distribute_ad: Instagram container failed: %s", msg)
-                    send_notification(
-                        "error",
-                        f"Instagram container failed: {msg}. Click to fix.",
-                        link="/settings/hub/instagram/",
-                    )
-            # Story: separate image and URL
-            ensure_story_image(ad_obj)
-            story_url = get_absolute_media_url(ad_obj.generated_story_image) if ad_obj.generated_story_image else None
-            if story_url:
-                logger.info("post_manager.distribute_ad: Sending Story URL: %s", story_url)
-                story_result = create_container(story_url, "", is_story=True)
-                if story_result.get("success") and story_result.get("creation_id"):
-                    story_pub = publish_media(story_result["creation_id"])
-                    if story_pub.get("success"):
-                        ad_obj.instagram_story_id = story_pub.get("id", "")
-                        ad_obj.is_instagram_published = True
-                        ad_obj.save(update_fields=["instagram_story_id", "is_instagram_published"])
-                        logger.info("post_manager.distribute_ad: Instagram Story published for ad %s", ad_obj.uuid)
+                ensure_story_image(ad_obj)
+                story_url = get_absolute_media_url(ad_obj.generated_story_image) if ad_obj.generated_story_image else None
+                if story_url:
+                    logger.info("post_manager.distribute_ad: Sending Story URL: %s", story_url)
+                    story_result = create_container(story_url, "", is_story=True)
+                    if story_result.get("success") and story_result.get("creation_id"):
+                        story_pub = publish_media(story_result["creation_id"])
+                        if story_pub.get("success"):
+                            ad_obj.instagram_story_id = story_pub.get("id", "")
+                            ad_obj.is_instagram_published = True
+                            ad_obj.save(update_fields=["instagram_story_id", "is_instagram_published"])
+                            logger.info("post_manager.distribute_ad: Instagram Story published for ad %s", ad_obj.uuid)
+                        else:
+                            logger.warning("post_manager.distribute_ad: Instagram Story publish failed: %s", story_pub.get("message"))
                     else:
-                        logger.warning("post_manager.distribute_ad: Instagram Story publish failed: %s", story_pub.get("message"))
-                else:
-                    logger.warning("post_manager.distribute_ad: Instagram Story container failed: %s", story_result.get("message"))
-        except Exception as exc:
-            logger.exception("post_manager.distribute_ad: Instagram delivery crashed ad=%s: %s", ad_obj.uuid, exc)
+                        logger.warning("post_manager.distribute_ad: Instagram Story container failed: %s", story_result.get("message"))
+            except Exception as exc:
+                logger.exception("post_manager.distribute_ad: Instagram delivery crashed ad=%s: %s", ad_obj.uuid, exc)
 
     return telegram_ok or instagram_ok

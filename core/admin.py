@@ -22,6 +22,7 @@ from .models import (
     TelegramMessageLog,
     TelegramUser,
     VerificationCode,
+    InstagramSettings,
     InstagramConfiguration,
     ApiClient,
     DeliveryLog,
@@ -72,6 +73,10 @@ class SiteConfigurationAdmin(admin.ModelAdmin):
         }),
         ('Telegram (legacy / webhook)', {
             'fields': ('telegram_bot_token', 'telegram_bot_username', 'telegram_webhook_url', 'use_webhook', 'production_base_url'),
+        }),
+        ('Outbound API (External Webhook)', {
+            'fields': ('external_webhook_url', 'enable_webhook_sync', 'webhook_secret_key'),
+            'description': 'When an ad is approved, POST JSON to external_webhook_url if enable_webhook_sync is ON. X-Webhook-Secret header sent when webhook_secret_key is set.',
         }),
         ('Default Telegram channel (ads)', {
             'fields': ('telegram_channel_id', 'telegram_channel_title', 'is_channel_active', 'default_telegram_bot'),
@@ -190,10 +195,10 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(AdRequest)
 class AdRequestAdmin(admin.ModelAdmin):
-    list_display = ['uuid', 'category', 'status', 'bot', 'user', 'created_at']
-    list_filter = ['status', 'category']
+    list_display = ['uuid', 'category', 'status', 'instagram_queue_status', 'bot', 'user', 'created_at']
+    list_filter = ['status', 'instagram_queue_status', 'category']
     search_fields = ['content', 'uuid']
-    readonly_fields = ['uuid', 'created_at', 'updated_at', 'raw_telegram_json']
+    readonly_fields = ['uuid', 'created_at', 'updated_at', 'raw_telegram_json', 'instagram_queue_status']
 
 
 class TelegramBotAdminForm(forms.ModelForm):
@@ -349,6 +354,33 @@ class TelegramMessageLogAdmin(admin.ModelAdmin):
     list_filter = ['direction', 'bot']
     search_fields = ['text', 'telegram_user_id']
     readonly_fields = ['created_at']
+
+
+@admin.register(InstagramSettings)
+class InstagramSettingsAdmin(admin.ModelAdmin):
+    list_display = ['pk', 'enable_instagram_queue', 'last_post_time', 'updated_at']
+    list_display_links = ['pk']
+    readonly_fields = ['last_post_time', 'updated_at']
+    fieldsets = (
+        (None, {
+            'fields': (
+                'enable_instagram_queue',
+                'last_post_time',
+                'updated_at',
+            ),
+            'description': (
+                'When "Add post and story on queue" is ON, approved ads are queued for Instagram '
+                'and published by the scheduler (max 5 per 24h with ±15 min jitter). '
+                'last_post_time shows when the last automated post was made.'
+            ),
+        }),
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(InstagramConfiguration)

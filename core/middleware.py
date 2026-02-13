@@ -97,7 +97,11 @@ class ApiKeyAuthMiddleware:
 
         key = (request.META.get(self.HEADER_API_KEY) or '').strip()
         if not key:
-            return JsonResponse({'error': 'Missing API key', 'message': 'Provide X-API-KEY header.'}, status=401)
+            auth = request.META.get('HTTP_AUTHORIZATION') or ''
+            if auth.startswith('Token '):
+                key = auth[6:].strip()
+        if not key:
+            return JsonResponse({'error': 'Missing API key', 'message': 'Provide X-API-KEY or Authorization: Token <key>.'}, status=401)
 
         client = None
         for c in ApiClient.objects.filter(is_active=True):

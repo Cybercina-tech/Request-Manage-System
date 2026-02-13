@@ -8,7 +8,7 @@
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
     {% if is_create %}Add API Client{% else %}Edit {{ client.name }}{% endif %}
   </h1>
-  <a href="{% url 'settings_api' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to API Clients</a>
+  <a href="{% url 'settings_api' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to API Management</a>
 </div>
 
 <form id="apiForm" class="form-soul card-soul p-4" style="max-width: 480px;" action="{% if is_create %}{% url 'settings_api_create' %}{% else %}{% url 'settings_api_edit' client.pk %}{% endif %}" method="post">

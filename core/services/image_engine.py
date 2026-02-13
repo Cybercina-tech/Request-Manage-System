@@ -3,10 +3,10 @@ High-level image engine for AdTemplate-based ad generation.
 
 Features:
 - Uses Pillow for compositing.
-- Uses arabic_reshaper + bidi.get_display for proper Persian text rendering.
-- Reads coordinates from AdTemplate.coordinates JSON.
-- Supports dual format: POST (1080x1350 / 4:5) and STORY (1080x1920 / 9:16).
-- Story format: blurred background fill + automatic Y+285 offset (no separate JSON needed).
+- Coordinates, font sizes, and colors from static/banner_config.json (primary), then AdTemplate.coordinates.
+- Default font: static/fonts/YekanBakh-Bold.ttf for Category and Description; no pseudo-bold stroke.
+- Uses arabic_reshaper + bidi for Persian text rendering on image only (not for stored data).
+- Dual format: POST (1080x1350 / 4:5) and STORY (1080x1920 / 9:16); Story uses Y+285 offset.
 - Three text layers: Category, Description, Phone.
 """
 
@@ -33,11 +33,13 @@ logger = logging.getLogger(__name__)
 # Default template background (used when AdTemplate has no background_image)
 DEFAULT_TEMPLATE_IMAGE_REL = "static/images/default_template/Template.png"
 
-# ── Banner font for Category and Description (Farsi text): Yekan.ttf ──
-# Search order: static/fonts/Yekan.ttf (recommended), then root; fallback Persian.ttf.
+# ── Banner font for Category and Description (Farsi text): YekanBakh-Bold.ttf ──
+# Search order: static/fonts/YekanBakh-Bold.ttf (recommended), then root; fallback Yekan.ttf, Persian.ttf.
 def _get_persian_font_path():
     base = Path(settings.BASE_DIR)
     for candidate in [
+        base / "static" / "fonts" / "YekanBakh-Bold.ttf",
+        base / "YekanBakh-Bold.ttf",
         base / "static" / "fonts" / "Yekan.ttf",
         base / "Yekan.ttf",
         base / "static" / "fonts" / "Persian.ttf",
@@ -51,8 +53,8 @@ def _get_persian_font_path():
 PERSIAN_FONT_PATH = _get_persian_font_path()
 assert PERSIAN_FONT_PATH, (
     "FATAL: Banner font not found.\n"
-    "Place Yekan.ttf in static/fonts/ (recommended) or in the project root.\n"
-    "Fallback: Persian.ttf in static/fonts/ or project root.\n"
+    "Place YekanBakh-Bold.ttf in static/fonts/ (recommended) or project root.\n"
+    "Fallback: Yekan.ttf or Persian.ttf in static/fonts/ or project root.\n"
     "Image generation for category and message text cannot proceed without it."
 )
 
@@ -67,33 +69,20 @@ def _ensure_deps():
     return Image, ImageDraw, ImageFont, ImageFilter
 
 
-# ── Nuclear Persian text shaping ─────────────────────────────────────
-# No dependency passing, no fallback.  Imports directly; fails loud.
+# ── Persian text shaping for IMAGE rendering ONLY ─────────────────────
+# Reshaping must NOT be applied to captions, templates, or stored data.
+# Only used inside the drawing functions (prepare_text → create_ad_image).
 
-def _shape_persian(text: str, config=None) -> str:
+def _reshape_for_image_drawing(text: str) -> str:
     """
-    Process Persian/Arabic text for Pillow rendering.
+    Prepare Persian/Arabic text for Pillow image rendering ONLY.
 
-    When config.use_arabic_reshaper is False, returns raw text (for modern fonts/browsers
-    that render RTL correctly without manual reshaping).
-
-    When enabled:
-    1. arabic_reshaper with strict Persian configuration:
-       connects isolated letters into proper presentation forms.
-    2. bidi get_display: reverses visual order for RTL so Pillow
-       draws left-to-right correctly.
-
-    Raises ImportError if arabic-reshaper / python-bidi are missing (when reshaping is enabled).
+    Uses arabic_reshaper.reshape() + bidi.get_display() so Pillow (which
+    renders LTR) draws RTL text correctly. This logic exists solely within
+    the image drawing pipeline — never for captions or stored data.
     """
     if not text:
         return ""
-
-    if config is None:
-        from core.models import SiteConfiguration
-        config = SiteConfiguration.get_config()
-    if not getattr(config, 'use_arabic_reshaper', True):
-        return text  # Return raw Persian text (for modern fonts/browsers)
-
     import arabic_reshaper
     from bidi.algorithm import get_display
 
@@ -103,14 +92,8 @@ def _shape_persian(text: str, config=None) -> str:
         'use_unshaped_instead_of_isolated': False,
     }
     reshaper = arabic_reshaper.ArabicReshaper(configuration=configuration)
-
-    # 1. Reshape (connect letters)
-    reshaped_text = reshaper.reshape(text)
-
-    # 2. Bidi (fix Right-to-Left order)
-    bidi_text = get_display(reshaped_text)
-
-    return bidi_text
+    reshaped = reshaper.reshape(text)
+    return get_display(reshaped)
 
 
 def _normalize_to_western_digits(text: str) -> str:
@@ -128,25 +111,23 @@ def _normalize_to_western_digits(text: str) -> str:
     return text.translate(table)
 
 
-def prepare_text(text: str, *, is_phone: bool = False, config=None) -> str:
+def prepare_text(text: str, *, is_phone: bool = False) -> str:
     """
-    Unified "smart text" helper for the image engine.
+    Prepare text for image drawing (Category/Description/Phone layers).
 
     For Farsi text (is_phone=False):
-        - When config.use_arabic_reshaper: reshape via arabic_reshaper + bidi
-        - Otherwise: return raw text
-        - Result rendered with Yekan.ttf (banner font)
+        - Reshape via arabic_reshaper + bidi (image rendering ONLY)
+        - Result rendered with YekanBakh-Bold.ttf (banner font)
 
     For phone numbers (is_phone=True):
         - Convert Persian/Arabic digits to Western (0-9)
-        - No reshaping, no BiDi, no RTL — numbers stay strictly LTR
-        - Result rendered with _load_english_font only
+        - No reshaping, no BiDi — numbers stay strictly LTR
     """
     if not text:
         return ""
     if is_phone:
         return _normalize_to_western_digits(text).strip()
-    return _shape_persian(text, config)
+    return _reshape_for_image_drawing(text)
 
 
 def _resolve_absolute(p: Path) -> Path:
@@ -156,13 +137,21 @@ def _resolve_absolute(p: Path) -> Path:
     return Path(settings.BASE_DIR) / p
 
 
-def _load_font(ImageFont, size: int):
+def _load_font(ImageFont, size: int, font_path_override: str | None = None):
     """
-    Load banner font (Yekan.ttf or Persian.ttf) for Category and Description (Farsi text).
-    Phone numbers use _load_english_font.
+    Load banner font for Category and Description (Farsi text).
+    Default: static/fonts/YekanBakh-Bold.ttf (PERSIAN_FONT_PATH).
+    If font_path_override is set (e.g. from banner_config.json), resolve against BASE_DIR and use when valid.
+    Phone numbers use _load_english_font. No stroke/pseudo-bold — use .ttf weight only.
     """
-    font = ImageFont.truetype(PERSIAN_FONT_PATH, size)
-    logger.debug("Loaded banner font: %s (size %d)", PERSIAN_FONT_PATH, size)
+    path = PERSIAN_FONT_PATH
+    override = (font_path_override or "").strip()
+    if override:
+        resolved = _resolve_absolute(Path(override))
+        if resolved.exists():
+            path = str(resolved)
+    font = ImageFont.truetype(path, size)
+    logger.debug("Loaded banner font: %s (size %d)", path, size)
     return font
 
 
@@ -288,32 +277,19 @@ def draw_spaced_text(
     y: int,
     align: str = "center",
     area_width: int | None = None,
-        spacing_px: int = 4,
-    bold: bool = False,
+    spacing_px: int = 4,
 ):
     """
     Draw text character-by-character with custom inter-character spacing (kerning).
 
     Pillow's draw.text() has no letter-spacing option. This function manually
     draws each character and shifts the cursor by (char_advance + spacing_px),
-    producing a clear, professional look for phone numbers (10–15px spacing).
-
-    Args:
-        draw_obj: PIL ImageDraw instance.
-        text: The string to draw (already normalized — e.g. Western digits).
-        font: PIL ImageFont (TrueType) instance.
-        color: Fill color tuple, e.g. (19, 17, 17) for #131111.
-        x: Left edge of the drawing area.
-        y: Top Y position of the text baseline.
-        align: "center", "left", or "right" — controls positioning within area_width.
-        area_width: Width of the area to align within. If None, uses total text width.
-        spacing_px: Extra pixels between each character (default 4 for compact fit).
-        bold: If True, applies stroke for bold simulation.
+    producing a clear look for phone numbers. No stroke/pseudo-bold — font weight only.
     """
     if not text:
         return
 
-    stroke_w = max(1, int(font.size * 0.06)) if bold else 0
+    stroke_w = 0
 
     # Step 1: Calculate total rendered width with spacing
     char_advances: list[float] = []
@@ -395,6 +371,35 @@ def _get_media_root() -> Path:
     if not media_root:
         media_root = Path(settings.BASE_DIR) / "media"
     return Path(media_root)
+
+
+# ---------------------------------------------------------------------------
+# Banner config: single source of truth for coordinates, font sizes, colors
+# ---------------------------------------------------------------------------
+
+def _load_banner_config() -> dict | None:
+    """
+    Load static/banner_config.json for coordinates, font sizes, and colors.
+    Used as the primary source for all ad banner generation (Feed and Story).
+    Returns None if file is missing or invalid.
+    """
+    import json
+    config_path = Path(settings.BASE_DIR) / "static" / "banner_config.json"
+    if not config_path.exists():
+        return None
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        # Map "message" -> "description" for compatibility
+        if "message" in data and "description" not in data:
+            data = dict(data)
+            data["description"] = data.pop("message")
+        return data
+    except Exception as e:
+        logger.debug("_load_banner_config: could not load %s: %s", config_path, e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -518,9 +523,14 @@ def create_ad_image(
     format_type: str = FORMAT_POST,
     use_default_phone_coords: bool = False,
     output_filename: str | None = None,
+    coords_override: dict | None = None,
+    output_path: str | Path | None = None,
 ) -> str | None:
     """
     Generate ad image from an AdTemplate and return filesystem path.
+
+    Coordinates, font sizes, and colors: static/banner_config.json (primary),
+    then template.coordinates, then coords_override. Font: YekanBakh-Bold.ttf by default; no pseudo-bold.
 
     Layers: Category, Description (body text), Phone.
 
@@ -534,6 +544,8 @@ def create_ad_image(
         format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
         use_default_phone_coords: If True, ignore template's phone coords; use code defaults.
         output_filename: Optional filename for output (e.g. 'example_ad_test.png').
+        coords_override: Optional dict to override coordinates (keys: category, message/description, phone).
+        output_path: Optional absolute path for output (overrides default subdir + filename).
 
     Returns:
         Absolute filesystem path to the saved PNG, or None on failure.
@@ -556,17 +568,36 @@ def create_ad_image(
             logger.warning("create_ad_image: template %s has no background_image and default %s not found", tpl.pk, default_bg)
             return None
 
-    # Load post coordinates from template
+    # Load coordinates: banner_config.json (primary) -> template.coordinates -> coords_override
     coords = default_adtemplate_coordinates()
+    banner_config = _load_banner_config()
+    if banner_config:
+        for key, value in banner_config.items():
+            if key in coords and isinstance(value, dict):
+                coords[key].update({k: v for k, v in value.items() if v is not None})
     try:
-        user_coords = tpl.coordinates or {}
+        user_coords = dict(tpl.coordinates or {})
+        if "message" in user_coords and "description" not in user_coords:
+            user_coords["description"] = user_coords.pop("message")
         for key, value in user_coords.items():
             if key in coords and isinstance(value, dict):
                 if key == "phone" and use_default_phone_coords:
                     continue
                 coords[key].update({k: v for k, v in value.items() if v is not None})
     except Exception as e:
-        logger.warning("create_ad_image: invalid coordinates for template %s: %s", tpl.pk, e)
+        logger.warning("create_ad_image: invalid template coordinates for template %s: %s", tpl.pk, e)
+    if coords_override:
+        try:
+            override = dict(coords_override)
+            if "message" in override and "description" not in override:
+                override["description"] = override.pop("message")
+            for key, value in override.items():
+                if key in coords and isinstance(value, dict):
+                    if key == "phone" and use_default_phone_coords:
+                        continue
+                    coords[key].update({k: v for k, v in value.items() if v is not None})
+        except Exception as e:
+            logger.warning("create_ad_image: invalid coords_override: %s", e)
 
     # For Story: apply Y+285 offset to all coordinates (no separate JSON needed)
     is_story = format_type == FORMAT_STORY
@@ -603,8 +634,8 @@ def create_ad_image(
     def _draw_aligned_line(draw_obj, txt: str, x: int, y: int, font_obj, color, align: str, max_w: int | None = None, bold: bool = False):
         if not txt:
             return
-        # Bold simulation: use stroke_width to thicken the text
-        stroke_w = max(1, int(font_obj.size * 0.06)) if bold else 0
+        # No pseudo-bold: use .ttf weight only (stroke_w=0)
+        stroke_w = 0
         bbox = draw_obj.textbbox((0, 0), txt, font=font_obj, stroke_width=stroke_w)
         text_w = max(1, bbox[2] - bbox[0])
         area_w = max_w if (max_w is not None and max_w > 0) else text_w
@@ -618,11 +649,12 @@ def create_ad_image(
             stroke_width=stroke_w, stroke_fill=color,
         )
 
-    # ── Category Layer (Yekan.ttf / banner font, reshape+bidi) ──
+    # ── Category Layer (YekanBakh-Bold.ttf from config, no pseudo-bold) ──
     c_conf = coords.get("category", {})
     cat_font = _load_font(
         ImageFont,
         _coerce_int(c_conf.get("size"), default=93, minimum=1, maximum=400),
+        c_conf.get("font_path"),
     )
     cat_color = _hex_to_rgb(c_conf.get("color") or "#EEFF00")
     cat_x = _coerce_int(c_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
@@ -631,16 +663,17 @@ def create_ad_image(
     if cat_align not in ("left", "center", "right"):
         cat_align = "center"
     cat_max_w = _coerce_int(c_conf.get("max_width"), default=700, minimum=1, maximum=img.width * 2)
-    cat_bold = bool(c_conf.get("bold", True))
+    # No pseudo-bold (stroke): YekanBakh-Bold.ttf handles weight naturally
     cat_text = prepare_text(category or "", is_phone=False)
     if cat_text:
-        _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=cat_bold)
+        _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=False)
 
-    # ── Description Layer (Yekan.ttf / banner font, reshape+bidi, multi-line) ──
+    # ── Description Layer (YekanBakh-Bold.ttf from config, no pseudo-bold, multi-line) ──
     d_conf = coords.get("description", {})
     desc_font = _load_font(
         ImageFont,
         _coerce_int(d_conf.get("size"), default=58, minimum=1, maximum=400),
+        d_conf.get("font_path"),
     )
     desc_color = _hex_to_rgb(d_conf.get("color") or "#FFFFFF")
     desc_x = _coerce_int(d_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
@@ -649,13 +682,11 @@ def create_ad_image(
     desc_align = (d_conf.get("align") or "center").strip().lower()
     if desc_align not in ("left", "center", "right"):
         desc_align = "center"
-    desc_bold = bool(d_conf.get("bold", True))
-    desc_stroke_w = max(1, int(desc_font.size * 0.06)) if desc_bold else 0
 
     wrapped_lines = _wrap_persian_text(draw, text or "", desc_font, max_width)
     for line in wrapped_lines:
-        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width, bold=desc_bold)
-        bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=desc_stroke_w)
+        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width, bold=False)
+        bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=0)
         desc_y += (bbox[3] - bbox[1]) + 6
 
     # ── Phone Layer: English font only (monstrat/arialbd/trebucbd), LTR, Western digits ──
@@ -679,7 +710,6 @@ def create_ad_image(
     if phone_align not in ("left", "center", "right"):
         phone_align = "center"
     phone_max_w = _coerce_int(p_conf.get("max_width"), default=450, minimum=1, maximum=img.width * 2)
-    phone_bold = bool(p_conf.get("bold", True))
     # Kerning: reduced spacing so number fits inside frame
     phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=2, minimum=0, maximum=20)
     # Strict: is_phone=True — no reshaping, no RTL; numbers stay LTR
@@ -695,7 +725,6 @@ def create_ad_image(
             align=phone_align,
             area_width=phone_max_w,
             spacing_px=phone_spacing,
-            bold=phone_bold,
         )
 
     # Draw safety zone guidelines for Story (debug aid — only when DEBUG)
@@ -704,20 +733,36 @@ def create_ad_image(
             for x in range(0, img.width, 20):
                 draw.line([(x, zone_y), (min(x + 10, img.width), zone_y)], fill=(255, 50, 50, 80), width=1)
 
-    # Save: Feed → generated_ads/, Story → generated_stories/ (strict separation)
-    media_root = _get_media_root()
-    subdir = "generated_stories" if is_story else "generated_ads"
-    out_dir = media_root / subdir
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # Instagram Story requires exactly 1080x1920; ensure dimensions before save
+    if is_story:
+        target_w, target_h = FORMAT_DIMENSIONS[FORMAT_STORY]
+        if img.size != (target_w, target_h):
+            img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            draw = ImageDraw.Draw(img)
 
-    if output_filename:
-        filename = output_filename if output_filename.endswith(".png") else f"{output_filename}.png"
+    # Save: output_path overrides; else Feed → generated_ads/, Story → generated_stories/
+    if output_path is not None:
+        out_path = Path(output_path).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        prefix = "story" if is_story else "ad"
-        filename = f"{prefix}_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
-    out_path = out_dir / filename
+        media_root = _get_media_root()
+        subdir = "generated_stories" if is_story else "generated_ads"
+        out_dir = media_root / subdir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if output_filename:
+            filename = output_filename
+            if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                filename = f"{filename}.png"
+        else:
+            prefix = "story" if is_story else "ad"
+            filename = f"{prefix}_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
+        out_path = out_dir / filename
+    fmt = "JPEG" if str(out_path).lower().endswith((".jpg", ".jpeg")) else "PNG"
     try:
-        img.save(out_path, format="PNG", optimize=True)
+        save_kw = dict(format=fmt, optimize=True)
+        if fmt == "JPEG":
+            save_kw["quality"] = 95
+        img.save(out_path, **save_kw)
     except Exception as e:
         logger.warning("create_ad_image: failed to save image for template %s: %s", tpl.pk, e)
         return None

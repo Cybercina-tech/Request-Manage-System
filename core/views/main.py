@@ -409,26 +409,20 @@ def preview_publish(request, uuid):
             messages.error(request, 'Distribution failed. Check logs and channel/bot configuration.')
         return redirect('ad_detail', uuid=ad.uuid)
 
-    # GET: build preview (use stored Feed image so same as Telegram/Instagram)
+    # GET: build preview (use stored Feed image; Telegram caption = professional format from DeliveryService)
     from core.services.image_engine import ensure_feed_image
     from core.services.instagram_api import get_absolute_media_url
     from core.services.instagram import InstagramService
     from core.services.post_manager import get_default_channel
+    from core.services.delivery import DeliveryService
 
     ensure_feed_image(ad)
     preview_image_url = get_absolute_media_url(ad.generated_image) if ad.generated_image else None
 
-    category = (getattr(ad.category, 'name_fa', '') or (ad.category.name if ad.category else '')) or (ad.get_category_display() if hasattr(ad, 'get_category_display') else 'Other')
-    text = (ad.content or '').strip()
-    contact = getattr(ad, 'contact_snapshot', None) or {}
-    phone = (contact.get('phone') or '').strip() if isinstance(contact, dict) else ''
-    if not phone and getattr(ad, 'user_id', None) and ad.user:
-        phone = (ad.user.phone_number or '').strip()
     caption_preview = InstagramService.format_caption(ad, lang='fa')
-    telegram_caption = f"{category}\n\n{text}"
-    if phone:
-        telegram_caption += f"\n\n📱 {phone}"
-    telegram_preview = telegram_caption[:1024]
+    telegram_preview = DeliveryService._build_channel_caption(ad)
+    if len(telegram_preview) > 1024:
+        telegram_preview = telegram_preview[:1021] + "…"
 
     channel = get_default_channel()
     context = {
@@ -2179,14 +2173,39 @@ def api_instagram_post(request):
     return JsonResponse({'success': False, 'message': result.get('message', 'Unknown error')}, status=500)
 
 
-# ---------- API clients ----------
+# ---------- API Management (webhook + API clients + delivery log) ----------
 
 @staff_member_required
 @require_http_methods(['GET'])
 def settings_api(request):
-    """List API clients; create, regenerate key, rate limit, revoke."""
+    """API Management: webhook settings, API clients list, last webhook deliveries."""
+    config = SiteConfiguration.get_config()
     clients = ApiClient.objects.all().order_by('name')
-    return render(request, 'core/settings_api.html', {'clients': clients})
+    webhook_deliveries = (
+        DeliveryLog.objects.filter(channel=DeliveryLog.Channel.WEBHOOK)
+        .select_related('ad')
+        .order_by('-created_at')[:25]
+    )
+    return render(request, 'core/settings_api.html', {
+        'clients': clients,
+        'config': config,
+        'webhook_deliveries': webhook_deliveries,
+    })
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def settings_api_save_webhook(request):
+    """Save external webhook URL, enable flag, and secret key from API Management form."""
+    config = SiteConfiguration.get_config()
+    config.external_webhook_url = (request.POST.get('external_webhook_url') or '').strip()
+    config.enable_webhook_sync = request.POST.get('enable_webhook_sync') == 'on'
+    new_secret = (request.POST.get('webhook_secret_key') or '').strip()
+    if new_secret:
+        config.webhook_secret_key = new_secret
+    config.save()
+    messages.success(request, 'Webhook settings saved.')
+    return redirect('settings_api')
 
 
 @staff_member_required

@@ -1,51 +1,116 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}API Clients{% endblock %}
+{% block title %}API Management{% endblock %}
 
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
   <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-    API Clients
+    API Management
   </h1>
   <a href="{% url 'settings' %}" class="btn btn-action"><i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> Back to Settings</a>
 </div>
-<p class="text-muted mb-4">Partner API access. Create clients; use X-API-KEY header for /api/v1/ endpoints. Keys are hashed and cannot be retrieved.</p>
+<p class="text-muted mb-4">Outbound webhook (send ads to your URL when approved), API keys for partners, and webhook delivery status.</p>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <span class="text-muted">{{ clients|length }} client(s)</span>
-  <a href="{% url 'settings_api_create' %}" class="btn btn-soul">
-    <i class="fa-solid fa-plus icon me-1" aria-hidden="true"></i>
-    Add client
-  </a>
+<!-- 1. Outbound Webhook -->
+<div class="card-soul mb-4">
+  <h5 class="card-header border-0 bg-transparent pb-0"><i class="fa-solid fa-paper-plane me-2"></i>External Webhook (Outbound)</h5>
+  <div class="card-body">
+    <p class="text-muted small">When an ad is approved, its data is POSTed as JSON to the URL below. Use the secret in <code>X-Webhook-Secret</code> header for verification.</p>
+    <form action="{% url 'settings_api_save_webhook' %}" method="post" class="form-soul">
+      {% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label">External Webhook URL</label>
+        <input type="url" class="form-control" name="external_webhook_url" value="{{ config.external_webhook_url|default:'' }}" placeholder="https://your-server.com/webhook/ads">
+      </div>
+      <div class="mb-3">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="enable_webhook_sync" id="enable_webhook_sync" {% if config.enable_webhook_sync %}checked{% endif %}>
+          <label class="form-check-label" for="enable_webhook_sync">Enable Webhook Sync</label>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Webhook Secret Key</label>
+        <input type="password" class="form-control" name="webhook_secret_key" value="" placeholder="Leave blank to keep current; set to change. Sent as X-Webhook-Secret header" autocomplete="off">
+        <small class="text-muted">Leave blank to keep current; set to change. Sent as header so the receiver can verify requests.</small>
+      </div>
+      <button type="submit" class="btn btn-soul">Save Webhook Settings</button>
+    </form>
+  </div>
 </div>
 
+<!-- 2. API Keys (Inbound: others call us) -->
+<div class="card-soul mb-4">
+  <h5 class="card-header border-0 bg-transparent pb-0"><i class="fa-solid fa-key me-2"></i>API Keys (Inbound)</h5>
+  <div class="card-body">
+    <p class="text-muted small mb-3">Partners use <code>X-API-KEY</code> header to call <code>GET /api/v1/ads/latest/</code>, <code>POST /api/v1/submit/</code>, etc. Keys are hashed and cannot be retrieved; create or regenerate to get a new key.</p>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <span class="text-muted">{{ clients|length }} client(s)</span>
+      <a href="{% url 'settings_api_create' %}" class="btn btn-soul btn-sm">
+        <i class="fa-solid fa-plus icon me-1" aria-hidden="true"></i> Add client
+      </a>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-soul table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Active</th>
+            <th>Rate limit/min</th>
+            <th>Last used</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in clients %}
+          <tr>
+            <td><strong>{{ c.name }}</strong></td>
+            <td>{% if c.is_active %}<span class="badge bg-info">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
+            <td>{{ c.rate_limit_per_min }}</td>
+            <td>{{ c.last_used_at|timesince|default:"Never" }} ago</td>
+            <td><a href="{% url 'settings_api_edit' c.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="text-muted">No API clients. Add one to allow partner access to /api/v1/.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 3. Last Webhook Deliveries -->
 <div class="card-soul">
-  <div class="table-responsive">
-    <table class="table table-soul table-hover mb-0">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Active</th>
-          <th>Rate limit/min</th>
-          <th>Last used</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in clients %}
-        <tr>
-          <td><strong>{{ c.name }}</strong></td>
-          <td>{% if c.is_active %}<span class="badge bg-info">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
-          <td>{{ c.rate_limit_per_min }}</td>
-          <td>{{ c.last_used_at|timesince|default:"Never" }} ago</td>
-          <td><a href="{% url 'settings_api_edit' c.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="5" class="text-muted">No API clients. Add one to allow partner access to /api/v1/.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <h5 class="card-header border-0 bg-transparent pb-0"><i class="fa-solid fa-list-check me-2"></i>Last Webhook Deliveries</h5>
+  <div class="card-body">
+    <p class="text-muted small mb-3">Status of recent outbound webhook POSTs (success/failed).</p>
+    <div class="table-responsive">
+      <table class="table table-soul table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Ad</th>
+            <th>Status</th>
+            <th>Time</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in webhook_deliveries %}
+          <tr>
+            <td>{% if log.ad %}<a href="{% url 'request_detail' log.ad.uuid %}">{{ log.ad.uuid|truncatechars:12 }}</a>{% else %}—{% endif %}</td>
+            <td>{% if log.status == 'success' %}<span class="badge bg-success">Success</span>{% else %}<span class="badge bg-danger">Failed</span>{% endif %}</td>
+            <td>{{ log.created_at|timesince }} ago</td>
+            <td class="text-muted small">{% if log.error_message %}{{ log.error_message|truncatechars:80 }}{% else %}—{% endif %}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-muted">No webhook deliveries yet. Enable webhook and approve an ad to see entries.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-2">
+      <a href="{% url 'delivery_list' %}?channel=webhook" class="btn btn-sm btn-outline-secondary">View all deliveries</a>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -81,6 +81,7 @@ def _run_full_delivery(ad_pk: int) -> None:
         'instagram': 'Instagram Post',
         'instagram_story': 'Instagram Story',
         'api': 'API',
+        'webhook': 'External Webhook',
     }
 
     if failed:

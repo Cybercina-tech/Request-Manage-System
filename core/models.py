@@ -71,6 +71,21 @@ class SiteConfiguration(models.Model):
         max_length=512,
         help_text='Base URL of the site (e.g. https://iraniu.ir). Used to build webhook URL.',
     )
+    # Outbound API: when an ad is approved/generated, POST JSON to this URL (API Settings / API Management).
+    external_webhook_url = models.URLField(
+        blank=True,
+        max_length=512,
+        help_text='URL to receive ad payload when an ad is approved (POST JSON). Leave empty to disable.',
+    )
+    enable_webhook_sync = models.BooleanField(
+        default=False,
+        help_text='When ON, approved ads are sent to External Webhook URL as JSON.',
+    )
+    webhook_secret_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Secret sent as X-Webhook-Secret header for webhook verification at destination.',
+    )
     # Default Telegram channel (singleton): used by distribute_ad when is_channel_active.
     telegram_channel_id = models.CharField(
         max_length=32,
@@ -553,6 +568,20 @@ class AdRequest(models.Model):
         default=False,
         help_text='True when at least one of Feed or Story was successfully published to Instagram.',
     )
+    # Instagram queue: when enable_instagram_queue is ON, ads are marked queued and sent by process_instagram_queue
+    instagram_queue_status = models.CharField(
+        max_length=16,
+        blank=True,
+        default='',
+        db_index=True,
+        choices=[
+            ('', '—'),
+            ('queued', 'Queued'),
+            ('sent', 'Sent'),
+            ('failed', 'Failed'),
+        ],
+        help_text='Queued: waiting for scheduler. Sent/Failed: set by queue processor.',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -596,6 +625,17 @@ class AdRequest(models.Model):
         """
         from core.services.instagram_api import get_absolute_media_url
         return get_absolute_media_url(self.generated_story_image)
+
+    def generate_images(self) -> bool:
+        """
+        Generate Feed and Story images for this ad using banner_config.json and
+        the active AdTemplate. Uses YekanBakh-Bold.ttf and no pseudo-bold stroke.
+        Returns True if both images were generated (or already present).
+        """
+        from core.services.image_engine import ensure_feed_image, ensure_story_image
+        feed_ok = ensure_feed_image(self)
+        story_ok = ensure_story_image(self)
+        return feed_ok and story_ok
 
 
 class TelegramBot(models.Model):
@@ -831,6 +871,46 @@ class TelegramMessageLog(models.Model):
         indexes = [models.Index(fields=['bot', 'telegram_user_id', 'created_at'])]
 
 
+class InstagramSettings(models.Model):
+    """
+    Singleton (pk=1) for Instagram queue behavior.
+    - enable_instagram_queue: when ON, approved ads are queued for Instagram instead of posting immediately.
+    - last_post_time: timestamp of last successful automated Instagram post (Feed or Story); used for 5 posts/24h rule.
+    """
+    enable_instagram_queue = models.BooleanField(
+        default=False,
+        verbose_name='Add post and story on queue',
+        help_text='When ON, approved ads are queued for Instagram and published by the scheduler (max 5 per 24h). When OFF, posts go out immediately.',
+    )
+    last_post_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='When the last successful Instagram post was made by the queue processor (read-only).',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Instagram Settings'
+        verbose_name_plural = 'Instagram Settings'
+
+    @classmethod
+    def get_settings(cls):
+        """Return the singleton InstagramSettings (pk=1), creating with defaults if needed."""
+        try:
+            obj, _ = cls.objects.get_or_create(
+                pk=1,
+                defaults={'enable_instagram_queue': False},
+            )
+            return obj
+        except Exception:
+            obj = cls.objects.filter(pk=1).first()
+            if obj is None:
+                obj = cls(pk=1)
+                obj.save()
+            return obj
+
+
 class InstagramConfiguration(models.Model):
     """Instagram (Meta Graph API) credentials. Token encrypted at rest."""
 
@@ -970,6 +1050,7 @@ class DeliveryLog(models.Model):
 
     class DeliveryStatus(models.TextChoices):
         PENDING = 'pending', 'Pending'
+        QUEUED = 'queued', 'Queued'
         SUCCESS = 'success', 'Success'
         FAILED = 'failed', 'Failed'
 
@@ -979,6 +1060,7 @@ class DeliveryLog(models.Model):
         INSTAGRAM = 'instagram', 'Instagram'
         INSTAGRAM_STORY = 'instagram_story', 'Instagram Story'
         API = 'api', 'API'
+        WEBHOOK = 'webhook', 'External Webhook'
 
     ad = models.ForeignKey(
         AdRequest,
@@ -1041,11 +1123,9 @@ class ActivityLog(models.Model):
 def default_adtemplate_coordinates():
     """
     Default coordinates JSON for AdTemplate.
-    Keys:
-      - category: {x, y, size, color, font_path, align, bold}
-      - description: {x, y, size, color, font_path, max_width, align, bold}
-      - phone: {x, y, size, color, font_path, align, bold, letter_spacing}
-        Phone: x300 y1150, size 48, max_width 450, letter_spacing 2, color #131111; English font only.
+    Primary source for production is static/banner_config.json; these are fallbacks.
+    Keys: category, description, phone — each with x, y, size, color, font_path, align; description has max_width; phone has letter_spacing.
+    No pseudo-bold (stroke); font weight from .ttf only.
     """
     return {
         'category': {
@@ -1056,7 +1136,6 @@ def default_adtemplate_coordinates():
             'font_path': '',
             'max_width': 700,
             'align': 'center',
-            'bold': True,
         },
         'description': {
             'x': 215,
@@ -1066,7 +1145,6 @@ def default_adtemplate_coordinates():
             'font_path': '',
             'max_width': 650,
             'align': 'center',
-            'bold': True,
         },
         'phone': {
             'x': 300,
@@ -1076,7 +1154,6 @@ def default_adtemplate_coordinates():
             'font_path': '',
             'max_width': 450,
             'align': 'center',
-            'bold': True,
             'letter_spacing': 2,
         },
     }
@@ -1137,7 +1214,8 @@ class AdTemplate(models.Model):
         blank=True,
         help_text=(
             'JSON with keys: category, description, phone. '
-            'Each contains x, y, size, color, font_path, align, bold; description also has max_width.'
+            'Each contains x, y, size, color, font_path, align; description also has max_width; phone has letter_spacing. '
+            'Primary source is static/banner_config.json.'
         ),
     )
     story_coordinates = models.JSONField(

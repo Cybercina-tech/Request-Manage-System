@@ -79,6 +79,7 @@ urlpatterns = [
     path('settings/instagram/<int:pk>/edit/', views.settings_instagram_edit, name='settings_instagram_edit'),
     path('settings/instagram/<int:pk>/test/', views.settings_instagram_test, name='settings_instagram_test'),
     path('settings/api/', views.settings_api, name='settings_api'),
+    path('settings/api/save-webhook/', views.settings_api_save_webhook, name='settings_api_save_webhook'),
     path('settings/api/key-display/', views.settings_api_key_display, name='settings_api_key_display'),
     path('settings/api/create/', views.settings_api_edit, name='settings_api_create'),
     path('settings/api/<int:pk>/edit/', views.settings_api_edit, name='settings_api_edit'),
@@ -99,6 +100,7 @@ urlpatterns = [
     path('api/v1/submit/', views_api_v1.api_v1_submit, name='api_v1_submit'),
     path('api/v1/status/<uuid:uuid>/', views_api_v1.api_v1_status, name='api_v1_status'),
     path('api/v1/list/', views_api_v1.api_v1_list, name='api_v1_list'),
+    path('api/v1/ads/latest/', views_api_v1.api_v1_ads_latest, name='api_v1_ads_latest'),
     path('telegram/webhook/<int:bot_id>/', telegram_views.telegram_webhook, name='telegram_webhook'),
     path('telegram/webhook/<uuid:webhook_secret_token>/', views.TelegramWebhookView.as_view(), name='telegram_webhook_by_token'),
 ]

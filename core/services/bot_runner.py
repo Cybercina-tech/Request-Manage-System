@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 SUPERVISOR_INTERVAL = 10
 HEARTBEAT_CHECK_INTERVAL = 30
 OFFLINE_THRESHOLD_SEC = 90
+INSTAGRAM_QUEUE_CHECK_INTERVAL = 600  # 10 minutes
 DEFAULT_LOG_DIR = "logs"
 
 # Only bots for this environment are started (PROD on cPanel, DEV locally).
@@ -330,6 +331,7 @@ class BotRunnerManager:
         except Exception as e:
             logger.exception("Supervisor initial start: %s", e)
         last_webhook_check = 0.0
+        last_instagram_queue_check = 0.0
         while not self._shutdown:
             time.sleep(SUPERVISOR_INTERVAL)
             self.supervisor_tick(debug=debug)
@@ -345,6 +347,15 @@ class BotRunnerManager:
                         if self._shutdown:
                             break
                         _run_webhook_health_check(bot)
+            # Instagram queue: every 10 minutes check if it's time to post one queued ad
+            now = time.time()
+            if now - last_instagram_queue_check >= INSTAGRAM_QUEUE_CHECK_INTERVAL:
+                last_instagram_queue_check = now
+                try:
+                    from core.services.instagram_queue import run_queue_tick
+                    run_queue_tick()
+                except Exception as e:
+                    logger.exception("Instagram queue tick in runbots: %s", e)
 
     def _run_webhook_loop(self, bot_ids: list = None) -> None:
         """Webhook mode: health check only, no polling workers (current environment only)."""

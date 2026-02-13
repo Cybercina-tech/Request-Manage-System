@@ -19,6 +19,16 @@ MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 0.5
 INSTAGRAM_CAPTION_MAX_LENGTH = 2200
 
+# Telegram channel for brand line in caption (change to your channel handle)
+INSTAGRAM_CAPTION_TELEGRAM_CHANNEL = '@Iraniu_uk'
+
+# SEO hashtags for Iranians in the UK (bottom of caption)
+INSTAGRAM_CAPTION_HASHTAGS = (
+    '#ایرانیان_انگلیس #لندن #ایرانیان_لندن #نیازمندیهای_لندن #انگلیس '
+    '#مهاجرت_انگلیس #کسب_و_کار_لندن #ایرانیان_بریتانیا #تبلیغات_لندن '
+    '#املاک_لندن #کاریابی_لندن #IraniansInUK'
+)
+
 
 def validate_instagram_token(token: str) -> tuple[bool, str]:
     """
@@ -103,42 +113,50 @@ class InstagramService:
         include_emojis: bool = True,
     ) -> str:
         """
-        Build Instagram caption: message text, email, phone. Truncates to max_length.
-        Uses contact_snapshot for email/phone. Bilingual (en/fa).
+        Build Instagram caption for engagement and SEO:
+        - Leading blank line for visual spacing
+        - Category as hashtag (📂 دسته بندی: #Category, spaces → underscores)
+        - Message body prefixed with 📝 متن آگهی:
+        - Contact: 📞 شماره تماس: (and 📧 email if present)
+        - Brand line: Telegram channel
+        - Double line break then block of 12 UK-Iranian hashtags
+        Truncates to max_length; uses contact_snapshot for email/phone.
         """
         if not ad:
             return ''
-        parts = []
-        if ad.category:
-            cat_label = ad.get_category_display_fa()
-            if include_emojis:
-                parts.append(f'📂 [{cat_label}]')
-            else:
-                parts.append(f'[{cat_label}]')
-        parts.append(ad.content or '')
+        # Category as hashtag: "📂 دسته بندی: #Category" (spaces → underscores)
+        cat_label = ad.get_category_display_fa() if hasattr(ad, 'get_category_display_fa') else (ad.category.name if ad.category else 'سایر')
+        if not cat_label:
+            cat_label = 'سایر'
+        category_hashtag = '#' + str(cat_label).replace(' ', '_')
+
+        # Message body: "📝 متن آگهی:" then content
+        body = (ad.content or '').strip()
+        message_section = '📝 متن آگهی:' + ('\n' + body if body else '')
+
+        # Contact: phone with "📞 شماره تماس:", optional email
         contact = getattr(ad, 'contact_snapshot', None) or {}
-        email = (contact.get('email') or '').strip()
         phone = (contact.get('phone') or '').strip()
-        if email or phone:
-            contact_lines = []
-            if lang == 'fa':
-                if email:
-                    contact_lines.append(f'📧 {email}')
-                if phone:
-                    contact_lines.append(f'📞 {phone}')
-            else:
-                if email:
-                    contact_lines.append(f'📧 {email}')
-                if phone:
-                    contact_lines.append(f'📞 {phone}')
-            if contact_lines:
-                parts.append('\n'.join(contact_lines))
-        if include_emojis and lang == 'en':
-            parts.append('🙏 Iraniu — trusted classifieds')
-        elif include_emojis and lang == 'fa':
-            parts.append('🙏 ایرانيو — آگهی‌های معتبر')
-        caption = '\n\n'.join(p for p in parts if p).strip()
-        if not caption:
+        email = (contact.get('email') or '').strip()
+        contact_parts = []
+        if phone:
+            contact_parts.append(f'📞 شماره تماس: {phone}')
+        if email:
+            contact_parts.append(f'📧 {email}')
+        contact_section = '\n'.join(contact_parts) if contact_parts else ''
+
+        # Build sections in order (skip empty)
+        sections = [
+            f'📂 دسته بندی: {category_hashtag}',
+            message_section,
+            contact_section,
+            f'📢 کانال تلگرام ما: {INSTAGRAM_CAPTION_TELEGRAM_CHANNEL}',
+        ]
+        caption_body = '\n\n'.join(s for s in sections if s)
+        # Start with blank line; double line break before hashtag block
+        caption = '\n' + caption_body + '\n\n' + INSTAGRAM_CAPTION_HASHTAGS
+
+        if not caption.strip():
             return ''
         if len(caption) > max_length:
             caption = caption[: max_length - 3] + '...'

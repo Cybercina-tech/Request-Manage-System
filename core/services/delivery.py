@@ -11,6 +11,7 @@ Each channel is independent: failure in one does NOT block others.
 """
 
 import logging
+import time
 from django.utils import timezone
 
 from core.models import (
@@ -18,6 +19,7 @@ from core.models import (
     AdTemplate,
     SiteConfiguration,
     DeliveryLog,
+    InstagramSettings,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,16 +45,18 @@ class DeliveryService:
         'instagram',          # Instagram Feed post
         'instagram_story',    # Instagram Story (9:16)
         'api',                # Passive API availability
+        'webhook',            # POST JSON to external URL (when enable_webhook_sync + external_webhook_url)
     )
 
     # Channels that involve external API calls (for threading decisions)
-    SLOW_CHANNELS = ('telegram_channel', 'instagram', 'instagram_story')
+    SLOW_CHANNELS = ('telegram_channel', 'instagram', 'instagram_story', 'webhook')
 
     @staticmethod
-    def send(ad: AdRequest, channel: str) -> bool:
+    def send(ad: AdRequest, channel: str, force_deliver: bool = False) -> bool:
         """
         Deliver ad to the given channel. Returns True if delivery succeeded.
         Validates ad is approved; creates DeliveryLog (pending -> success/failed).
+        When force_deliver=True (e.g. from queue processor), skip Instagram queue check and send immediately.
         """
         if not isinstance(ad, AdRequest):
             logger.warning("DeliveryService.send: invalid ad type")
@@ -64,11 +68,38 @@ class DeliveryService:
             logger.info("DeliveryService.send: ad %s not approved, status=%s", ad.uuid, ad.status)
             return False
 
-        log = DeliveryLog.objects.create(
-            ad=ad,
-            channel=channel,
-            status=DeliveryLog.DeliveryStatus.PENDING,
-        )
+        # Webhook: skip if disabled or no URL (no log created)
+        if channel == 'webhook':
+            config = SiteConfiguration.get_config()
+            url = (getattr(config, 'external_webhook_url', None) or '').strip()
+            if not getattr(config, 'enable_webhook_sync', False) or not url:
+                return True
+
+        # Telegram channel: post only once per ad (single execution guard)
+        if channel == 'telegram_channel':
+            if DeliveryLog.objects.filter(
+                ad=ad,
+                channel=DeliveryLog.Channel.TELEGRAM_CHANNEL,
+                status=DeliveryLog.DeliveryStatus.SUCCESS,
+            ).exists():
+                logger.info("DeliveryService.send: ad %s already delivered to Telegram channel, skipping", ad.uuid)
+                return True
+
+        # If this ad/channel was already queued, reuse the existing log; otherwise create one
+        log = None
+        if force_deliver and channel in ('instagram', 'instagram_story'):
+            log = DeliveryLog.objects.filter(
+                ad=ad, channel=channel, status=DeliveryLog.DeliveryStatus.QUEUED
+            ).first()
+        if log is None:
+            log = DeliveryLog.objects.create(
+                ad=ad,
+                channel=channel,
+                status=DeliveryLog.DeliveryStatus.PENDING,
+            )
+        else:
+            log.status = DeliveryLog.DeliveryStatus.PENDING
+            log.save(update_fields=['status'])
         try:
             if channel == 'telegram':
                 ok = DeliveryService._send_telegram(ad)
@@ -76,7 +107,6 @@ class DeliveryService:
                 ok = DeliveryService._send_telegram_channel(ad, log)
             elif channel in ('instagram', 'instagram_story'):
                 # Skip Instagram delivery if not enabled in SiteConfiguration
-                from core.models import SiteConfiguration
                 config = SiteConfiguration.get_config()
                 if not getattr(config, 'is_instagram_enabled', False):
                     logger.info("DeliveryService.send: Instagram disabled, skipping channel=%s for ad %s", channel, ad.uuid)
@@ -84,10 +114,22 @@ class DeliveryService:
                     log.error_message = 'Instagram is not enabled (incomplete configuration)'
                     log.save(update_fields=['status', 'error_message'])
                     return False
+                # If Instagram queue is ON and we're not force-delivering: do not send now; mark as QUEUED
+                if not force_deliver:
+                    ig_settings = InstagramSettings.get_settings()
+                    if getattr(ig_settings, 'enable_instagram_queue', False):
+                        log.status = DeliveryLog.DeliveryStatus.QUEUED
+                        log.save(update_fields=['status'])
+                        ad.instagram_queue_status = 'queued'
+                        ad.save(update_fields=['instagram_queue_status'])
+                        _log_instagram_bot('QUEUED', 'Feed' if channel == 'instagram' else 'Story', ad.uuid, 'added to queue')
+                        return True
                 if channel == 'instagram':
                     ok = DeliveryService._send_instagram(ad, log)
                 else:
                     ok = DeliveryService._send_instagram_story(ad, log)
+            elif channel == 'webhook':
+                ok = DeliveryService._send_webhook(ad, log)
             else:  # api
                 ok = DeliveryService._send_api(ad)
 
@@ -419,9 +461,10 @@ class DeliveryService:
         """
         Post ad to Instagram Story (9:16). Uses ad.generated_story_image (generated if missing).
         Public URL must be absolute so Meta crawler can fetch it (no login).
+        A 10s delay between container creation and publish gives Instagram time to fetch the image.
         """
         from core.services.image_engine import ensure_story_image
-        from core.services.instagram_api import get_absolute_media_url
+        from core.services.instagram_api import get_absolute_media_url, get_instagram_base_url
         from core.services.instagram_client import create_container, publish_media
 
         if not ensure_story_image(ad):
@@ -433,6 +476,20 @@ class DeliveryService:
             log.error_message = 'Story image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
             _log_instagram_bot('FAILED', 'Story', ad.uuid, 'image URL not public')
             return False
+        # Require URL to be under our production media base so Instagram can fetch it
+        expected_media_prefix = get_instagram_base_url().rstrip('/') + '/media/'
+        if not story_url.startswith(expected_media_prefix):
+            log.error_message = (
+                f'Story image URL must be under {expected_media_prefix!r}. Got: {story_url[:80]}...'
+            )
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'URL not under production media base')
+            return False
+        # Debug: log exact URL to bot_log.txt so it can be manually checked for accessibility
+        _log_bot.info(
+            'Instagram Story URL sent to Meta (verify in browser): ad=%s url=%s',
+            ad.uuid,
+            story_url,
+        )
         logger.info('Sending Story URL to Instagram: %s', story_url)
         try:
             container = create_container(story_url, "", is_story=True)
@@ -442,6 +499,8 @@ class DeliveryService:
                 logger.warning("_send_instagram_story: container failed ad=%s: %s", ad.uuid, msg)
                 _log_instagram_bot('FAILED', 'Story', ad.uuid, msg)
                 return False
+            # Give Instagram servers time to fetch and process the image before publishing
+            time.sleep(10)
             pub = publish_media(container["creation_id"])
             if pub.get("success"):
                 media_id = pub.get('id', '')
@@ -461,6 +520,57 @@ class DeliveryService:
             log.error_message = str(exc)[:500]
             logger.exception("_send_instagram_story: crash ad=%s: %s", ad.uuid, exc)
             _log_instagram_bot('FAILED', 'Story', ad.uuid, str(exc)[:200])
+            return False
+
+    # ------------------------------------------------------------------
+    # Channel: External Webhook (POST JSON to configured URL)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _send_webhook(ad: AdRequest, log: DeliveryLog) -> bool:
+        """
+        POST ad payload as JSON to external_webhook_url with X-Webhook-Secret header.
+        Payload: id, category, message, image_url, story_url, created_at.
+        """
+        import requests
+        from core.services.instagram_api import get_absolute_media_url
+
+        config = SiteConfiguration.get_config()
+        url = (getattr(config, 'external_webhook_url', None) or '').strip()
+        if not url:
+            log.error_message = 'External webhook URL not configured.'
+            return False
+        secret = (getattr(config, 'webhook_secret_key', None) or '').strip()
+        image_url = get_absolute_media_url(ad.generated_image) if ad.generated_image else None
+        story_url = get_absolute_media_url(ad.generated_story_image) if ad.generated_story_image else None
+        category_name = ad.category.name if ad.category else 'Other'
+        payload = {
+            'id': ad.pk,
+            'uuid': str(ad.uuid),
+            'category': category_name,
+            'message': (ad.content or '')[:10000],
+            'image_url': image_url or '',
+            'story_url': story_url or '',
+            'created_at': ad.created_at.isoformat() if ad.created_at else None,
+        }
+        headers = {'Content-Type': 'application/json'}
+        if secret:
+            headers['X-Webhook-Secret'] = secret
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            if resp.status_code >= 200 and resp.status_code < 300:
+                log.response_payload = {'status_code': resp.status_code}
+                return True
+            log.error_message = f'HTTP {resp.status_code}: {resp.text[:500]}'
+            log.response_payload = {'status_code': resp.status_code, 'body_preview': resp.text[:500]}
+            return False
+        except requests.RequestException as e:
+            log.error_message = str(e)[:500]
+            log.response_payload = {}
+            return False
+        except Exception as e:
+            log.error_message = str(e)[:500]
+            log.response_payload = {}
             return False
 
     # ------------------------------------------------------------------
