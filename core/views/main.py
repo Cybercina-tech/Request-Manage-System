@@ -1183,6 +1183,9 @@ def approve_ad(request):
             return JsonResponse({'status': 'error', 'message': 'Ad not in pending state'}, status=400)
         approve_one_ad(ad, edited_content=edited_content, approved_by=request.user)
         return JsonResponse({'status': 'success'})
+    except ValidationError as exc:
+        msg = exc.messages[0] if exc.messages else 'Invalid content.'
+        return JsonResponse({'status': 'error', 'message': msg}, status=400)
     except Exception as exc:
         logger.exception("approve_ad failed: %s", exc)
         return _json_server_error('Could not approve ad.')
@@ -1241,6 +1244,11 @@ def bulk_approve(request):
                     continue
                 approve_one_ad(ad, approved_by=request.user)
                 approved_count += 1
+            except ValidationError as ve:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': ve.messages[0] if ve.messages else 'Invalid content.',
+                }, status=400)
             except AdRequest.DoesNotExist:
                 pass
         return JsonResponse({'status': 'success', 'approved_count': approved_count})
@@ -1601,6 +1609,12 @@ def submit_ad(request):
         if not content:
             return JsonResponse({'error': 'content is required'}, status=400)
         content = clean_ad_text(content)
+        try:
+            from core.validators import validate_ad_content as validate_ad_content_rules
+            validate_ad_content_rules(content)
+        except ValidationError as e:
+            msg = e.messages[0] if e.messages else 'Invalid content.'
+            return JsonResponse({'error': msg}, status=400)
         slug = (data.get('category') or 'other').strip()
         category = Category.objects.filter(slug=slug, is_active=True).first() or Category.objects.filter(slug='other').first()
         if not category:

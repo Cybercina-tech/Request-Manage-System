@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from core.models import AdRequest, Category, SiteConfiguration, TelegramBot, TelegramUser
 from core.services import clean_ad_text, run_ai_moderation
+from core.validators import validate_ad_content
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class SubmitAdService:
         content = clean_ad_text((content or "").strip())
         if not content:
             return None
+        validate_ad_content(content)
 
         config = SiteConfiguration.get_config()
         if isinstance(category, str):

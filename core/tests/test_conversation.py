@@ -127,43 +127,32 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.language, "fa")
         self.assertEqual(session.state, TelegramSession.State.MAIN_MENU)
 
-    def test_confirm_yes_goes_to_ask_contact(self):
-        """Data collection at end: after confirm we ask contact (reply keyboard)."""
+    def test_confirm_yes_goes_to_ask_email(self):
+        """Data collection at end: after confirm we ask email (inline skip)."""
         TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
-        session.context = {"content": "Ad content", "category": "other"}
+        session.context = {"content": "اجاره آپارتمان در تهران", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
         out = self.engine.process_update(session, callback_data="confirm_yes")
-        session.refresh_from_db()
-        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
-        self.assertIn("keyboard", out["reply_markup"])
-        self.assertIn("request_contact", str(out["reply_markup"]))
-
-    def test_contact_skip_goes_to_enter_email(self):
-        """Skip contact (text) -> ENTER_EMAIL (ask email at end)."""
-        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
-        session = self.engine.get_or_create_session(telegram_user_id=12345)
-        session.state = TelegramSession.State.ASK_CONTACT
-        session.language = "en"
-        session.save(update_fields=["state", "language"])
-        out = self.engine.process_update(session, text="skip")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
         self.assertIn("inline_keyboard", out["reply_markup"])
 
-    def test_contact_shared_goes_to_enter_email(self):
-        """Share phone via Telegram contact -> ENTER_EMAIL."""
+    def test_contact_shared_goes_to_select_category(self):
+        """Share contact when phone not verified -> SELECT_CATEGORY (then can create ad)."""
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.ASK_CONTACT
         session.language = "en"
-        session.context = {"content": "Ad text", "category": "other"}
+        session.context = {"content": "فروش خودرو پژو", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
-        out = self.engine.process_update(session, contact_phone="+989123456789")
+        out = self.engine.process_update(
+            session, contact_phone="+989123456789", contact_user_id=12345
+        )
         session.refresh_from_db()
-        self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
+        self.assertEqual(session.state, TelegramSession.State.SELECT_CATEGORY)
         user.refresh_from_db()
         self.assertEqual(user.phone_number, "+989123456789")
         self.assertTrue(user.phone_verified)
@@ -174,19 +163,24 @@ class ConversationEngineTests(TestCase):
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.ENTER_EMAIL
         session.language = "en"
-        session.context = {"content": "Ad content", "category": "other"}
+        session.context = {"content": "اجاره آپارتمان در تهران", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
         out = self.engine.process_update(session, callback_data="email_skip")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
         ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
-        self.assertEqual(ad.content, "Ad content")
+        self.assertEqual(ad.content, "اجاره آپارتمان در تهران")
         self.assertEqual(ad.user_id, user.pk)
 
     def test_main_menu_create_ad_goes_to_select_category(self):
         """Category-first flow: Create ad -> SELECT_CATEGORY (not ENTER_CONTENT)."""
-        TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
+        user, _ = TelegramUser.objects.get_or_create(
+            telegram_user_id=12345,
+            defaults={"username": "u"},
+        )
+        user.phone_verified = True
+        user.save(update_fields=["phone_verified"])
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.MAIN_MENU
         session.language = "en"
@@ -216,10 +210,10 @@ class ConversationEngineTests(TestCase):
         session.language = "en"
         session.context = {"category": "other"}
         session.save(update_fields=["state", "language", "context"])
-        out = self.engine.process_update(session, text="My ad text here")
+        out = self.engine.process_update(session, text="اجاره آپارتمان در تهران")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.CONFIRM)
-        self.assertEqual(session.context.get("content"), "My ad text here")
+        self.assertEqual(session.context.get("content"), "اجاره آپارتمان در تهران")
         self.assertEqual(session.context.get("category"), "other")
 
     def test_invalid_category_stays_in_select_category(self):
@@ -249,7 +243,9 @@ class ConversationEngineTests(TestCase):
 
     def test_full_flow_category_then_content_then_confirm_submit(self):
         """Full flow: MAIN_MENU -> SELECT_CATEGORY -> ENTER_CONTENT -> CONFIRM -> ... -> SUBMITTED."""
-        user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
+        user = TelegramUser.objects.create(
+            telegram_user_id=12345, username="u", phone_verified=True
+        )
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.MAIN_MENU
         session.language = "en"
@@ -261,14 +257,11 @@ class ConversationEngineTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.ENTER_CONTENT)
         self.assertEqual(session.context.get("category"), "rent")
-        self.engine.process_update(session, text="Ad content here")
+        self.engine.process_update(session, text="اجاره آپارتمان در تهران")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.CONFIRM)
-        self.assertEqual(session.context.get("content"), "Ad content here")
+        self.assertEqual(session.context.get("content"), "اجاره آپارتمان در تهران")
         self.engine.process_update(session, callback_data="confirm_yes")
-        session.refresh_from_db()
-        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
-        self.engine.process_update(session, text="skip")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
         self.engine.process_update(session, callback_data="email_skip")
@@ -276,24 +269,19 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
         ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
-        self.assertEqual(ad.content, "Ad content here")
+        self.assertEqual(ad.content, "اجاره آپارتمان در تهران")
         self.assertEqual(ad.category.slug if ad.category else None, "rent")
         self.assertEqual(ad.user_id, user.pk)
-        self.assertIn("phone", ad.contact_snapshot)
-        self.assertIn("verified_phone", ad.contact_snapshot)
 
-    def test_confirm_yes_then_skip_contact_then_skip_email_creates_ad(self):
-        """Confirm -> ask contact -> skip -> ask email -> skip -> ad created."""
+    def test_confirm_yes_then_skip_email_creates_ad(self):
+        """Confirm -> ask email -> skip -> ad created."""
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
-        session.context = {"content": "Ad content", "category": "other"}
+        session.context = {"content": "اجاره آپارتمان در تهران", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
         self.engine.process_update(session, callback_data="confirm_yes")
-        session.refresh_from_db()
-        self.assertEqual(session.state, TelegramSession.State.ASK_CONTACT)
-        self.engine.process_update(session, text="skip")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.ENTER_EMAIL)
         self.engine.process_update(session, callback_data="email_skip")
@@ -301,17 +289,15 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(session.state, TelegramSession.State.SUBMITTED)
         self.assertEqual(AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).count(), 1)
         ad = AdRequest.objects.get(telegram_user_id=12345, bot=self.bot)
-        self.assertEqual(ad.content, "Ad content")
+        self.assertEqual(ad.content, "اجاره آپارتمان در تهران")
         self.assertEqual(ad.user_id, user.pk)
-        self.assertIn("phone", ad.contact_snapshot)
-        self.assertIn("verified_phone", ad.contact_snapshot)
 
     def test_confirm_no_returns_to_main_menu(self):
         TelegramUser.objects.get_or_create(telegram_user_id=12345, defaults={"username": "u"})
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
-        session.context = {"content": "Ad content", "category": "other"}
+        session.context = {"content": "اجاره آپارتمان در تهران", "category": "other"}
         session.save(update_fields=["state", "language", "context"])
         out = self.engine.process_update(session, callback_data="confirm_no")
         session.refresh_from_db()
@@ -323,7 +309,7 @@ class ConversationEngineTests(TestCase):
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
-        session.context = {"content": "Ad text", "category": "rent"}
+        session.context = {"content": "فروش خودرو پژو", "category": "rent"}
         session.save(update_fields=["state", "language", "context"])
         out = self.engine.process_update(session, callback_data="confirm_back", message_id=99)
         session.refresh_from_db()
@@ -336,12 +322,12 @@ class ConversationEngineTests(TestCase):
         session = self.engine.get_or_create_session(telegram_user_id=12345)
         session.state = TelegramSession.State.CONFIRM
         session.language = "en"
-        session.context = {"content": "Old ad", "category": "rent"}
+        session.context = {"content": "آگهی قبلی", "category": "rent"}
         session.save(update_fields=["state", "language", "context"])
         out = self.engine.process_update(session, callback_data="confirm_edit")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.ENTER_CONTENT)
-        self.assertIn("Old ad", out["text"])
+        self.assertIn("آگهی قبلی", out["text"])
 
     def test_inline_button_returns_edit_previous_and_message_id(self):
         """When processing callback (e.g. category chosen), response includes edit_previous and message_id."""
@@ -370,7 +356,7 @@ class ConversationEngineTests(TestCase):
     def test_start_resubmit_valid_rejected_ad_enters_resubmit_edit(self):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         ad = AdRequest.objects.create(
-            content="Old rejected ad text",
+            content="آگهی رد شده قبلی",
             category=Category.objects.get(slug='other'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=12345,
@@ -382,7 +368,7 @@ class ConversationEngineTests(TestCase):
         session.save(update_fields=["language"])
         out = self.engine.process_update(session, text=f"/start resubmit_{ad.uuid}")
         self.assertIn("text", out)
-        self.assertIn("Old rejected ad text", out["text"])
+        self.assertIn("آگهی رد شده قبلی", out["text"])
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.RESUBMIT_EDIT)
         self.assertEqual(session.context.get("mode"), "resubmit")
@@ -391,7 +377,7 @@ class ConversationEngineTests(TestCase):
     def test_resubmit_ad_not_rejected_shows_error(self):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         ad = AdRequest.objects.create(
-            content="Approved ad",
+            content="آگهی تأیید شده",
             category=Category.objects.get(slug='other'),
             status=AdRequest.Status.APPROVED,
             telegram_user_id=12345,
@@ -410,7 +396,7 @@ class ConversationEngineTests(TestCase):
         other_user_id = 99999
         TelegramUser.objects.create(telegram_user_id=other_user_id, username="other")
         ad = AdRequest.objects.create(
-            content="Other user ad",
+            content="آگهی کاربر دیگر",
             category=Category.objects.get(slug='other'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=other_user_id,
@@ -427,7 +413,7 @@ class ConversationEngineTests(TestCase):
     def test_resubmit_full_flow_creates_new_ad_and_marks_original_solved(self):
         user = TelegramUser.objects.create(telegram_user_id=12345, username="u")
         original = AdRequest.objects.create(
-            content="Rejected content",
+            content="محتوا رد شده",
             category=Category.objects.get(slug='rent'),
             status=AdRequest.Status.REJECTED,
             telegram_user_id=12345,
@@ -440,7 +426,7 @@ class ConversationEngineTests(TestCase):
         self.engine.process_update(session, text=f"/start resubmit_{original.uuid}")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.RESUBMIT_EDIT)
-        self.engine.process_update(session, text="New revised ad text")
+        self.engine.process_update(session, text="متن اصلاح شده جدید")
         session.refresh_from_db()
         self.assertEqual(session.state, TelegramSession.State.RESUBMIT_CONFIRM)
         self.engine.process_update(session, callback_data="confirm_yes")
@@ -450,7 +436,7 @@ class ConversationEngineTests(TestCase):
         self.assertEqual(original.status, AdRequest.Status.SOLVED)
         new_ads = AdRequest.objects.filter(telegram_user_id=12345, bot=self.bot).exclude(uuid=original.uuid)
         self.assertEqual(new_ads.count(), 1)
-        self.assertEqual(new_ads.get().content, "New revised ad text")
+        self.assertEqual(new_ads.get().content, "متن اصلاح شده جدید")
         self.assertEqual(new_ads.get().category.slug if new_ads.get().category else None, "rent")
 
 
@@ -472,7 +458,7 @@ class SubmitAdServiceTests(TestCase):
 
     def test_submit_creates_ad(self):
         ad = SubmitAdService.submit(
-            content="Test ad",
+            content="آگهی تست",
             category=Category.objects.get(slug='other'),
             telegram_user_id=999,
             bot=self.bot,
@@ -480,7 +466,7 @@ class SubmitAdServiceTests(TestCase):
             contact_snapshot={"phone": "+989123456789", "email": "", "verified_phone": False, "verified_email": False},
         )
         self.assertIsNotNone(ad)
-        self.assertEqual(ad.content, "Test ad")
+        self.assertEqual(ad.content, "آگهی تست")
         self.assertEqual(ad.category.slug if ad.category else None, "other")
         self.assertEqual(ad.telegram_user_id, 999)
         self.assertEqual(ad.bot_id, self.bot.pk)

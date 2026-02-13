@@ -139,8 +139,8 @@ def prepare_text(text: str, *, is_phone: bool = False, config=None) -> str:
 
     For phone numbers (is_phone=True):
         - Convert Persian/Arabic digits to Western (0-9)
-        - Skip reshaping and BiDi (phone numbers are always LTR)
-        - Result rendered with English font
+        - No reshaping, no BiDi, no RTL — numbers stay strictly LTR
+        - Result rendered with _load_english_font only
     """
     if not text:
         return ""
@@ -169,12 +169,14 @@ def _load_font(ImageFont, size: int):
 def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     """
     Load a Latin/English TrueType font for the Phone layer.
+    Prefers bold system fonts (Arial Bold, Trebuchet MS Bold) for clear, heavy digits.
 
     Search order:
     1. Explicit override path (from coordinates JSON).
-    2. Project fonts: media/ad_templates/fonts/English.ttf, Roboto.ttf, etc.
-    3. System fonts: Arial, Segoe UI (Windows), DejaVuSans (Linux).
-    4. Pillow default.
+    2. Bold system fonts: arialbd.ttf, trebucbd.ttf (Windows).
+    3. Project fonts: English.ttf, Roboto.ttf, etc.
+    4. Regular system fonts: Arial, Segoe UI, DejaVuSans.
+    5. Pillow default.
     """
     paths: list[Path] = []
     base_dir = Path(settings.BASE_DIR)
@@ -186,6 +188,13 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
         p = _resolve_absolute(Path(font_path_override))
         paths.append(p)
 
+    import platform
+    # Prefer bold system fonts for phone numbers (clear, heavy digits)
+    if platform.system() == "Windows":
+        win_fonts = Path("C:/Windows/Fonts")
+        for name in ["arialbd.ttf", "trebucbd.ttf", "segoeuib.ttf", "calibrib.ttf"]:
+            paths.append(win_fonts / name)
+
     # Project English fonts
     english_font_names = ["English.ttf", "Roboto.ttf", "Inter.ttf", "OpenSans.ttf"]
     search_dirs = [
@@ -196,22 +205,20 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
         for name in english_font_names:
             paths.append(d / name)
 
-    # System fonts (common locations)
-    import platform
+    # Regular system fonts
     if platform.system() == "Windows":
         win_fonts = Path("C:/Windows/Fonts")
-        for name in ["arial.ttf", "segoeui.ttf", "calibri.ttf", "verdana.ttf"]:
+        for name in ["arial.ttf", "segoeui.ttf", "calibri.ttf", "verdana.ttf", "trebuc.ttf"]:
             paths.append(win_fonts / name)
     else:
-        # Linux / macOS
         linux_dirs = [
             Path("/usr/share/fonts/truetype/dejavu"),
             Path("/usr/share/fonts/truetype/liberation"),
             Path("/usr/share/fonts/TTF"),
-            Path("/System/Library/Fonts"),  # macOS
+            Path("/System/Library/Fonts"),
         ]
         for d in linux_dirs:
-            for name in ["DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]:
+            for name in ["DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]:
                 paths.append(d / name)
 
     paths.append(base_dir / "static" / "fonts" / "DejaVuSans.ttf")
@@ -272,26 +279,26 @@ def draw_spaced_text(
     y: int,
     align: str = "center",
     area_width: int | None = None,
-    spacing_px: int = 3,
+    spacing_px: int = 12,
     bold: bool = False,
 ):
     """
-    Draw text character-by-character with custom inter-character spacing.
+    Draw text character-by-character with custom inter-character spacing (kerning).
 
     Pillow's draw.text() has no letter-spacing option. This function manually
     draws each character and shifts the cursor by (char_advance + spacing_px),
-    producing a "tracked" / "kerned" look that's more readable for phone numbers.
+    producing a clear, professional look for phone numbers (default 12px spacing).
 
     Args:
         draw_obj: PIL ImageDraw instance.
         text: The string to draw (already normalized — e.g. Western digits).
         font: PIL ImageFont (TrueType) instance.
-        color: Fill color tuple, e.g. (19, 17, 17).
+        color: Fill color tuple, e.g. (19, 17, 17) for #131111.
         x: Left edge of the drawing area.
         y: Top Y position of the text baseline.
         align: "center", "left", or "right" — controls positioning within area_width.
         area_width: Width of the area to align within. If None, uses total text width.
-        spacing_px: Extra pixels added between each character (default 3).
+        spacing_px: Extra pixels between each character (default 12 for phone readability).
         bold: If True, applies stroke for bold simulation.
     """
     if not text:
@@ -636,12 +643,13 @@ def create_ad_image(
         bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=desc_stroke_w)
         desc_y += (bbox[3] - bbox[1]) + 6
 
-    # ── Phone Layer (English font, LTR, Western digits) ──
+    # ── Phone Layer: English font only, LTR, Western digits, no RTL/shaping ──
+    # Large size (default 130), generous letter spacing (10–15px), dark color (#131111).
     p_conf = coords.get("phone", {})
     phone_font = _load_english_font(
         p_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(p_conf.get("size"), default=50, minimum=1, maximum=400),
+        _coerce_int(p_conf.get("size"), default=130, minimum=120, maximum=400),
     )
     phone_color = _hex_to_rgb(p_conf.get("color") or "#131111")
     phone_x = _coerce_int(p_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
@@ -651,9 +659,9 @@ def create_ad_image(
         phone_align = "center"
     phone_max_w = _coerce_int(p_conf.get("max_width"), default=550, minimum=1, maximum=img.width * 2)
     phone_bold = bool(p_conf.get("bold", True))
-    phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=1, minimum=0, maximum=20)
-    # Phone numbers: normalize digits to Western (0-9) and do NOT apply
-    # Persian reshaping/bidi — phone numbers are always LTR.
+    # Kerning: 10–15px between digits for readability (avoid squashed look)
+    phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=12, minimum=10, maximum=25)
+    # Strict: is_phone=True — no reshaping, no RTL; numbers stay LTR
     phone_text = prepare_text(phone or "", is_phone=True)
     if phone_text:
         draw_spaced_text(

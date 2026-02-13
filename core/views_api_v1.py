@@ -12,6 +12,8 @@ from django.shortcuts import get_object_or_404
 from core.models import AdRequest, Category, SiteConfiguration
 from core.view_utils import get_request_payload
 from core.services import clean_ad_text, run_ai_moderation
+from core.validators import validate_ad_content
+from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,11 @@ def api_v1_submit(request):
         if not content:
             return JsonResponse({'error': 'Validation error', 'message': 'content is required.'}, status=400)
         content = clean_ad_text(content)
+        try:
+            validate_ad_content(content)
+        except ValidationError as e:
+            msg = e.messages[0] if e.messages else 'Invalid content.'
+            return JsonResponse({'error': 'Validation error', 'message': msg}, status=400)
         slug = (data.get('category') or 'other').strip()
         valid = _get_valid_category_slugs()
         if slug not in valid:

@@ -17,6 +17,7 @@ from django.db import models
 from django.utils import timezone
 
 from .encryption import decrypt_token, encrypt_token, mask_token
+from .validators import validate_ad_content_length, validate_ad_content_persian
 
 
 def default_workflow_stages():
@@ -513,7 +514,9 @@ class AdRequest(models.Model):
         default=Status.PENDING_AI,
         db_index=True
     )
-    content = models.TextField()
+    content = models.TextField(
+        validators=[validate_ad_content_length, validate_ad_content_persian]
+    )
     rejection_reason = models.TextField(blank=True)
     ai_suggested_reason = models.TextField(blank=True)
     telegram_user_id = models.BigIntegerField(null=True, blank=True)
@@ -1003,7 +1006,8 @@ def default_adtemplate_coordinates():
     Keys:
       - category: {x, y, size, color, font_path, align, bold}
       - description: {x, y, size, color, font_path, max_width, align, bold}
-      - phone: {x, y, size, color, font_path, align, bold}
+      - phone: {x, y, size, color, font_path, align, bold, letter_spacing}
+        Phone: size default 130, letter_spacing 10–15px, color #131111; English font only.
     """
     return {
         'category': {
@@ -1028,13 +1032,14 @@ def default_adtemplate_coordinates():
         },
         'phone': {
             'x': 250,
-            'y': 1150,
-            'size': 50,
+            'y': 1100,
+            'size': 130,
             'color': '#131111',
             'font_path': '',
             'max_width': 550,
             'align': 'center',
             'bold': True,
+            'letter_spacing': 12,
         },
     }
 

@@ -127,7 +127,10 @@ def approve_one_ad(ad: AdRequest, edited_content: str | None = None, approved_by
     approved_by: optional User instance for audit logging (who approved and when).
     """
     if edited_content is not None:
-        ad.content = clean_ad_text(edited_content)
+        from core.validators import validate_ad_content
+        cleaned = clean_ad_text(edited_content)
+        validate_ad_content(cleaned)
+        ad.content = cleaned
     ad.status = AdRequest.Status.APPROVED
     ad.approved_at = timezone.now()
     ad.rejection_reason = ""

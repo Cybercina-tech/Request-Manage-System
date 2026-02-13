@@ -15,10 +15,13 @@ except ImportError:
 
 from django.urls import reverse
 
+from django.core.exceptions import ValidationError
+
 from core.i18n import get_message
 from core.models import TelegramSession, TelegramBot, AdRequest, Category, TelegramUser, SiteConfiguration
 from core.services.submit_ad_service import SubmitAdService
 from core.services.users import update_contact_info
+from core.validators import validate_ad_content_with_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +270,13 @@ class ConversationEngine:
                 return self._reply_enter_content(session, edit_previous=edit_previous, message_id=message_id)
             if contains_emoji(text):
                 return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=True)
-            session.context["content"] = text.strip()[:4000]
+            content_stripped = text.strip()
+            valid, error_key = validate_ad_content_with_feedback(content_stripped)
+            if not valid and error_key:
+                return self._reply_ad_content_validation_custom(
+                    session, error_key, edit_previous, message_id
+                )
+            session.context["content"] = content_stripped[:80]
             session.state = TelegramSession.State.CONFIRM
             session.save(update_fields=["state", "context", "last_activity"])
             logger.info("conversation state session_id=%s ENTER_CONTENT → CONFIRM", session.pk)
@@ -322,7 +331,11 @@ class ConversationEngine:
 
         if session.state == TelegramSession.State.ENTER_EMAIL:
             if callback_data == "email_skip":
-                ad = self._do_submit(session)
+                try:
+                    ad = self._do_submit(session)
+                except ValidationError as e:
+                    code = e.error_list[0].code if e.error_list else "ad_content_not_persian"
+                    return self._reply_ad_content_validation_custom(session, code, edit_previous, message_id)
                 if ad:
                     session.state = TelegramSession.State.SUBMITTED
                     session.context = {}
@@ -335,14 +348,17 @@ class ConversationEngine:
                     if telegram_user:
                         update_contact_info(telegram_user, email=text.strip())
                     ad = self._do_submit(session)
-                    if ad:
-                        session.state = TelegramSession.State.SUBMITTED
-                        session.context = {}
-                        session.save(update_fields=["state", "context", "last_activity"])
-                        return self._reply_submitted(session)
-                    return self._reply_error_generic(session)
+                except ValidationError as e:
+                    code = e.error_list[0].code if e.error_list else "ad_content_not_persian"
+                    return self._reply_ad_content_validation_custom(session, code, edit_previous, message_id)
                 except ValueError:
                     return self._reply_invalid_email(session)
+                if ad:
+                    session.state = TelegramSession.State.SUBMITTED
+                    session.context = {}
+                    session.save(update_fields=["state", "context", "last_activity"])
+                    return self._reply_submitted(session)
+                return self._reply_error_generic(session)
             # Re-prompt: invalid email shows short message; empty shows full prompt with Skip button
             return self._reply_ask_email(session, after_contact=False)
 
@@ -352,7 +368,13 @@ class ConversationEngine:
             if text and text.strip():
                 if contains_emoji(text):
                     return self._reply_ad_content_validation_error(session, edit_previous, message_id, state_enter_content=False)
-                session.context["content"] = text.strip()[:4000]
+                content_stripped = text.strip()
+                valid, error_key = validate_ad_content_with_feedback(content_stripped)
+                if not valid and error_key:
+                    return self._reply_ad_content_validation_custom(
+                        session, error_key, edit_previous, message_id
+                    )
+                session.context["content"] = content_stripped[:80]
                 session.state = TelegramSession.State.RESUBMIT_CONFIRM
                 session.save(update_fields=["state", "context", "last_activity"])
                 return self._reply_resubmit_confirm(session, edit_previous, message_id)
@@ -361,7 +383,11 @@ class ConversationEngine:
 
         if session.state == TelegramSession.State.RESUBMIT_CONFIRM:
             if callback_data == "confirm_yes":
-                ad, error_response = self._do_resubmit(session)
+                try:
+                    ad, error_response = self._do_resubmit(session)
+                except ValidationError as e:
+                    code = e.error_list[0].code if e.error_list else "ad_content_not_persian"
+                    return self._reply_ad_content_validation_custom(session, code, edit_previous, message_id)
                 if error_response is not None:
                     return error_response
                 if ad:
@@ -718,6 +744,27 @@ class ConversationEngine:
         """
         lang = session.language or "en"
         text = get_message("ad_content_validation_error", lang)
+        back_label = get_message("btn_back_to_home", lang)
+        reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
+        out = {"text": text, "reply_markup": reply_markup}
+        if edit_previous and message_id is not None:
+            out["edit_previous"] = True
+            out["message_id"] = message_id
+        return out
+
+    def _reply_ad_content_validation_custom(
+        self,
+        session: TelegramSession,
+        error_key: str,
+        edit_previous: bool = False,
+        message_id: int | None = None,
+    ) -> dict:
+        """
+        Send validation error for length or Persian-only. error_key: ad_content_too_long | ad_content_not_persian.
+        Message is bilingual (FA + EN) per user request.
+        """
+        lang = session.language or "en"
+        text = get_message(error_key, lang)
         back_label = get_message("btn_back_to_home", lang)
         reply_markup = {"inline_keyboard": [[{"text": back_label, "callback_data": "back_to_home"}]]}
         out = {"text": text, "reply_markup": reply_markup}
