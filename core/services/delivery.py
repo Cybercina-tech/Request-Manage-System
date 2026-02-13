@@ -21,6 +21,12 @@ from core.models import (
 )
 
 logger = logging.getLogger(__name__)
+_log_bot = logging.getLogger('core.instagram.bot')
+
+
+def _log_instagram_bot(status: str, target: str, ad_uuid, detail: str = ''):
+    """Write one line to bot_log.txt for Instagram post/story success or failure."""
+    _log_bot.info('Instagram %s %s ad=%s %s', status, target, ad_uuid, detail)
 
 
 class DeliveryService:
@@ -371,11 +377,13 @@ class DeliveryService:
         if not ensure_feed_image(ad):
             if log:
                 log.error_message = 'Feed image generation or save failed.'
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'image generation or save failed')
             return False
         image_url = get_absolute_media_url(ad.generated_image)
         if not image_url or not image_url.startswith('http'):
             if log:
                 log.error_message = 'Feed image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'image URL not public')
             return False
         logger.info('Sending Feed URL to Instagram: %s', image_url)
         caption = InstagramService.format_caption(ad, lang='fa')
@@ -384,12 +392,14 @@ class DeliveryService:
             msg = result.get('message', 'Container creation failed')[:500]
             if log:
                 log.error_message = msg
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, msg)
             return False
         pub = publish_media(result['creation_id'])
         if not pub.get('success'):
             msg = pub.get('message', 'Publish failed')[:500]
             if log:
                 log.error_message = msg
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, msg)
             return False
         media_id = pub.get('id', '')
         if log:
@@ -397,6 +407,7 @@ class DeliveryService:
         ad.instagram_post_id = media_id
         ad.is_instagram_published = True
         ad.save(update_fields=['instagram_post_id', 'is_instagram_published'])
+        _log_instagram_bot('SUCCESS', 'Feed', ad.uuid, f'media_id={media_id}')
         return True
 
     # ------------------------------------------------------------------
@@ -415,10 +426,12 @@ class DeliveryService:
 
         if not ensure_story_image(ad):
             log.error_message = 'Story image generation or save failed.'
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'image generation or save failed')
             return False
         story_url = get_absolute_media_url(ad.generated_story_image)
         if not story_url or not story_url.startswith('http'):
             log.error_message = 'Story image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'image URL not public')
             return False
         logger.info('Sending Story URL to Instagram: %s', story_url)
         try:
@@ -427,6 +440,7 @@ class DeliveryService:
                 msg = container.get("message", "Container creation failed")[:500]
                 log.error_message = msg
                 logger.warning("_send_instagram_story: container failed ad=%s: %s", ad.uuid, msg)
+                _log_instagram_bot('FAILED', 'Story', ad.uuid, msg)
                 return False
             pub = publish_media(container["creation_id"])
             if pub.get("success"):
@@ -436,14 +450,17 @@ class DeliveryService:
                 ad.is_instagram_published = True
                 ad.save(update_fields=['instagram_story_id', 'is_instagram_published'])
                 logger.info("_send_instagram_story: published for ad %s", ad.uuid)
+                _log_instagram_bot('SUCCESS', 'Story', ad.uuid, f'media_id={media_id}')
                 return True
             msg = pub.get("message", "Publish failed")[:500]
             log.error_message = msg
             logger.warning("_send_instagram_story: publish failed ad=%s: %s", ad.uuid, msg)
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, msg)
             return False
         except Exception as exc:
             log.error_message = str(exc)[:500]
             logger.exception("_send_instagram_story: crash ad=%s: %s", ad.uuid, exc)
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, str(exc)[:200])
             return False
 
     # ------------------------------------------------------------------

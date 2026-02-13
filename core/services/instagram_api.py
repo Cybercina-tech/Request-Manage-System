@@ -140,9 +140,11 @@ def post_to_instagram(
 ) -> dict:
     """
     Post image to Instagram via Graph API.
+    Uses public absolute URL (e.g. https://request.iraniu.uk/media/...) so Meta can fetch the image.
+    Feed posts must use generated_image; Stories must use generated_story_image (caller responsibility).
 
-    - Feed: square/portrait image with caption
-    - Story: 9:16 image, no caption (Graph API does not support caption on Stories)
+    - Feed: square/portrait image with caption (image_path → generated_image)
+    - Story: 9:16 image, no caption (image_path → generated_story_image)
 
     Args:
         image_path: Absolute filesystem path to image (PNG/JPEG)
@@ -152,15 +154,19 @@ def post_to_instagram(
     Returns:
         dict with keys: success (bool), message (str), id (media_id if success)
     """
+    logger_bot = logging.getLogger('core.instagram.bot')
     ig_user_id, token = _get_credentials()
     if not ig_user_id or not token:
+        logger_bot.warning('Instagram post FAILED: not configured (set credentials or run set_instagram_token)')
         return {'success': False, 'message': 'Instagram not configured (set credentials in Settings)'}
 
     image_url = _path_to_public_url(image_path)
     if not image_url:
+        logger_bot.warning('Instagram post FAILED: image path not accessible or not under MEDIA_ROOT')
         return {'success': False, 'message': 'Image path not accessible or not under MEDIA_ROOT'}
 
     if not image_url.startswith('http'):
+        logger_bot.warning('Instagram post FAILED: INSTAGRAM_BASE_URL must be set for public image URL')
         return {'success': False, 'message': 'INSTAGRAM_BASE_URL must be set for public image URL'}
 
     caption = (caption or '')[:2200] if not is_story else ''
@@ -197,6 +203,7 @@ def post_to_instagram(
             pub = r2.json()
             media_id = pub.get('id')
             logger.info('Instagram post: media_id=%s is_story=%s', media_id, is_story)
+            logger_bot.info('Instagram post SUCCESS: media_id=%s is_story=%s image_url=%s', media_id, is_story, image_url[:80])
             return {'success': True, 'message': 'Published', 'id': media_id}
         except requests.RequestException as e:
             last_error = e
@@ -220,6 +227,7 @@ def post_to_instagram(
                 error_code = err_resp.json().get('error', {}).get('code')
             except Exception:
                 pass
+    logger_bot.warning('Instagram post FAILED: %s', msg[:300])
     try:
         from core.notifications import send_notification
         notif_msg = f'Instagram post failed: {msg}'

@@ -267,10 +267,23 @@ LOGGING = {
             'formatter': 'verbose',
             'encoding': 'utf-8',
         },
+        'bot_log_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': str(LOGS_DIR / 'bot_log.txt'),
+            'maxBytes': 2 * 1024 * 1024,  # 2 MB
+            'backupCount': 2,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
     },
     'loggers': {
         'core.services.instagram': {
             'handlers': ['console', 'instagram_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'core.instagram.bot': {
+            'handlers': ['bot_log_file', 'console'],
             'level': 'INFO',
             'propagate': False,
         },
