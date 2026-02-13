@@ -33,11 +33,13 @@ logger = logging.getLogger(__name__)
 # Default template background (used when AdTemplate has no background_image)
 DEFAULT_TEMPLATE_IMAGE_REL = "static/images/default_template/Template.png"
 
-# ── Persian font for Category and Description (Farsi text) ──
-# Search order: static/fonts/Persian.ttf (recommended), then project root Persian.ttf.
+# ── Banner font for Category and Description (Farsi text): Yekan.ttf ──
+# Search order: static/fonts/Yekan.ttf (recommended), then root; fallback Persian.ttf.
 def _get_persian_font_path():
     base = Path(settings.BASE_DIR)
     for candidate in [
+        base / "static" / "fonts" / "Yekan.ttf",
+        base / "Yekan.ttf",
         base / "static" / "fonts" / "Persian.ttf",
         base / "Persian.ttf",
     ]:
@@ -48,8 +50,9 @@ def _get_persian_font_path():
 
 PERSIAN_FONT_PATH = _get_persian_font_path()
 assert PERSIAN_FONT_PATH, (
-    "FATAL: Persian.ttf not found.\n"
-    "Place Persian.ttf in static/fonts/ (recommended) or in the project root.\n"
+    "FATAL: Banner font not found.\n"
+    "Place Yekan.ttf in static/fonts/ (recommended) or in the project root.\n"
+    "Fallback: Persian.ttf in static/fonts/ or project root.\n"
     "Image generation for category and message text cannot proceed without it."
 )
 
@@ -132,7 +135,7 @@ def prepare_text(text: str, *, is_phone: bool = False, config=None) -> str:
     For Farsi text (is_phone=False):
         - When config.use_arabic_reshaper: reshape via arabic_reshaper + bidi
         - Otherwise: return raw text
-        - Result rendered with Persian.ttf
+        - Result rendered with Yekan.ttf (banner font)
 
     For phone numbers (is_phone=True):
         - Convert Persian/Arabic digits to Western (0-9)
@@ -155,15 +158,11 @@ def _resolve_absolute(p: Path) -> Path:
 
 def _load_font(ImageFont, size: int):
     """
-    Load Persian.ttf from the hard-linked PERSIAN_FONT_PATH.
-    Used for Category and Description layers (Farsi text).
-
-    No searching.  No fallback.  No Pillow default.
-    If the font cannot be loaded, the error propagates and image
-    generation stops — we NEVER render white boxes.
+    Load banner font (Yekan.ttf or Persian.ttf) for Category and Description (Farsi text).
+    Phone numbers use _load_english_font.
     """
     font = ImageFont.truetype(PERSIAN_FONT_PATH, size)
-    logger.debug("Loaded Persian font: %s (size %d)", PERSIAN_FONT_PATH, size)
+    logger.debug("Loaded banner font: %s (size %d)", PERSIAN_FONT_PATH, size)
     return font
 
 
@@ -597,7 +596,7 @@ def create_ad_image(
             stroke_width=stroke_w, stroke_fill=color,
         )
 
-    # ── Category Layer (Persian.ttf — Vazirmatn Regular, reshape+bidi) ──
+    # ── Category Layer (Yekan.ttf / banner font, reshape+bidi) ──
     c_conf = coords.get("category", {})
     cat_font = _load_font(
         ImageFont,
@@ -615,7 +614,7 @@ def create_ad_image(
     if cat_text:
         _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=cat_bold)
 
-    # ── Description Layer (Persian.ttf — Vazirmatn Regular, reshape+bidi, multi-line) ──
+    # ── Description Layer (Yekan.ttf / banner font, reshape+bidi, multi-line) ──
     d_conf = coords.get("description", {})
     desc_font = _load_font(
         ImageFont,

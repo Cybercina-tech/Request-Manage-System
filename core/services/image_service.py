@@ -40,9 +40,9 @@ def _hex_to_rgb(hex_color: str):
 
 
 def _persian_font_path():
-    """Path to Persian.ttf for category and message text (static/fonts preferred)."""
+    """Path to banner font (Yekan.ttf) for category and message text."""
     base = Path(settings.BASE_DIR)
-    for rel in ["static/fonts/Persian.ttf", "Persian.ttf"]:
+    for rel in ["static/fonts/Yekan.ttf", "Yekan.ttf", "static/fonts/Persian.ttf", "Persian.ttf"]:
         p = base / rel
         if p.exists():
             return str(p)
@@ -50,7 +50,7 @@ def _persian_font_path():
 
 
 def _load_persian_font(ImageFont, size: int):
-    """Load Persian.ttf for category and ad text (Farsi). Fails if not found."""
+    """Load Yekan.ttf (banner font) for category and ad text (Farsi). Fallback: Persian, Vazir, Samim."""
     path = _persian_font_path()
     if path:
         return ImageFont.truetype(path, size)

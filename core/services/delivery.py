@@ -209,16 +209,13 @@ class DeliveryService:
         # ---- Phone ----
         phone = DeliveryService._get_ad_phone(ad)
 
-        # ---- Channel handle & bot username (from SiteConfiguration) ----
+        # ---- Channel handle & bot username for caption (use @iraniu_bot in caption) ----
         config = SiteConfiguration.get_config()
         channel_handle = (getattr(config, "telegram_channel_handle", "") or "").strip()
-        bot_username = (getattr(config, "telegram_bot_username", "") or "").strip()
         if not channel_handle:
             channel_handle = "@iraniu_bot"
-        if not bot_username:
-            bot_username = "iraniu_bot"
-        # Ensure @ prefix for display
-        bot_display = bot_username if bot_username.startswith("@") else f"@{bot_username}"
+        # Telegram caption always shows @iraniu_bot (not @Iraniu_ads_bot)
+        bot_display = "@iraniu_bot"
 
         # ---- Assemble HTML caption ----
         lines = [

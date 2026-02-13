@@ -35,8 +35,10 @@ def _ensure_pillow():
 
 
 def _find_font(ImageFont, size: int, prefer_persian: bool = True):
-    """Find best font for Persian text: Persian.ttf (static/fonts), then Vazir/Samim, else fallback."""
+    """Find banner font for Persian text: Yekan.ttf first, then Persian, Vazir/Samim, else fallback."""
     persian_paths = [
+        str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Yekan.ttf'),
+        str(Path(settings.BASE_DIR) / 'Yekan.ttf'),
         str(Path(settings.BASE_DIR) / 'static' / 'fonts' / 'Persian.ttf'),
         str(Path(settings.BASE_DIR) / 'Persian.ttf'),
         '/usr/share/fonts/truetype/vazir/Vazir.ttf',
