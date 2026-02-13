@@ -57,19 +57,29 @@ def _ensure_deps():
 # ── Nuclear Persian text shaping ─────────────────────────────────────
 # No dependency passing, no fallback.  Imports directly; fails loud.
 
-def _shape_persian(text: str) -> str:
+def _shape_persian(text: str, config=None) -> str:
     """
     Process Persian/Arabic text for Pillow rendering.
 
+    When config.use_arabic_reshaper is False, returns raw text (for modern fonts/browsers
+    that render RTL correctly without manual reshaping).
+
+    When enabled:
     1. arabic_reshaper with strict Persian configuration:
        connects isolated letters into proper presentation forms.
     2. bidi get_display: reverses visual order for RTL so Pillow
        draws left-to-right correctly.
 
-    Raises ImportError if arabic-reshaper / python-bidi are missing.
+    Raises ImportError if arabic-reshaper / python-bidi are missing (when reshaping is enabled).
     """
     if not text:
         return ""
+
+    if config is None:
+        from core.models import SiteConfiguration
+        config = SiteConfiguration.get_config()
+    if not getattr(config, 'use_arabic_reshaper', True):
+        return text  # Return raw Persian text (for modern fonts/browsers)
 
     import arabic_reshaper
     from bidi.algorithm import get_display
@@ -105,13 +115,13 @@ def _normalize_to_western_digits(text: str) -> str:
     return text.translate(table)
 
 
-def prepare_text(text: str, *, is_phone: bool = False) -> str:
+def prepare_text(text: str, *, is_phone: bool = False, config=None) -> str:
     """
     Unified "smart text" helper for the image engine.
 
     For Farsi text (is_phone=False):
-        - Reshape letters via arabic_reshaper (isolated → connected)
-        - Apply BiDi algorithm (RTL visual reordering)
+        - When config.use_arabic_reshaper: reshape via arabic_reshaper + bidi
+        - Otherwise: return raw text
         - Result rendered with Persian.ttf
 
     For phone numbers (is_phone=True):
@@ -123,7 +133,7 @@ def prepare_text(text: str, *, is_phone: bool = False) -> str:
         return ""
     if is_phone:
         return _normalize_to_western_digits(text).strip()
-    return _shape_persian(text)
+    return _shape_persian(text, config)
 
 
 def _resolve_absolute(p: Path) -> Path:

@@ -12,7 +12,7 @@ register = template.Library()
 def persian_display(text):
     """
     Reshape Persian/Arabic text for correct RTL display using arabic_reshaper + bidi.
-    Use for user-generated or bilingual content in templates.
+    Respects SiteConfiguration.use_arabic_reshaper — when OFF, returns raw text.
 
     Uses the same configured reshaper as the image engine for consistency.
     """

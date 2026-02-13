@@ -195,6 +195,7 @@ class DesignDefaultsForm(forms.ModelForm):
             "default_accent_color",
             "default_watermark",
             "default_watermark_opacity",
+            "use_arabic_reshaper",
         )
         widgets = {
             "default_font": forms.Select(attrs={"class": "form-select form-control"}),
@@ -211,6 +212,7 @@ class DesignDefaultsForm(forms.ModelForm):
             "default_watermark_opacity": forms.NumberInput(
                 attrs={"class": "form-control", "min": 0, "max": 100, "type": "range", "step": 1}
             ),
+            "use_arabic_reshaper": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
 
     def __init__(self, font_choices=None, *args, **kwargs):

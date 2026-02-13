@@ -511,6 +511,12 @@ body.theme-light {
   background: rgba(59, 130, 246, 0.08) !important;
 }
 
+/* Ad content box: RTL for Persian/Arabic — raw content, browser handles display */
+.ad-content-box {
+  direction: rtl;
+  unicode-bidi: plaintext;
+}
+
 /* Light theme: ad detail content box (avoid pure black) */
 .theme-light .ad-content-box.bg-dark {
   background-color: #F8FAFC !important;

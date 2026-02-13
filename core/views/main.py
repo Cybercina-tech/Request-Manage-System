@@ -260,6 +260,7 @@ def ad_detail(request, uuid):
     Request Detail: ad content (read-only display), client info (read-only),
     predefined rejection dropdown, approve with confirmation / reject with reason.
     Passes client (TelegramUser), rejection reasons list, and AI suggested reason for template.
+    For approved ads, generates and displays the exact image that will be sent to Telegram.
     """
     ad = get_object_or_404(AdRequest, uuid=uuid)
     # Client: linked TelegramUser (ad.user) or lookup by telegram_user_id for read-only display
@@ -268,10 +269,20 @@ def ad_detail(request, uuid):
         client = ad.user
     elif ad.telegram_user_id:
         client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
+
+    preview_image_url = None
+    if ad.status == AdRequest.Status.APPROVED:
+        from core.services.image_engine import generate_ad_image
+        from core.services.instagram_api import _path_to_public_url
+        feed_path = generate_ad_image(ad, is_story=False)
+        if feed_path:
+            preview_image_url = _path_to_public_url(feed_path)
+
     context = {
         'ad': ad,
         'client': client,
         'ai_suggested_reason': ad.ai_suggested_reason or '',
+        'preview_image_url': preview_image_url,
     }
     return render(request, 'core/ad_detail.html', context)
 
@@ -398,25 +409,21 @@ def preview_publish(request, uuid):
             messages.error(request, 'Distribution failed. Check logs and channel/bot configuration.')
         return redirect('ad_detail', uuid=ad.uuid)
 
-    # GET: build preview data (same logic as post_manager.distribute_ad)
-    from core.services.image_engine import create_ad_image
+    # GET: build preview data (same logic as post_manager.distribute_ad — same image as Telegram)
+    from core.services.image_engine import generate_ad_image
     from core.services.instagram_api import _path_to_public_url
     from core.services.instagram import InstagramService
     from core.services.post_manager import get_default_channel
 
-    category = ad.get_category_display() if hasattr(ad, 'get_category_display') else (ad.category.name if ad.category else 'Other')
+    feed_path = generate_ad_image(ad, is_story=False)
+    preview_image_url = _path_to_public_url(feed_path) if feed_path else None
+
+    category = (getattr(ad.category, 'name_fa', '') or (ad.category.name if ad.category else '')) or (ad.get_category_display() if hasattr(ad, 'get_category_display') else 'Other')
     text = (ad.content or '').strip()
     contact = getattr(ad, 'contact_snapshot', None) or {}
     phone = (contact.get('phone') or '').strip() if isinstance(contact, dict) else ''
     if not phone and getattr(ad, 'user_id', None) and ad.user:
         phone = (ad.user.phone_number or '').strip()
-
-    preview_image_url = None
-    template = AdTemplate.objects.filter(is_active=True).first()
-    if template:
-        feed_path = create_ad_image(template.pk, category, text, phone)
-        preview_image_url = _path_to_public_url(feed_path) if feed_path else None
-
     caption_preview = InstagramService.format_caption(ad, lang='fa')
     telegram_caption = f"{category}\n\n{text}"
     if phone:
@@ -662,6 +669,8 @@ def settings_save(request):
     config.auto_responder_message = (data.get('auto_responder_message') or config.auto_responder_message).strip()
     config.auto_reply_comments = data.get('auto_reply_comments') == 'on'
     config.auto_reply_dms = data.get('auto_reply_dms') == 'on'
+    if 'use_arabic_reshaper' in data:
+        config.use_arabic_reshaper = data.get('use_arabic_reshaper') == 'on'
     raw_stages = data.get('workflow_stages_json')
     if raw_stages:
         try:

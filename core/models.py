@@ -141,6 +141,11 @@ class SiteConfiguration(models.Model):
         default='',
         help_text='CSRF state token for in-progress Instagram OAuth flow.',
     )
+    # Persian/Arabic text shaping
+    use_arabic_reshaper = models.BooleanField(
+        default=True,
+        help_text='When ON, use arabic_reshaper+bidi for Persian text in images and templates. Turn OFF if text looks garbled (modern fonts/browsers often render RTL correctly without it).',
+    )
     # UI — Professional Light Theme (default) or Dark
     theme_preference = models.CharField(
         max_length=16,

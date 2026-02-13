@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static iraniu_tags %}
+{% load static %}
 {# Request Detail: ad info, client info (read-only), approve/reject via dedicated confirmation pages. #}
 
 {% block title %}Request {{ ad.uuid }}{% endblock %}
@@ -42,7 +42,13 @@
   <div class="col-lg-7">
     <div class="card-soul h-100">
       <h5 class="text-muted mb-3"><i class="fa-solid fa-file-lines icon" aria-hidden="true"></i> Ad content</h5>
-      <div class="ad-content-box bg-dark border border-secondary rounded p-3" style="max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{ ad.content|persian_display }}</div>
+      {% if preview_image_url %}
+      <div class="mb-3">
+        <p class="text-muted small mb-2">Preview (exact image sent to Telegram)</p>
+        <img src="{{ preview_image_url }}" alt="Ad preview" class="img-fluid rounded border shadow-sm" style="max-height: 400px; object-fit: contain;">
+      </div>
+      {% endif %}
+      <div class="ad-content-box bg-dark border border-secondary rounded p-3" style="max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{ ad.content|default:"" }}</div>
       {% if ad.ai_suggested_reason %}
       <div class="alert alert-warning border border-warning mt-3 mb-0">
         <strong><i class="fa-solid fa-robot icon" aria-hidden="true"></i> AI suggested rejection:</strong>

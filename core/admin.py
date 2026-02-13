@@ -84,6 +84,10 @@ class SiteConfigurationAdmin(admin.ModelAdmin):
             'fields': ('is_instagram_enabled', 'instagram_app_id', 'instagram_business_id', 'facebook_access_token_encrypted'),
             'description': 'is_instagram_enabled is auto-managed: it becomes True when all required Instagram fields are filled.',
         }),
+        ('Text rendering (Persian/Arabic)', {
+            'fields': ('use_arabic_reshaper',),
+            'description': 'When ON, use arabic_reshaper+bidi for Persian text. Turn OFF if text looks garbled in some fonts/browsers.',
+        }),
     )
     filter_horizontal = ()
     raw_id_fields = ['default_telegram_bot']

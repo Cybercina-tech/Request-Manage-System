@@ -45,6 +45,13 @@
         {% if config.default_watermark %}<p class="small text-muted mt-1">Current: {{ config.default_watermark.name }}</p>{% endif %}
       </div>
       <div class="col-12">
+        <div class="form-check">
+          <input type="checkbox" class="form-check-input" name="use_arabic_reshaper" id="designUseArabicReshaper" {% if config.use_arabic_reshaper %}checked{% endif %}>
+          <label class="form-check-label" for="designUseArabicReshaper" style="color: var(--text-primary);">Use Arabic Reshaper for Persian text</label>
+          <p class="small text-muted mb-0">When ON, reshapes Persian/Arabic text for Pillow images. Turn OFF if text looks garbled (modern fonts render RTL without it).</p>
+        </div>
+      </div>
+      <div class="col-12">
         <label class="form-label" style="color: var(--text-primary);">Live Preview</label>
         <div id="designMiniPreview" class="mini-preview">
           <div class="d-flex align-items-center gap-2 mb-2">
