@@ -579,6 +579,24 @@ class AdRequest(models.Model):
         """Hex color for badge styling."""
         return (self.category.color or '#7C4DFF') if self.category else '#7C4DFF'
 
+    def get_absolute_feed_image_url(self) -> str | None:
+        """
+        Return the absolute public URL for the Feed image (e.g. for Instagram/Telegram).
+        Example: https://request.iraniu.uk/media/generated_ads/ads_123.png
+        No login required; /media/ is served publicly (read-only).
+        """
+        from core.services.instagram_api import get_absolute_media_url
+        return get_absolute_media_url(self.generated_image)
+
+    def get_absolute_story_image_url(self) -> str | None:
+        """
+        Return the absolute public URL for the Story image (e.g. for Instagram Story).
+        Example: https://request.iraniu.uk/media/generated_stories/story_123.png
+        No login required; /media/ is served publicly (read-only).
+        """
+        from core.services.instagram_api import get_absolute_media_url
+        return get_absolute_media_url(self.generated_story_image)
+
 
 class TelegramBot(models.Model):
     """

@@ -3,6 +3,7 @@ Iraniu — Core URL routes.
 """
 
 from django.urls import path
+
 from . import views
 from . import telegram_views
 from . import views_api_v1
@@ -47,6 +48,9 @@ urlpatterns = [
     path('settings/hub/instagram/connect/', views.instagram_connect, name='instagram_oauth_connect'),
     path('settings/hub/instagram/callback/', views.instagram_callback, name='instagram_oauth_callback'),
     path('settings/hub/instagram/check-permissions/', views.instagram_check_permissions, name='instagram_check_permissions'),
+    # Alias: Meta Dashboard may use /instagram/callback/ — same view, no 404
+    path('instagram/callback/', views.instagram_callback, name='instagram_oauth_callback_alias'),
+    path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
     path('notifications/<int:pk>/read/', views.notification_mark_read, name='notification_mark_read'),
     path('notifications/read-all/', views.notification_mark_all_read, name='notification_mark_all_read'),
     path('categories/', views.category_list, name='categories'),

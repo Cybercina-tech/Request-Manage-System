@@ -182,11 +182,24 @@ CACHES = {
     }
 }
 
-# Media for user-uploaded and generated images (Instagram)
+# Media: user-uploaded and generated images (Instagram, ads). Public read-only; no directory listing.
+# Django static() serve does not list directories (404 for directory paths). In production (Nginx/Apache), set autoindex off.
 MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
 MEDIA_ROOT = BASE_DIR / 'media'
 # Public base URL for Instagram image URLs (required; set in .env)
 INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
+
+# Instagram OAuth — redirect_uri must match exactly what is configured in Meta Developer portal.
+# Canonical value (used when building auth URL and when exchanging code for tokens):
+INSTAGRAM_REDIRECT_URI = (
+    (os.environ.get('INSTAGRAM_REDIRECT_URI') or '').strip()
+    or 'https://request.iraniu.uk/settings/hub/instagram/callback/'
+)
+# Manual OAuth (no social-auth-app-django). All Meta URLs must be HTTPS:
+INSTAGRAM_GRAPH_API_BASE = 'https://graph.facebook.com/v18.0'
+INSTAGRAM_OAUTH_AUTHORIZATION_URL = 'https://www.facebook.com/v18.0/dialog/oauth'
+# Instagram webhook: verify token must match the value you set in Meta Developer portal.
+INSTAGRAM_WEBHOOK_VERIFY_TOKEN = os.environ.get('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', 'my_secret_123').strip() or 'my_secret_123'
 
 # اجبار جنگو به تشخیص HTTPS از طریق هدرهای cPanel/پروکسی
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

@@ -1,6 +1,7 @@
 """
-Iraniu
-URL configuration.
+Iraniu — URL configuration.
+Media: served publicly (no login_required). Middleware allows /media/ without auth for Instagram crawler.
+Django static() does not expose directory listing; production should serve media via Nginx/Apache with autoindex off.
 """
 
 from django.conf import settings
@@ -18,5 +19,6 @@ urlpatterns = [
     path('', include('core.urls')),
 ]
 
+# Media: public read-only. Not wrapped in any login_required; middleware bypasses auth for /media/
 if settings.DEBUG and settings.MEDIA_URL:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1041,8 +1041,10 @@ def instagram_connect(request):
         messages.error(request, 'Instagram App Secret is not configured. Save it first in the Instagram Settings card.')
         return redirect('settings_hub_instagram')
 
-    # Build the exact redirect URI (must match Meta Developer portal exactly)
-    redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
+    # Build redirect URI: use settings.INSTAGRAM_REDIRECT_URI so it matches Meta Developer portal exactly
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None) or request.build_absolute_uri(reverse('instagram_oauth_callback'))
+    if not redirect_uri.startswith('https://'):
+        redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
 
     # Generate and store CSRF state
     state = generate_oauth_state()
@@ -1095,8 +1097,10 @@ def instagram_callback(request):
         config.save(update_fields=['instagram_oauth_state'])
         return redirect('settings_hub_instagram')
 
-    # Build redirect_uri (must be identical to the one in the initial request)
-    redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
+    # Build redirect_uri (must be identical to the one used in the authorization request)
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None) or request.build_absolute_uri(reverse('instagram_oauth_callback'))
+    if not redirect_uri.startswith('https://'):
+        redirect_uri = request.build_absolute_uri(reverse('instagram_oauth_callback'))
 
     result = perform_full_oauth_exchange(code, redirect_uri)
 
@@ -1148,6 +1152,34 @@ def instagram_check_permissions(request):
                        f"{'✅ Can publish.' if has_publish else '⚠️ instagram_content_publish NOT granted.'}",
         })
     return JsonResponse({'success': False, 'message': result.get('error', 'Check failed.')})
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def instagram_webhook(request):
+    """
+    Instagram webhook endpoint for Meta to verify and send real-time updates.
+    GET: Meta sends hub.mode, hub.verify_token, hub.challenge; return hub.challenge if token matches.
+    POST: Meta sends payload; log to instagram logger (file + console) and return 200.
+    """
+    logger_ig = logging.getLogger('core.services.instagram')
+    if request.method == 'GET':
+        hub_mode = request.GET.get('hub.mode', '').strip()
+        hub_verify_token = request.GET.get('hub.verify_token', '').strip()
+        hub_challenge = request.GET.get('hub.challenge', '').strip()
+        expected_token = getattr(settings, 'INSTAGRAM_WEBHOOK_VERIFY_TOKEN', '') or ''
+        if hub_mode == 'subscribe' and hub_verify_token == expected_token and hub_challenge:
+            logger_ig.info('Instagram webhook verified: challenge returned.')
+            return HttpResponse(hub_challenge, content_type='text/plain', status=200)
+        logger_ig.warning('Instagram webhook GET verification failed: mode=%s token_match=%s', hub_mode, hub_verify_token == expected_token)
+        return HttpResponseForbidden()
+    if request.method == 'POST':
+        try:
+            body = request.body.decode('utf-8') if request.body else ''
+            logger_ig.info('Instagram webhook POST: %s', body[:2000] if len(body) > 2000 else body)
+        except Exception as e:
+            logger_ig.exception('Instagram webhook POST read error: %s', e)
+        return HttpResponse(status=200)
 
 
 @staff_member_required

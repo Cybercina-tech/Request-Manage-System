@@ -1,13 +1,13 @@
 """
 Iraniu — Require authentication for all internal URLs.
-Only these are public: /, /login/, /logout/, /i18n/, /api/submit/, /telegram/webhook/*
+Only these are public: /, /login/, /logout/, /i18n/, /api/submit/, /telegram/webhook/*, /media/, etc.
 """
 
 from django.conf import settings
 
 
-# Paths (exact or prefix) that anonymous users may access
-# /media/ must be public so Instagram (Meta) crawler can fetch image URLs (200 OK, no login).
+# Paths (exact or prefix) that anonymous users may access without login.
+# /media/ must be public so Instagram (Meta) crawler can fetch image URLs (200 OK, read-only; no directory listing).
 PUBLIC_PATHS = (
     "/",
     "/login/",
@@ -16,7 +16,8 @@ PUBLIC_PATHS = (
     "/api/submit/",
     "/api/v1/",     # Partner API uses X-API-KEY
     "/telegram/webhook/",
-    "/media/",      # Public media for Instagram Graph API image_url (Feed + Story)
+    "/media/",           # Public media for Instagram Graph API image_url (Feed + Story)
+    "/instagram/webhook/",  # Instagram webhook (Meta GET verify + POST payloads)
 )
 
 
@@ -35,12 +36,16 @@ class LoginRequiredMiddleware:
     """
     Redirect anonymous users to LOGIN_URL for any non-public path.
     Runs after AuthenticationMiddleware so request.user is available.
+    /media/ is explicitly bypassed (no auth) so Instagram and other crawlers can fetch images.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
+        # Explicit bypass: /media/ is always public (read-only; no directory listing). Skip auth.
+        if request.path.startswith('/media/'):
+            return self.get_response(request)
         if not _is_public(request.path):
             if not request.user.is_authenticated:
                 from django.contrib.auth.views import redirect_to_login
