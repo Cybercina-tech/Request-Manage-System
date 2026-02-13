@@ -409,14 +409,14 @@ def preview_publish(request, uuid):
             messages.error(request, 'Distribution failed. Check logs and channel/bot configuration.')
         return redirect('ad_detail', uuid=ad.uuid)
 
-    # GET: build preview data (same logic as post_manager.distribute_ad — same image as Telegram)
-    from core.services.image_engine import generate_ad_image
-    from core.services.instagram_api import _path_to_public_url
+    # GET: build preview (use stored Feed image so same as Telegram/Instagram)
+    from core.services.image_engine import ensure_feed_image
+    from core.services.instagram_api import get_absolute_media_url
     from core.services.instagram import InstagramService
     from core.services.post_manager import get_default_channel
 
-    feed_path = generate_ad_image(ad, is_story=False)
-    preview_image_url = _path_to_public_url(feed_path) if feed_path else None
+    ensure_feed_image(ad)
+    preview_image_url = get_absolute_media_url(ad.generated_image) if ad.generated_image else None
 
     category = (getattr(ad.category, 'name_fa', '') or (ad.category.name if ad.category else '')) or (ad.get_category_display() if hasattr(ad, 'get_category_display') else 'Other')
     text = (ad.content or '').strip()
@@ -459,19 +459,30 @@ def post_to_instagram_view(request, uuid, target):
         return JsonResponse({'success': False, 'message': 'Invalid target'}, status=400)
     is_story = target == 'story'
 
-    from core.utils.image_generator import generate_request_image
+    from core.services.image_engine import ensure_feed_image, ensure_story_image
     from core.services.instagram_api import post_to_instagram
     from core.services.instagram import InstagramService
 
-    image_path = generate_request_image(ad.pk, is_story=is_story)
+    if is_story:
+        if not ensure_story_image(ad):
+            return JsonResponse({'success': False, 'message': 'Failed to generate story image'}, status=500)
+        image_path = ad.generated_story_image.path if ad.generated_story_image else None
+    else:
+        if not ensure_feed_image(ad):
+            return JsonResponse({'success': False, 'message': 'Failed to generate feed image'}, status=500)
+        image_path = ad.generated_image.path if ad.generated_image else None
     if not image_path:
-        return JsonResponse({'success': False, 'message': 'Failed to generate image'}, status=500)
+        return JsonResponse({'success': False, 'message': 'No image available'}, status=500)
 
-    caption = ''
-    if not is_story:
-        caption = InstagramService.format_caption(ad, lang='fa')
-
+    caption = '' if is_story else InstagramService.format_caption(ad, lang='fa')
     result = post_to_instagram(image_path=image_path, caption=caption, is_story=is_story)
+    if result.get('success') and result.get('id'):
+        if is_story:
+            ad.instagram_story_id = result['id']
+        else:
+            ad.instagram_post_id = result['id']
+        ad.is_instagram_published = True
+        ad.save(update_fields=['instagram_story_id' if is_story else 'instagram_post_id', 'is_instagram_published'])
     return JsonResponse(result, status=200 if result.get('success') else 500)
 
 

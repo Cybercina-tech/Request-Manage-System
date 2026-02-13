@@ -1,6 +1,7 @@
 """
 Iraniu — Instagram Graph API for Business accounts.
 Post images to Feed or Story. Uses container creation + publish flow.
+Media URLs must be absolute and publicly accessible (no login); /media/ is in PUBLIC_PATHS.
 """
 
 import logging
@@ -18,6 +19,58 @@ GRAPH_API_BASE = 'https://graph.facebook.com/v18.0'
 REQUEST_TIMEOUT = 15
 MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 0.5
+
+# Production base URL for Instagram image_url. Instagram requires HTTPS and public 200 OK.
+DEFAULT_INSTAGRAM_BASE_URL = 'https://request.iraniu.uk'
+
+
+def get_instagram_base_url() -> str:
+    """
+    Return the absolute base URL (no trailing slash) for building media URLs.
+    Order: settings.INSTAGRAM_BASE_URL, env INSTAGRAM_BASE_URL, SiteConfiguration.production_base_url,
+    then DEFAULT_INSTAGRAM_BASE_URL.
+    """
+    base = (
+        (getattr(settings, 'INSTAGRAM_BASE_URL', '') or '').strip()
+        or os.environ.get('INSTAGRAM_BASE_URL', '').strip()
+    )
+    if base:
+        return base.rstrip('/')
+    from core.models import SiteConfiguration
+    site = SiteConfiguration.get_config()
+    base = (site.production_base_url or '').strip().rstrip('/')
+    if base:
+        return base
+    return DEFAULT_INSTAGRAM_BASE_URL
+
+
+def get_absolute_media_url(file_field) -> str | None:
+    """
+    Build a public absolute URL for a FileField/ImageField so Instagram can fetch the image.
+    Requires no login (middleware must allow /media/ as public).
+
+    Args:
+        file_field: Django ImageField/FileField value (e.g. ad.generated_image, ad.generated_story_image).
+                    Can be None or falsy.
+
+    Returns:
+        Full URL e.g. https://request.iraniu.uk/media/generated_ads/xxx.png, or None if no file.
+    """
+    if not file_field:
+        return None
+    try:
+        url = getattr(file_field, 'url', None) or ''
+    except (ValueError, OSError):
+        return None
+    url = (url or '').strip()
+    if not url:
+        return None
+    base = get_instagram_base_url()
+    if url.startswith('http'):
+        return url
+    if not url.startswith('/'):
+        url = '/' + url
+    return f'{base}{url}'
 
 
 def _get_credentials():
@@ -58,7 +111,10 @@ def _get_credentials():
 
 
 def _path_to_public_url(image_path: str) -> str | None:
-    """Convert local filesystem path to public URL for Instagram."""
+    """
+    Convert local filesystem path (under MEDIA_ROOT) to public absolute URL for Instagram.
+    Uses get_instagram_base_url() so image_url is always absolute (e.g. https://request.iraniu.uk/...).
+    """
     path = Path(image_path)
     if not path.exists():
         return None
@@ -70,14 +126,10 @@ def _path_to_public_url(image_path: str) -> str | None:
     except ValueError:
         return None
     rel_str = str(rel).replace('\\', '/')
-    from core.models import SiteConfiguration
-    site = SiteConfiguration.get_config()
-    base = (
-        (getattr(settings, 'INSTAGRAM_BASE_URL', '') or '').strip()
-        or os.environ.get('INSTAGRAM_BASE_URL', '').strip()
-        or (site.production_base_url or '').strip().rstrip('/')
-    )
+    base = get_instagram_base_url()
     media_url = getattr(settings, 'MEDIA_URL', '/media/').rstrip('/')
+    if not media_url.startswith('/'):
+        media_url = '/' + media_url
     return f'{base}{media_url}/{rel_str}'
 
 

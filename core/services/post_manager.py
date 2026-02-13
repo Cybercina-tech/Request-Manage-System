@@ -13,12 +13,12 @@ from typing import Optional
 
 from django.conf import settings
 
-from core.models import AdRequest, AdTemplate, SiteConfiguration, TelegramChannel, FORMAT_STORY
+from core.models import AdRequest, SiteConfiguration, TelegramChannel
 from core.notifications import send_notification
 from core.services.telegram_client import send_message, send_photo
-from core.services.image_engine import create_ad_image, make_story_image
+from core.services.image_engine import ensure_feed_image, ensure_story_image
 from core.services.instagram_client import create_container, publish_media
-from core.services.instagram_api import _path_to_public_url
+from core.services.instagram_api import get_absolute_media_url
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +106,9 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
     if phone:
         caption += f"\n\n📱 {phone}"
 
-    template = AdTemplate.objects.filter(is_active=True).first()
-    feed_path = None
-    if template:
-        try:
-            feed_path = create_ad_image(template.pk, category_fa, text, phone)
-        except Exception as exc:
-            logger.exception("post_manager.distribute_ad: image generation failed ad=%s: %s", ad_obj.uuid, exc)
-    feed_url = _path_to_public_url(feed_path) if feed_path else None
+    # Generate and attach Feed image (and optionally Story) so Instagram gets stable public URLs
+    ensure_feed_image(ad_obj)
+    feed_url = get_absolute_media_url(ad_obj.generated_image) if ad_obj.generated_image else None
 
     # ──────────────────────────────────────────────
     # Telegram Channel
@@ -166,58 +161,53 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
             )
 
     # ──────────────────────────────────────────────
-    # Instagram Feed + Story
+    # Instagram Feed + Story (strict separation: Feed URL vs Story URL)
     # ──────────────────────────────────────────────
     instagram_ok = False
     config = SiteConfiguration.get_config()
     if not getattr(config, 'is_instagram_enabled', False):
         logger.info("post_manager.distribute_ad: Instagram disabled, skipping for ad %s", ad_obj.uuid)
-    elif feed_url:
+    else:
         try:
-            # Feed post
-            result = create_container(feed_url, caption[:2200], is_story=False)
-            if result.get("success") and result.get("creation_id"):
-                pub = publish_media(result["creation_id"])
-                if pub.get("success"):
-                    instagram_ok = True
-                    logger.info("post_manager.distribute_ad: Instagram Feed published for ad %s", ad_obj.uuid)
+            if feed_url:
+                result = create_container(feed_url, caption[:2200], is_story=False)
+                if result.get("success") and result.get("creation_id"):
+                    pub = publish_media(result["creation_id"])
+                    if pub.get("success"):
+                        instagram_ok = True
+                        ad_obj.instagram_post_id = pub.get("id", "")
+                        ad_obj.is_instagram_published = True
+                        ad_obj.save(update_fields=["instagram_post_id", "is_instagram_published"])
+                        logger.info("post_manager.distribute_ad: Instagram Feed published for ad %s", ad_obj.uuid)
+                    else:
+                        msg = pub.get("message") or "Unknown error"
+                        logger.warning("post_manager.distribute_ad: Instagram publish failed: %s", msg)
+                        send_notification(
+                            "error",
+                            f"Instagram post failed: {msg}. Click to refresh token.",
+                            link="/settings/hub/instagram/",
+                            add_to_active_errors=("token" in msg.lower() or "expired" in msg.lower()),
+                        )
                 else:
-                    msg = pub.get("message") or "Unknown error"
-                    logger.warning("post_manager.distribute_ad: Instagram publish failed: %s", msg)
+                    msg = result.get("message") or "Unknown error"
+                    logger.warning("post_manager.distribute_ad: Instagram container failed: %s", msg)
                     send_notification(
                         "error",
-                        f"Instagram post failed: {msg}. Click to refresh token.",
+                        f"Instagram container failed: {msg}. Click to fix.",
                         link="/settings/hub/instagram/",
-                        add_to_active_errors=("token" in msg.lower() or "expired" in msg.lower()),
                     )
-            else:
-                msg = result.get("message") or "Unknown error"
-                logger.warning("post_manager.distribute_ad: Instagram container failed: %s", msg)
-                send_notification(
-                    "error",
-                    f"Instagram container failed: {msg}. Click to fix.",
-                    link="/settings/hub/instagram/",
-                )
-
-            # Story — use format_type='STORY' (auto Y+285 offset) for proper 9:16 rendering
-            story_path = None
-            if template:
-                try:
-                    story_path = create_ad_image(
-                        template.pk, category_fa, text, phone,
-                        format_type=FORMAT_STORY,
-                    )
-                except Exception as exc:
-                    logger.warning("post_manager.distribute_ad: story image gen failed ad=%s: %s", ad_obj.uuid, exc)
-                    # Fallback: old make_story_image approach
-                    story_path = make_story_image(feed_path) if feed_path else None
-
-            story_url = _path_to_public_url(story_path) if story_path else None
+            # Story: separate image and URL
+            ensure_story_image(ad_obj)
+            story_url = get_absolute_media_url(ad_obj.generated_story_image) if ad_obj.generated_story_image else None
             if story_url:
+                logger.info("post_manager.distribute_ad: Sending Story URL: %s", story_url)
                 story_result = create_container(story_url, "", is_story=True)
                 if story_result.get("success") and story_result.get("creation_id"):
                     story_pub = publish_media(story_result["creation_id"])
                     if story_pub.get("success"):
+                        ad_obj.instagram_story_id = story_pub.get("id", "")
+                        ad_obj.is_instagram_published = True
+                        ad_obj.save(update_fields=["instagram_story_id", "is_instagram_published"])
                         logger.info("post_manager.distribute_ad: Instagram Story published for ad %s", ad_obj.uuid)
                     else:
                         logger.warning("post_manager.distribute_ad: Instagram Story publish failed: %s", story_pub.get("message"))

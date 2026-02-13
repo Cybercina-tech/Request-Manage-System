@@ -1,6 +1,6 @@
 # Iraniu — Request Management System
 
-Human-in-the-loop ad request management: AI pre-scan, admin review, and Telegram notifications.
+Human-in-the-loop ad request management: AI pre-scan, admin review, multi-channel distribution (Telegram DM, Telegram Channel, Instagram Feed, Instagram Story), and template-based image generation.
 
 ---
 
@@ -10,463 +10,271 @@ Human-in-the-loop ad request management: AI pre-scan, admin review, and Telegram
 2. [Tech Stack](#tech-stack)
 3. [Project Structure](#project-structure)
 4. [Setup & Run](#setup--run)
-5. [Data Models & Database](#data-models--database)
+5. [Data Models](#data-models)
 6. [Application Flow](#application-flow)
-7. [URLs & Views](#urls--views)
-8. [API Reference](#api-reference)
-9. [AI Moderation (OpenAI)](#ai-moderation-openai)
-10. [Telegram Integration](#telegram-integration)
+7. [Instagram: Feed vs Story](#instagram-feed-vs-story)
+8. [Telegram Integration](#telegram-integration)
+9. [URLs & Views](#urls--views)
+10. [API Reference](#api-reference)
 11. [Settings & Configuration](#settings--configuration)
 12. [Security](#security)
-13. [Icons & UI Assets](#icons--ui-assets)
 
 ---
 
 ## Overview
 
-**Iraniu** is a Django web application that:
+**Iraniu** is a Django CRM that:
 
-- Accepts **ad submissions** (e.g. from a Telegram bot or any HTTP client).
-- Optionally runs **OpenAI-based moderation** on each submission and suggests approve/reject + reason.
-- Lets **staff admins** review, approve, or reject ads from a dashboard.
-- Sends **Telegram notifications** to users when their ad is approved or rejected (with optional “Edit & Resubmit” link).
+- **Accepts ad submissions** from a Telegram bot (FA/EN flow), Partner API (`/api/v1/submit/`), or legacy `/api/submit/`.
+- **Runs optional OpenAI moderation** on each submission and suggests approve/reject + reason.
+- **Lets staff review** ads from the dashboard (list, filters, detail), edit content, then **Approve**, **Reject**, or **Request Revision**.
+- **On approval**, distributes the ad to all configured channels in a background thread:
+  - **Telegram DM** — approval/rejection notification to the user.
+  - **Telegram Channel** — post with generated image (from AdTemplate) and caption.
+  - **Instagram Feed** — post with square/4:5 image and caption (Meta Graph API).
+  - **Instagram Story** — 9:16 story image only (separate image, separate API call).
+  - **API** — ad becomes available to partners via `/api/v1/list/`.
+- **Image generation** is template-based (AdTemplate: background, coordinates, fonts). Feed image (1:1 or 4:5) and Story image (9:16) are generated and stored separately so Feed, Telegram channel, and Story never mix.
+- **Public media URLs** — generated images are served under `/media/` without login so Instagram’s crawler can fetch them (e.g. `https://request.iraniu.uk/media/generated_ads/...` and `.../generated_stories/...`).
 
-All sensitive configuration (API keys, bot token, message templates) is stored in the database via a singleton **SiteConfiguration** and edited from the **Settings** page.
+Sensitive configuration (API keys, bot tokens, Instagram tokens) is stored in the database via **SiteConfiguration** (and optional **InstagramConfiguration**) and edited from the **Settings Hub**.
 
 ---
 
 ## Tech Stack
 
-| Layer        | Technology                          |
-|-------------|--------------------------------------|
-| Backend     | Django 5.0.1 (Python 3.11+)         |
-| Database    | SQLite (default)                     |
-| Frontend    | Bootstrap 5, Font Awesome (self-hosted), Vanilla JS / AJAX |
-| Theme       | Midnight Obsidian & Electric Soul (dark)    |
-| Integrations| OpenAI API (moderation), Telegram Bot API   |
+| Layer         | Technology |
+|---------------|------------|
+| Backend      | Django 5.x (Python 3.11+) |
+| Database     | SQLite (default); PostgreSQL recommended for production |
+| Frontend     | Bootstrap 5, Font Awesome (self-hosted), vanilla JS / AJAX |
+| Theme        | Professional Light / Dark (theme preference in settings) |
+| Integrations | OpenAI (moderation), Telegram Bot API, Instagram Graph API (Meta) |
+| Static/Media | WhiteNoise (static), `/media/` for generated and uploaded files |
 
-**Dependencies** (see `requirements.txt`):
-
-- `Django==5.0.1`
-- `openai>=1.0.0`
-- `requests>=2.31.0`
+**Key dependencies** (see `requirements.txt`): Django, openai, requests, Pillow, python-dotenv, whitenoise, arabic-reshaper, python-bidi (for Persian text in images).
 
 ---
 
 ## Project Structure
 
 ```
-Request-Manage-System/
-├── manage.py                 # Django CLI entry
-├── requirements.txt          # Python dependencies
-├── README.md                 # This file
-├── iraniu/                   # Django project package
-│   ├── __init__.py
-│   ├── settings.py           # App list, DB, static, auth, etc.
-│   ├── urls.py               # Root URLconf (admin, login, core)
-│   ├── asgi.py / wsgi.py
-├── core/                     # Main app: ads + config + services
-│   ├── __init__.py
-│   ├── models.py             # SiteConfiguration, AdRequest
-│   ├── views.py              # Landing, Dashboard, Requests, Settings, APIs
-│   ├── urls.py               # All core routes
-│   ├── services/              # Business logic (dashboard, telegram, ai_moderation, ad_actions, …)
-│   ├── admin.py              # Django admin for SiteConfiguration, AdRequest
-│   ├── context_processors.py # Injects config into templates
+Request-Manage-System-1/
+├── manage.py
+├── requirements.txt
+├── README.md
+├── iraniu/                    # Django project
+│   ├── settings.py
+│   ├── urls.py                 # Root URLconf (admin, login, core)
+│   └── wsgi.py / asgi.py
+├── core/                       # Main app
+│   ├── models.py               # SiteConfiguration, AdRequest, Category, AdTemplate,
+│   │                            # TelegramBot, TelegramChannel, DeliveryLog, etc.
+│   ├── views/                  # Views split by module
+│   │   ├── main.py             # Landing, dashboard, requests, detail, settings hub,
+│   │   │                        # preview-publish, post-to-instagram, bots, categories
+│   │   └── api_v1.py           # Partner API (submit, status, list)
+│   ├── urls.py
+│   ├── services/               # Business logic
+│   │   ├── ad_actions.py       # approve_one_ad, reject_one_ad (triggers delivery)
+│   │   ├── delivery.py        # DeliveryService: Telegram DM, Channel, Instagram Feed/Story, API
+│   │   ├── image_engine.py    # AdTemplate-based image gen (POST/STORY), ensure_feed_image, ensure_story_image
+│   │   ├── instagram_api.py   # get_absolute_media_url, post_to_instagram, Graph API helpers
+│   │   ├── instagram_client.py # create_container, publish_media (Feed/Story)
+│   │   ├── instagram.py       # InstagramService: format_caption, validate token
+│   │   ├── post_manager.py    # distribute_ad (Preview & Publish flow)
+│   │   ├── telegram_client.py # send_message, send_photo
+│   │   └── ...
+│   ├── admin.py
+│   ├── context_processors.py
+│   ├── middleware.py           # LoginRequiredMiddleware (PUBLIC_PATHS: /, /login/, /api/submit/, /media/, ...)
 │   └── migrations/
 ├── templates/
-│   ├── base.html             # Layout, nav, static refs
-│   ├── registration/
-│   │   └── login.html
-│   └── core/
-│       ├── landing.html      # Public entry + login link
-│       ├── dashboard.html    # KPIs, pulse, 7-day chart
-│       ├── ad_list.html      # Requests list, filters, bulk actions
-│       ├── ad_detail.html   # Single ad, approve/reject, edit content
-│       └── settings.html    # AI, Telegram, Messages tabs
-└── static/
-    ├── css/
-    │   └── iraniu.css       # Custom dark theme
-    └── vendor/
-        └── fontawesome/     # Self-hosted Font Awesome (css, webfonts, svgs)
+│   ├── base.html
+│   ├── registration/login.html
+│   └── core/                  # dashboard, ad_list, ad_detail, preview_publish, settings_hub, etc.
+├── static/                     # CSS, fonts (Yekan, Montserrat), vendor/fontawesome
+└── media/                      # generated_ads/, generated_stories/, ad_templates/, etc.
 ```
 
 ---
 
 ## Setup & Run
 
-1. **Create and activate a virtual environment:**
+1. **Virtual environment and dependencies**
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate   # Windows: .venv\Scripts\activate
-   ```
-
-2. **Install dependencies:**
-
-   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate          # Windows
+   # source .venv/bin/activate      # Linux/macOS
    pip install -r requirements.txt
    ```
 
-3. **Run migrations:**
+2. **Environment (optional)**
+
+   Create a `.env` (see `.env.example` if present) with e.g. `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `MEDIA_URL`, `INSTAGRAM_BASE_URL` (or rely on SiteConfiguration `production_base_url`).
+
+3. **Migrations and superuser**
 
    ```bash
    python manage.py migrate
-   ```
-
-4. **Create a staff/superuser:**
-
-   ```bash
    python manage.py createsuperuser
    ```
 
-5. **Start the server:**
+4. **Run server**
 
    ```bash
    python manage.py runserver
    ```
 
-6. Open **http://127.0.0.1:8000**. Log in with a **staff** user to access Dashboard, Requests, and Settings.
+5. Open **http://127.0.0.1:8000**, log in with a **staff** user. Use **Dashboard**, **Requests**, **Settings** (Hub: Instagram, Telegram, Channels, Design, Storage), **Bots**, **Categories**, **Template Manager**, and **Deliveries**.
 
 ---
 
-## Data Models & Database
+## Data Models
 
-### SiteConfiguration (singleton)
+### SiteConfiguration (singleton, pk=1)
 
-Single row (pk=1) holding global settings.
-
-| Field | Purpose |
-|-------|--------|
-| `is_ai_enabled` | Turn OpenAI moderation on/off |
-| `openai_api_key` | OpenAI API key |
-| `openai_model` | Model name (e.g. gpt-3.5-turbo, gpt-4o) |
-| `ai_system_prompt` | System prompt for moderation; response must be JSON `{"approved": bool, "reason": "..."}` |
-| `telegram_bot_token` | Bot token for sending messages |
-| `telegram_bot_username` | Bot username (no @) for “Edit & Resubmit” deep link |
-| `telegram_webhook_url` | Optional webhook URL |
-| `use_webhook` | Whether webhook is used |
-| `approval_message_template` | Message on approve; `{ad_id}` placeholder |
-| `rejection_message_template` | Message on reject; `{reason}`, `{ad_id}` |
-| `submission_ack_message` | Message sent back after submit (e.g. “under review”) |
-| `updated_at` | Last config change |
-
-**Singleton behavior:** Only one row is ever created; `get_config()` returns that row.
+Global settings: AI (OpenAI key, model, system prompt), Telegram (legacy bot token/username, webhook), **production_base_url** (HTTPS base for webhooks and Instagram media URLs), default Telegram channel (channel ID, bot, handle), **Instagram Business** (app ID, app secret, business ID, Facebook access token, OAuth state), message templates (approval, rejection, submission ack), theme, default font/watermark/colors, workflow stages, retention, etc. **is_instagram_enabled** is auto-set when all required Instagram fields are filled.
 
 ### AdRequest
 
-One row per ad submission.
+Per submission: **uuid**, **category** (FK to Category), **status** (pending_ai → pending_manual → approved / rejected / needs_revision / expired / solved), **content**, **rejection_reason**, **ai_suggested_reason**, **contact_snapshot**, **telegram_user_id**, **bot** (FK), **user** (FK to TelegramUser), **approved_at**, **submitted_via_api_client**.
 
-| Field | Purpose |
-|-------|--------|
-| `uuid` | Public unique ID (UUID, indexed) |
-| `category` | One of: job_vacancy, rent, events, services, sale, other |
-| `status` | pending_ai → pending_manual → approved / rejected (or expired, solved) |
-| `content` | Main ad text (HTML/Markdown stripped before save) |
-| `rejection_reason` | Set when admin rejects; can be sent to user |
-| `ai_suggested_reason` | Reason from OpenAI when AI suggests reject |
-| `telegram_user_id` | Telegram user ID for notifications |
-| `telegram_username` | Telegram username (optional) |
-| `raw_telegram_json` | Optional raw payload from Telegram |
-| `created_at`, `updated_at` | Timestamps |
-| `approved_at` | Set when status becomes approved |
+- **generated_image** — ImageField, `upload_to='generated_ads/'`; used for **Feed** and **Telegram channel**.
+- **generated_story_image** — ImageField, `upload_to='generated_stories/'`; used only for **Instagram Story** (never mixed with Feed).
+- **instagram_post_id**, **instagram_story_id** — IDs returned by Meta after publishing.
+- **is_instagram_published** — True when at least one of Feed or Story was published.
 
-**Status flow:**
+### Category
 
-- **Pending AI** — Just created; if AI is enabled, moderation runs and status moves to Pending Manual (with optional `ai_suggested_reason`).
-- **Pending Manual** — Waiting for admin to approve or reject.
-- **Approved** — Approved; user notified via Telegram.
-- **Rejected** — Rejected with reason; user notified (with “Edit & Resubmit” button if bot username is set).
-- **Expired / Solved** — For future use (e.g. expiry or resolution).
+Dynamic categories (name, name_fa, slug, color, icon, is_active, order). Used in bot flow and ad list filters.
 
-**Indexes:** `status`, `created_at`, `(category, status)` for fast filters and dashboards.
+### AdTemplate
+
+Template for ad image generation: background image, font file, **coordinates** (JSON: category, description, phone — x, y, size, color, align, etc.), **story_coordinates** (for 9:16). One active template is used by the image engine for both Feed and Story (Story uses Y-offset from post coordinates).
+
+### TelegramBot, TelegramChannel, TelegramUser, TelegramSession
+
+Multi-bot support (token encrypted, webhook or polling, environment PROD/DEV). Channels link to a bot and optional SiteConfiguration. Sessions hold per-user state (language, draft).
+
+### DeliveryLog
+
+Per-ad, per-channel delivery result (telegram, telegram_channel, instagram, instagram_story, api): status (pending/success/failed), response_payload, error_message.
+
+### Others
+
+InstagramConfiguration (optional per-account tokens), ScheduledInstagramPost, ApiClient (Partner API), AdminProfile (staff + Telegram ID for notifications), SystemStatus, Notification, ActivityLog, VerificationCode.
 
 ---
 
 ## Application Flow
 
-1. **Ingress**  
-   Client (e.g. Telegram bot) POSTs to `/api/submit/` with `content`, optional `category`, `telegram_user_id`, `telegram_username`, `raw_telegram_json`.
-
-2. **Create AdRequest**  
-   New `AdRequest` is created with `status=PENDING_AI`, `content` cleaned (HTML/Markdown stripped).
-
-3. **AI (if enabled)**  
-   If `SiteConfiguration.is_ai_enabled` and API key is set, `run_ai_moderation()` is called. Response is parsed as JSON `{approved, reason}`. Status is set to `PENDING_MANUAL`; if not approved, `ai_suggested_reason` is stored. AI never auto-deletes; admin always has final say.
-
-4. **Response to client**  
-   API returns `{ status: "created", uuid, ack_message }`. The bot can send `ack_message` (e.g. submission ack) to the user.
-
-5. **Admin**  
-   Staff open **Dashboard** (KPIs, pulse, 7-day chart) and **Requests** (list with filters: category, status, date, search). From **Detail** they can edit content, then Approve or Reject.
-
-6. **Approve**  
-   Status → Approved, `approved_at` set, Telegram message sent using `approval_message_template` with `{ad_id}`.
-
-7. **Reject**  
-   Status → Rejected, `rejection_reason` set, Telegram message sent using `rejection_message_template` with `{reason}` and `{ad_id}`, plus inline “Edit & Resubmit” button linking to `https://t.me/<bot_username>?start=resubmit_<uuid>`.
+1. **Ingress** — User submits via Telegram bot (FA/EN flow) or Partner API `POST /api/v1/submit/` (or legacy `/api/submit/`). AdRequest is created with status **Pending AI**.
+2. **AI moderation (if enabled)** — `run_ai_moderation()` returns approve/reason; status → **Pending Manual**; reason stored in `ai_suggested_reason` if reject suggested.
+3. **Admin** — Staff see **Requests** (filters: category, status, date, search). From **Detail** they can edit content, then **Approve**, **Reject**, or **Request Revision**.
+4. **Approve** — `approve_one_ad()` sets status → Approved, `approved_at`, then starts a **background thread** that runs **DeliveryService.send(ad, channel)** for each channel: telegram, telegram_channel, instagram, instagram_story, api.
+5. **Delivery**
+   - **Telegram DM** — approval message to user (localized).
+   - **Telegram Channel** — ensure Feed image (`ensure_feed_image`), upload photo + caption via bot.
+   - **Instagram Feed** — ensure Feed image, build public URL (`get_absolute_media_url(ad.generated_image)`), create container + publish; save `instagram_post_id`, `is_instagram_published`.
+   - **Instagram Story** — ensure Story image (`ensure_story_image`), build public URL (`get_absolute_media_url(ad.generated_story_image)`), create container with `media_type=STORIES` + publish; save `instagram_story_id`, `is_instagram_published`.
+   - **API** — ad is simply available at `/api/v1/list/` (no outbound call).
+6. **Reject** — Status → Rejected, message to user with optional “Edit & Resubmit” button (`https://t.me/<bot>?start=resubmit_<uuid>`).
 
 ---
 
-## URLs & Views
+## Instagram: Feed vs Story
 
-| URL | View | Auth | Description |
-|-----|------|------|-------------|
-| `/` | `landing` | — | Public landing; redirects staff to dashboard |
-| `/dashboard/` | `dashboard` | Staff | KPIs, pulse score, 7-day submission chart |
-| `/requests/` | `ad_list` | Staff | Paginated list, filters (category, status, date, search), bulk approve/reject |
-| `/requests/<uuid>/` | `ad_detail` | Staff | Single ad: content, audit info, edit, approve/reject |
-| `/settings/` | `settings_view` | Staff | Tabs: AI, Telegram, Messages (templates) |
-| `/settings/save/` | `settings_save` | Staff | POST: save configuration |
-| `/settings/test-telegram/` | `test_telegram` | Staff | POST: test bot token (getMe) |
-| `/settings/test-openai/` | `test_openai` | Staff | POST: test OpenAI key |
-| `/settings/export/` | `export_config` | Staff | GET: export config as JSON (no secrets in plain text) |
-| `/settings/import/` | `import_config` | Staff | POST: import config JSON |
-| `/api/approve/` | `approve_ad` | Staff | POST: approve one ad (optional edited content) |
-| `/api/reject/` | `reject_ad` | Staff | POST: reject with reason |
-| `/api/bulk-approve/` | `bulk_approve` | Staff | POST: list of ad_ids |
-| `/api/bulk-reject/` | `bulk_reject` | Staff | POST: ad_ids + single reason |
-| `/api/pulse/` | `api_pulse` | Staff | GET: live stats for dashboard polling |
-| `/api/submit/` | `submit_ad` | — | POST: create ad (Telegram/external); CSRF exempt |
-
-Django built-in:
-
-- `/admin/` — Django admin (SiteConfiguration, AdRequest).
-- `/login/`, `/logout/` — Auth (LOGIN_REDIRECT_URL → dashboard).
-
----
-
-## API Reference
-
-### Submit ad (ingress)
-
-**POST** `/api/submit/`
-
-**Body (JSON or form):**
-
-- `content` (required): Ad text.
-- `category` (optional): One of `rent`, `job_vacancy`, `events`, `services`, `sale`, `other`. Default `other`.
-- `telegram_user_id` (optional): Telegram user ID.
-- `telegram_username` (optional): Telegram username.
-- `raw_telegram_json` (optional): Any JSON blob (stored as-is).
-
-**Response:** `200`  
-`{ "status": "created", "uuid": "<uuid>", "ack_message": "..." }`
-
-**Errors:** `400` if `content` missing; `500` on server error.
-
----
-
-### Approve (staff)
-
-**POST** `/api/approve/`
-
-**Body (JSON):** `{ "ad_id": "<uuid>", "content": "optional edited text" }`
-
-**Response:** `200` `{ "status": "success" }`  
-Ad is set to Approved, approval message sent to user if `telegram_user_id` is set.
-
----
-
-### Reject (staff)
-
-**POST** `/api/reject/`
-
-**Body (JSON):** `{ "ad_id": "<uuid>", "reason": "..." }`
-
-**Response:** `200` `{ "status": "success" }`  
-Ad is set to Rejected, rejection message + “Edit & Resubmit” button sent if applicable.
-
----
-
-### Bulk approve / reject (staff)
-
-- **POST** `/api/bulk-approve/`: `{ "ad_ids": ["<uuid>", ...] }` — up to 50.
-- **POST** `/api/bulk-reject/`: `{ "ad_ids": ["<uuid>", ...], "reason": "..." }` — up to 50.
-
----
-
-### Pulse (live stats, staff)
-
-**GET** `/api/pulse/`
-
-**Response:**  
-`{ "total", "pending_ai", "pending_manual", "approved_today", "rejected_today", "rejection_rate", "pulse_score", "system_health" }`  
-Used by the dashboard for auto-refresh.
-
----
-
-## AI Moderation (OpenAI)
-
-- **Where:** `core.services.run_ai_moderation(content, config)`.
-- **When:** Right after an ad is created in `submit_ad`, if `config.is_ai_enabled` and `config.openai_api_key` are set.
-- **Input:** `content` (cleaned ad text, up to 4000 chars) and `config` (SiteConfiguration).
-- **Prompt:** `config.ai_system_prompt` (must ask for JSON `{"approved": true/false, "reason": "..."}`).
-- **Output:** `(approved: bool, reason: str)`. Reason is truncated to 500 chars and stored in `ai_suggested_reason` when not approved.
-- **Behavior:** Never deletes the ad. Status is always set to `PENDING_MANUAL`; if AI says reject, admin still sees the ad and can approve or reject. Failures (e.g. API error) default to `(True, "")` so the ad stays in queue.
+- **Strict separation:** Feed uses **generated_image** (saved under `media/generated_ads/`). Story uses **generated_story_image** (saved under `media/generated_stories/`). Two generation paths (POST 1080×1350, STORY 1080×1920), two API calls, two media IDs.
+- **Public URLs:** Instagram requires a **public, absolute** image URL (e.g. `https://request.iraniu.uk/media/generated_ads/xxx.png`). Base URL is taken from `INSTAGRAM_BASE_URL` (settings/env), then **SiteConfiguration.production_base_url**, then default **https://request.iraniu.uk**. Helper: **get_absolute_media_url(file_field)** in `core.services.instagram_api`.
+- **No login for media:** `/media/` is in **PUBLIC_PATHS** in `core.middleware.LoginRequiredMiddleware`, so Meta’s crawler gets **200 OK** without authentication.
+- **Flow:** `ensure_feed_image(ad)` / `ensure_story_image(ad)` generate and attach the file to the model if missing. Then `get_absolute_media_url(ad.generated_image)` or `..._story_image` is passed to **create_container** (image_url, caption for Feed only, media_type=STORIES for Story), then **publish_media(creation_id)**. Success is recorded in **DeliveryLog** and in `ad.instagram_post_id` / `ad.instagram_story_id` and `ad.is_instagram_published`.
+- **Manual publish:** From **Request Detail**, **Preview & Publish** runs `distribute_ad()` (Telegram + Instagram Feed + Story). Separate buttons **Feed** / **Story** call `post_to_instagram_view` with target `feed` or `story`, using the same ensure + get_absolute_media_url + post_to_instagram flow.
 
 ---
 
 ## Telegram Integration
 
-- **Sending:** Uses Telegram Bot API `sendMessage` (and optional `reply_markup` for inline keyboard).
-- **Config:** `telegram_bot_token`, `telegram_bot_username` (for “Edit & Resubmit” link).
-- **When:**  
-  - After **approve:** `send_telegram_message(chat_id, approval_message_template.format(ad_id=...), config)`.  
-  - After **reject:** `send_telegram_rejection_with_button(chat_id, rejection_message_template.format(...), ad_uuid, config)` — adds inline button with `https://t.me/<username>?start=resubmit_<uuid>`.
-- **Testing:** Settings page can POST to `/settings/test-telegram/` with a token to run `getMe` (token is not saved by that request).
-- **Update handling:** **Webhook only** (no polling). Telegram sends POST to your server; no separate bot process.
-- **Endpoint:** `POST /telegram/webhook/<bot_id>/` — receives updates, runs conversation engine, sends replies.
-- **How to run the bot:** (1) Run Django with **HTTPS**. (2) In **Bots** → Create/Edit, set **Webhook URL** to `https://<your-domain>/telegram/webhook/<bot_id>/` and save — the app auto-calls `setWebhook`. (3) Send `/start` to the bot; you should get the language selection. If the bot does not respond, ensure the webhook URL is saved (so Telegram receives it), the server is reachable over HTTPS, and the bot is Active. Use `python manage.py check_telegram --bot-id 1` to test.
+- **Bots:** Multiple bots (Django admin + Bots UI). Token stored encrypted; webhook or polling; environment PROD/DEV. Webhook URL uses **production_base_url** and optional secret token.
+- **Channels:** TelegramChannel links a channel ID to a bot. SiteConfiguration can define a default channel (telegram_channel_id + default_telegram_bot). On approval, the Feed image is sent to the channel with a Persian caption (category, description, phone, hashtags).
+- **Flow:** User talks to bot → session state (language, contact, content, category) → submit → AdRequest created. On approve/reject, user gets a DM; on approve, channel gets the generated image.
+- **Runner:** Bots can auto-start with Django (default) or run via `python manage.py runbots` (e.g. for polling workers). Set `ENABLE_AUTO_BOTS=false` to disable auto-start. **TELEGRAM_MODE**: `polling` (getUpdates) or `webhook` (Telegram POSTs to your server).
 
-### Telegram Bot Runner
+---
 
-Telegram bots (polling workers and webhook health checker) can run in two ways: **auto-start with Django** (default) or **standalone** via the `runbots` management command.
+## URLs & Views
 
-#### Auto-start with Django (default)
+| Path | Description |
+|------|-------------|
+| `/` | Landing; staff → dashboard |
+| `/dashboard/` | KPIs, pulse, charts |
+| `/dashboard/channels/` | Channel list, create, delete, set default, test |
+| `/requests/` | Ad list, filters, bulk actions |
+| `/requests/<uuid>/` | Ad detail, approve/reject/request revision, **Preview & Publish**, **Feed** / **Story** buttons |
+| `/requests/<uuid>/preview-publish/` | Preview image + caption, then “Confirm & Distribute” |
+| `/requests/<uuid>/post-to-instagram/<feed\|story>/` | POST; publish to Instagram Feed or Story (JSON response) |
+| `/bots/` | Bot list, create, edit, test, webhook, start/stop |
+| `/settings/`, `/settings/hub/instagram/`, `.../telegram/`, `.../channels/`, `.../design/`, `.../storage/` | Settings Hub (Instagram API, Telegram, Channels, Design, Storage) |
+| `/settings/check-instagram/`, `.../instagram/connect/`, `.../callback/`, `.../check-permissions/` | Instagram token check and OAuth |
+| `/categories/` | Category CRUD |
+| `/templates/`, `/templates/tester/` | AdTemplate manager and tester |
+| `/deliveries/` | Delivery log list, retry |
+| `/admin-management/` | Admin profiles (Telegram ID for notifications) |
+| `/api/submit/` | Legacy submit (public) |
+| `/api/v1/submit/`, `/api/v1/status/<uuid>/`, `/api/v1/list/` | Partner API (X-API-KEY) |
+| `/api/approve/`, `/api/reject/`, `/api/bulk-approve/`, `/api/bulk-reject/`, `/api/pulse/` | Staff APIs |
+| `/api/instagram/post/` | Staff: post to Instagram |
+| `/telegram/webhook/<bot_id>/`, `.../<uuid>/` | Telegram webhook |
 
-When you start Django — `python manage.py runserver`, **gunicorn**, or any WSGI/ASGI server — the bot supervisor starts automatically in a background thread. You do **not** need to run `python manage.py runbots` separately.
+Django admin: `/admin/`. Login/logout: `/login/`, `/logout/`.
 
-- Works on **Windows**, **macOS**, and **Linux**.
-- Bots start only once (singleton); Django’s runserver autoreload does not start duplicate supervisors.
-- Supervisor runs in a daemon thread and does not block the main process.
-- SIGTERM/SIGINT trigger graceful shutdown of the supervisor and workers.
-- If the supervisor loop crashes, it restarts after 60 seconds.
-- To disable auto-start (e.g. in tests or when you run `runbots` manually), set:
+---
 
-  ```bash
-  ENABLE_AUTO_BOTS=false
-  ```
+## API Reference
 
-  Or in `settings.py`: `ENABLE_AUTO_BOTS = False`. Auto-start is also skipped when running `manage.py test`, `migrate`, `makemigrations`, `shell`, etc.
+### Submit (public)
 
-#### Standalone: runbots command
+- **POST /api/submit/** — Legacy: `content`, optional `category`, `telegram_user_id`, `telegram_username`, `raw_telegram_json`. Returns `{ status, uuid, ack_message }`.
+- **POST /api/v1/submit/** — Partner API: `X-API-KEY` header; body with ad content and optional category/contact. Returns `{ status, uuid, ... }`.
 
-For a dedicated process (e.g. separate systemd unit or when auto-start is disabled), run:
+### Staff (authenticated)
 
-```bash
-python manage.py runbots [--log-dir=logs]
-```
+- **POST /api/approve/** — `{ "ad_id": "<uuid>", "content": "optional" }`. Sets Approved and triggers full delivery.
+- **POST /api/reject/** — `{ "ad_id": "<uuid>", "reason": "..." }`.
+- **POST /api/bulk-approve/** — `{ "ad_ids": ["<uuid>", ...] }` (e.g. up to 50).
+- **POST /api/bulk-reject/** — `{ "ad_ids": [...], "reason": "..." }`.
+- **GET /api/pulse/** — Live stats for dashboard.
 
-This starts the same supervisor, which:
+### Partner API (X-API-KEY)
 
-- Loads all active bots (`is_active=True`)
-- Starts one worker process per polling bot
-- Monitors workers and auto-restarts crashed ones
-- Updates `last_heartbeat`, `status`, and `worker_pid` in the DB
-- Handles SIGTERM/SIGINT for graceful shutdown
-
-#### Command options
-
-| Option | Description |
-|--------|-------------|
-| `--log-dir=DIR` | Directory for `bot_<id>.log` files (default: `logs/`) |
-| `--once` | Run a single supervisor tick and exit |
-| `--bot-id=N` | Run only bot ID N (can repeat: `--bot-id=1 --bot-id=2`) |
-| `--debug` | Enable debug logging |
-
-#### Dev vs Prod
-
-- **Dev:** Use **Polling** mode (`TELEGRAM_MODE=polling`, default). No HTTPS required. `runbots` starts workers that long-poll `getUpdates`.
-- **Prod:** Use **Webhook** mode (`TELEGRAM_MODE=webhook`) when you have HTTPS. `runbots` only validates webhook + runs health checker; no polling workers. Telegram POSTs updates to your server.
-
-#### Polling vs Webhook
-
-| Mode | Behavior |
-|------|----------|
-| **Polling** | Workers fetch updates via `getUpdates`; logs to `logs/bot_<id>.log` |
-| **Webhook** | No workers; validate HTTPS webhook, run health checks every 30s |
-
-#### Settings
-
-```python
-# iraniu/settings.py (or env)
-TELEGRAM_MODE = "polling"   # or "webhook"
-ENABLE_AUTO_BOTS = True     # default; set False or env ENABLE_AUTO_BOTS=false to disable auto-start
-```
-
-#### Systemd example (optional)
-
-Use this only if you want a **separate** process for bots (e.g. you set `ENABLE_AUTO_BOTS=false` so the web process does not run bots):
-
-```ini
-[Unit]
-Description=Iraniu Telegram bot runner
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/path/to/project
-ExecStart=/path/to/venv/bin/python manage.py runbots --log-dir=/var/log/iraniu
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### Supervisor example (optional)
-
-Use this only if you run bots in a separate process (with `ENABLE_AUTO_BOTS=false`):
-
-```ini
-[program:iraniu-runbots]
-command=/path/to/venv/bin/python manage.py runbots --log-dir=/var/log/iraniu
-directory=/path/to/project
-user=www-data
-autostart=true
-autorestart=true
-stdout_logfile=/var/log/iraniu/runbots.log
-stderr_logfile=/var/log/iraniu/runbots.err
-```
-
-#### Bots page
-
-From **Bots** you can:
-
-- **Status** — online, offline, or error
-- **PID** — worker process ID when running
-- **Last heartbeat** — last update timestamp (stale > 90s → offline)
-- **Last error** — last error message (cleared on success)
-- **Start** / **Stop** / **Restart** — request actions (applied on next supervisor tick)
-- **Test token** — verify bot connection
+- **GET /api/v1/list/** — List approved ads (for partners).
+- **GET /api/v1/status/<uuid>/** — Status of one ad.
 
 ---
 
 ## Settings & Configuration
 
-All editable in **Settings** (and optionally Django admin):
+**Settings Hub** (staff):
 
-- **AI:** Enable/disable, API key, model, system prompt.
-- **Telegram:** Bot token, bot username, webhook URL, use_webhook.
-- **Messages:** Approval template, rejection template, submission ack message.
+- **Instagram API** — App ID, App Secret, Business ID, Facebook access token; OAuth connect/callback; production_base_url (used for media URLs if set). Token check and permission check endpoints.
+- **Telegram** — Legacy bot token/username; production_base_url for webhook.
+- **Channels** — Default channel ID, title, handle, bot; link to Channel Manager.
+- **Design** — Default font, watermark, primary/secondary/accent colors; theme (Light/Dark).
+- **Storage** — Retention, cleanup days; cleanup-generated-media action; export/import config (no plain secrets in export).
 
-Templates support placeholders: `{ad_id}`, `{reason}`. Export/Import are JSON (no secret values in export).
+Other: Categories, Template Manager (AdTemplate coordinates and story coordinates), Bots (multi-bot, webhook, start/stop), Admin Management (staff Telegram IDs for new-request notifications), API (Partner API keys).
 
 ---
 
 ## Security
 
-- **Staff-only:** Dashboard, Requests, Detail, Settings, and all approve/reject/pulse/export/import endpoints use `@staff_member_required`.
-- **CSRF:** Browser/staff endpoints use CSRF protection. Only machine-to-machine endpoints are exempt (`/api/submit/`, Telegram webhook routes, `/api/v1/submit/` with `X-API-KEY`).
-- **Secrets:** Stored in DB (SiteConfiguration). Do not commit real keys; use environment variables or secret management in production.
-- **Environment config:** Use `.env` (see `.env.example`) with `DJANGO_DEBUG`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, and security flags.
-- **Project settings:** Set `DJANGO_SETTINGS_MODULE=iraniu.settings` in `.env` or your environment when using runserver, WSGI, or management commands (e.g. in production or CI).
+- **Staff-only:** Dashboard, Requests, Detail, Settings, Bots, Categories, Templates, Deliveries, and approve/reject/pulse/export/import require staff.
+- **Public paths (no login):** `/`, `/login/`, `/logout/`, `/i18n/`, `/api/submit/`, `/api/v1/` (X-API-KEY), `/telegram/webhook/`, **`/media/`** (so Instagram and other crawlers can load images).
+- **CSRF:** Enabled for browser requests; exempt for `/api/submit/`, webhooks, and Partner API where appropriate.
+- **Secrets:** Stored in DB (encrypted where applicable). Use env and secret management in production; do not commit real keys.
+- **Allowed hosts / CSRF origins:** Set `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS` (e.g. `https://request.iraniu.uk`).
 
 ---
 
-## Icons & UI Assets
-
-Icons are **bundled locally** using [Font Awesome](https://fontawesome.com/) (free) — **no CDN required**. This avoids blocked fonts on Safari/macOS and keeps the app working offline.
-
-- **Location:** `static/vendor/fontawesome/` (css, webfonts, svgs). Included in the repo and served via Django `staticfiles`.
-- **Usage:** In templates use Font Awesome v6 classes, e.g. `<i class="fa-solid fa-inbox icon" aria-hidden="true"></i>`. The base layout loads `vendor/fontawesome/css/all.min.css` before custom CSS.
-- **Cache busting:** Static assets use `?v={{ STATIC_VERSION }}` (set via `STATIC_VERSION` env or default `1`). Run `collectstatic` for production.
-- **Optional SVG:** For inline SVG icons (e.g. in dashboards), place SVGs under `templates/icons/` and use `{% include "icons/play.svg" %}`. Font Awesome webfonts remain the primary icon set.
-
-Verify icon rendering in Safari, Chrome, and Firefox; self-hosted fonts avoid CSP and third-party blocking issues.
-
----
-
-This README describes the full Iraniu request management program: data models, flow, URLs, APIs, AI moderation, Telegram usage, and configuration in one place.
+This README describes the full Iraniu product: ad lifecycle, AI moderation, multi-channel delivery (Telegram DM, Telegram Channel, Instagram Feed, Instagram Story, API), template-based image generation with strict Feed/Story separation, and public media URLs for Instagram.

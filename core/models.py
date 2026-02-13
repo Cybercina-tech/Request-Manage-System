@@ -533,6 +533,26 @@ class AdRequest(models.Model):
         related_name='submitted_ads',
         help_text='If set, ad was submitted via Partner API by this client',
     )
+    # Generated images: strictly separate for Feed (post) vs Story (9:16)
+    generated_image = models.ImageField(
+        upload_to='generated_ads/',
+        blank=True,
+        null=True,
+        help_text='Generated image for Feed post (1:1 or 4:5). Used for Telegram channel and Instagram Feed.',
+    )
+    generated_story_image = models.ImageField(
+        upload_to='generated_stories/',
+        blank=True,
+        null=True,
+        help_text='Generated image for Instagram Story (9:16). Never mixed with Feed.',
+    )
+    # Instagram publish state (per target)
+    instagram_post_id = models.CharField(max_length=64, null=True, blank=True)
+    instagram_story_id = models.CharField(max_length=64, null=True, blank=True)
+    is_instagram_published = models.BooleanField(
+        default=False,
+        help_text='True when at least one of Feed or Story was successfully published to Instagram.',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -1007,7 +1027,7 @@ def default_adtemplate_coordinates():
       - category: {x, y, size, color, font_path, align, bold}
       - description: {x, y, size, color, font_path, max_width, align, bold}
       - phone: {x, y, size, color, font_path, align, bold, letter_spacing}
-        Phone: size default 130, letter_spacing 10–15px, color #131111; English font only.
+        Phone: x300 y1150, size 48, max_width 450, letter_spacing 2, color #131111; English font only.
     """
     return {
         'category': {
@@ -1031,15 +1051,15 @@ def default_adtemplate_coordinates():
             'bold': True,
         },
         'phone': {
-            'x': 250,
-            'y': 1100,
-            'size': 130,
+            'x': 300,
+            'y': 1150,
+            'size': 48,
             'color': '#131111',
             'font_path': '',
-            'max_width': 550,
+            'max_width': 450,
             'align': 'center',
             'bold': True,
-            'letter_spacing': 12,
+            'letter_spacing': 2,
         },
     }
 

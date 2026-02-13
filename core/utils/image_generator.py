@@ -60,9 +60,12 @@ def _find_font(ImageFont, size: int, prefer_persian: bool = True):
 
 
 def _find_english_font(ImageFont, size: int):
-    """Find English/Latin font for phone numbers."""
+    """Find English/Latin font for phone numbers. Prefers monstrat.ttf for ad banners."""
     base = Path(settings.BASE_DIR)
+    media_root = getattr(settings, 'MEDIA_ROOT', base / 'media') or (base / 'media')
     paths = [
+        base / 'static' / 'fonts' / 'monstrat.ttf',
+        Path(media_root) / 'ad_templates' / 'fonts' / 'monstrat.ttf',
         base / 'static' / 'fonts' / 'English.ttf',
         base / 'static' / 'fonts' / 'Roboto.ttf',
         Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),

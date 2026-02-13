@@ -166,17 +166,22 @@ def _load_font(ImageFont, size: int):
     return font
 
 
+# Preferred font for phone numbers on ad banners
+PHONE_FONT_NAME = "monstrat.ttf"
+
+
 def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     """
     Load a Latin/English TrueType font for the Phone layer.
-    Prefers bold system fonts (Arial Bold, Trebuchet MS Bold) for clear, heavy digits.
+    Prefers monstrat.ttf for ad banners; then explicit override; then fallbacks.
 
     Search order:
     1. Explicit override path (from coordinates JSON).
-    2. Bold system fonts: arialbd.ttf, trebucbd.ttf (Windows).
-    3. Project fonts: English.ttf, Roboto.ttf, etc.
-    4. Regular system fonts: Arial, Segoe UI, DejaVuSans.
-    5. Pillow default.
+    2. monstrat.ttf (project font for phone numbers).
+    3. Bold system fonts: arialbd.ttf, trebucbd.ttf (Windows).
+    4. Project fonts: English.ttf, Roboto.ttf, etc.
+    5. Regular system fonts: Arial, Segoe UI, DejaVuSans.
+    6. Pillow default.
     """
     paths: list[Path] = []
     base_dir = Path(settings.BASE_DIR)
@@ -187,6 +192,10 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     if font_path_override:
         p = _resolve_absolute(Path(font_path_override))
         paths.append(p)
+
+    # monstrat.ttf: preferred font for phone numbers on ad banners
+    for d in [base_dir / "static" / "fonts", media_root / "ad_templates" / "fonts"]:
+        paths.append(d / PHONE_FONT_NAME)
 
     import platform
     # Prefer bold system fonts for phone numbers (clear, heavy digits)
@@ -235,7 +244,7 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
 
     logger.warning(
         "No English font found; phone numbers will use Pillow default. "
-        "Place English.ttf or Roboto.ttf in media/ad_templates/fonts/ for best results."
+        "Place monstrat.ttf in static/fonts/ or media/ad_templates/fonts/ for best results."
     )
     return ImageFont.load_default()
 
@@ -279,7 +288,7 @@ def draw_spaced_text(
     y: int,
     align: str = "center",
     area_width: int | None = None,
-    spacing_px: int = 12,
+        spacing_px: int = 4,
     bold: bool = False,
 ):
     """
@@ -287,7 +296,7 @@ def draw_spaced_text(
 
     Pillow's draw.text() has no letter-spacing option. This function manually
     draws each character and shifts the cursor by (char_advance + spacing_px),
-    producing a clear, professional look for phone numbers (default 12px spacing).
+    producing a clear, professional look for phone numbers (10–15px spacing).
 
     Args:
         draw_obj: PIL ImageDraw instance.
@@ -298,7 +307,7 @@ def draw_spaced_text(
         y: Top Y position of the text baseline.
         align: "center", "left", or "right" — controls positioning within area_width.
         area_width: Width of the area to align within. If None, uses total text width.
-        spacing_px: Extra pixels between each character (default 12 for phone readability).
+        spacing_px: Extra pixels between each character (default 4 for compact fit).
         bold: If True, applies stroke for bold simulation.
     """
     if not text:
@@ -507,6 +516,8 @@ def create_ad_image(
     *,
     background_file=None,
     format_type: str = FORMAT_POST,
+    use_default_phone_coords: bool = False,
+    output_filename: str | None = None,
 ) -> str | None:
     """
     Generate ad image from an AdTemplate and return filesystem path.
@@ -521,6 +532,8 @@ def create_ad_image(
         background_file: Optional override for background. Can be str path,
                          file-like object, or None to use template's image.
         format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
+        use_default_phone_coords: If True, ignore template's phone coords; use code defaults.
+        output_filename: Optional filename for output (e.g. 'example_ad_test.png').
 
     Returns:
         Absolute filesystem path to the saved PNG, or None on failure.
@@ -549,6 +562,8 @@ def create_ad_image(
         user_coords = tpl.coordinates or {}
         for key, value in user_coords.items():
             if key in coords and isinstance(value, dict):
+                if key == "phone" and use_default_phone_coords:
+                    continue
                 coords[key].update({k: v for k, v in value.items() if v is not None})
     except Exception as e:
         logger.warning("create_ad_image: invalid coordinates for template %s: %s", tpl.pk, e)
@@ -643,24 +658,30 @@ def create_ad_image(
         bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=desc_stroke_w)
         desc_y += (bbox[3] - bbox[1]) + 6
 
-    # ── Phone Layer: English font only, LTR, Western digits, no RTL/shaping ──
-    # Large size (default 130), generous letter spacing (10–15px), dark color (#131111).
+    # ── Phone Layer: English font only (monstrat/arialbd/trebucbd), LTR, Western digits ──
+    # Default: x300 y1150, size 48, max_width 450, letter_spacing 2.
+    # is_phone=True: no reshaping, no RTL — numbers stay strictly LTR.
+    PHONE_BOTTOM_PADDING = 80  # Minimum clearance from image bottom to avoid overlap
     p_conf = coords.get("phone", {})
     phone_font = _load_english_font(
         p_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(p_conf.get("size"), default=130, minimum=120, maximum=400),
+        _coerce_int(p_conf.get("size"), default=48, minimum=20, maximum=400),
     )
     phone_color = _hex_to_rgb(p_conf.get("color") or "#131111")
-    phone_x = _coerce_int(p_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
-    phone_y = _coerce_int(p_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
+    phone_x = _coerce_int(p_conf.get("x"), default=300, minimum=-img.width * 2, maximum=img.width * 2)
+    phone_y_raw = _coerce_int(p_conf.get("y"), default=1150, minimum=-img.height * 2, maximum=img.height * 2)
+    # Clamp Y so phone bottom stays above img bottom (min 80px clearance)
+    est_phone_height = int(phone_font.size * 1.2)
+    max_phone_y = img.height - PHONE_BOTTOM_PADDING - est_phone_height
+    phone_y = min(phone_y_raw, max_phone_y)
     phone_align = (p_conf.get("align") or "center").strip().lower()
     if phone_align not in ("left", "center", "right"):
         phone_align = "center"
-    phone_max_w = _coerce_int(p_conf.get("max_width"), default=550, minimum=1, maximum=img.width * 2)
+    phone_max_w = _coerce_int(p_conf.get("max_width"), default=450, minimum=1, maximum=img.width * 2)
     phone_bold = bool(p_conf.get("bold", True))
-    # Kerning: 10–15px between digits for readability (avoid squashed look)
-    phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=12, minimum=10, maximum=25)
+    # Kerning: reduced spacing so number fits inside frame
+    phone_spacing = _coerce_int(p_conf.get("letter_spacing"), default=2, minimum=0, maximum=20)
     # Strict: is_phone=True — no reshaping, no RTL; numbers stay LTR
     phone_text = prepare_text(phone or "", is_phone=True)
     if phone_text:
@@ -683,13 +704,17 @@ def create_ad_image(
             for x in range(0, img.width, 20):
                 draw.line([(x, zone_y), (min(x + 10, img.width), zone_y)], fill=(255, 50, 50, 80), width=1)
 
-    # Save
+    # Save: Feed → generated_ads/, Story → generated_stories/ (strict separation)
     media_root = _get_media_root()
-    out_dir = media_root / "generated_ads"
+    subdir = "generated_stories" if is_story else "generated_ads"
+    out_dir = media_root / subdir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prefix = "story" if is_story else "ad"
-    filename = f"{prefix}_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
+    if output_filename:
+        filename = output_filename if output_filename.endswith(".png") else f"{output_filename}.png"
+    else:
+        prefix = "story" if is_story else "ad"
+        filename = f"{prefix}_{tpl.pk}_{uuid.uuid4().hex[:8]}.png"
     out_path = out_dir / filename
     try:
         img.save(out_path, format="PNG", optimize=True)
@@ -744,6 +769,104 @@ def generate_ad_image(ad, is_story: bool = False) -> str | None:
     return create_ad_image(template.pk, category_text, description, phone, format_type=format_type)
 
 
+def ensure_feed_image(ad) -> bool:
+    """
+    Ensure ad has generated_image (Feed/Post). Generate and save to model if missing.
+    Returns True if ad.generated_image is set (existing or newly generated).
+    """
+    if getattr(ad, 'generated_image', None) and ad.generated_image:
+        try:
+            if ad.generated_image.path and Path(ad.generated_image.path).exists():
+                return True
+        except (ValueError, OSError):
+            pass
+    path = generate_ad_image(ad, is_story=False)
+    if not path:
+        return False
+    try:
+        media_root = _get_media_root()
+        rel = str(Path(path).resolve().relative_to(media_root.resolve())).replace('\\', '/')
+        ad.generated_image.name = rel
+        ad.save(update_fields=['generated_image'])
+        logger.info("ensure_feed_image: saved for ad %s -> %s", ad.uuid, rel)
+        return True
+    except Exception as e:
+        logger.warning("ensure_feed_image: failed to attach path for ad %s: %s", ad.uuid, e)
+        return False
+
+
+def ensure_story_image(ad) -> bool:
+    """
+    Ensure ad has generated_story_image (9:16 Story). Generate and save to model if missing.
+    Returns True if ad.generated_story_image is set (existing or newly generated).
+    """
+    if getattr(ad, 'generated_story_image', None) and ad.generated_story_image:
+        try:
+            if ad.generated_story_image.path and Path(ad.generated_story_image.path).exists():
+                return True
+        except (ValueError, OSError):
+            pass
+    path = generate_ad_image(ad, is_story=True)
+    if not path:
+        return False
+    try:
+        media_root = _get_media_root()
+        rel = str(Path(path).resolve().relative_to(media_root.resolve())).replace('\\', '/')
+        ad.generated_story_image.name = rel
+        ad.save(update_fields=['generated_story_image'])
+        logger.info("ensure_story_image: saved for ad %s -> %s", ad.uuid, rel)
+        return True
+    except Exception as e:
+        logger.warning("ensure_story_image: failed to attach path for ad %s: %s", ad.uuid, e)
+        return False
+
+
+def generate_example_ad_banner(
+    format_type: str = FORMAT_POST,
+    output_filename: str | None = None,
+) -> str | None:
+    """
+    Generate a sample ad banner for testing (e.g. phone font with monstrat.ttf).
+
+    Uses sample Persian category, description, and phone number to verify
+    layout and font rendering. Saves to MEDIA_ROOT/generated_ads/ with
+    a predictable filename for easy inspection.
+
+    Args:
+        format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
+        output_filename: Optional custom filename (e.g. 'example_test.png').
+                        Default: example_ad_<format>_<uuid8>.png
+
+    Returns:
+        Absolute path to the generated image, or None on failure.
+
+    Example:
+        >>> from core.services.image_engine import generate_example_ad_banner
+        >>> path = generate_example_ad_banner(format_type='POST')
+        >>> print(path)  # .../media/generated_ads/example_ad_POST_abc12345.png
+    """
+    template = AdTemplate.objects.filter(is_active=True).first()
+    if not template:
+        logger.warning("generate_example_ad_banner: no active AdTemplate")
+        return None
+
+    category_text = "فروش ویژه"
+    description_text = "متن نمونه برای تست بنر آگهی و فونت شماره تلفن"
+    phone_number = "+44 20 7123 4567"
+
+    fn = (output_filename or "example_ad_test.png")
+    path = create_ad_image(
+        template.pk,
+        category_text,
+        description_text,
+        phone_number,
+        format_type=format_type,
+        use_default_phone_coords=True,
+        output_filename=fn,
+    )
+    return path
+
+
 def delete_old_assets(days: int = 7) -> dict:
     """
     Delete generated ad/story images older than *days*.
@@ -769,6 +892,7 @@ def delete_old_assets(days: int = 7) -> dict:
     media_root = _get_media_root()
     target_dirs = [
         media_root / "generated_ads",
+        media_root / "generated_stories",
     ]
 
     # File extensions and prefixes that must NEVER be deleted

@@ -261,7 +261,7 @@
           </h2>
           <div id="layerPhone" class="accordion-collapse collapse">
             <div class="accordion-body">
-              {% include "core/partials/layer_controls.html" with prefix="phone" title="Phone" x=p.x|default:0 y=p.y|default:0 size=p.size|default:50 color=p.color|default:"#131111" max_width=p.max_width|default:550 align=p.align|default:"center" bold=p.bold %}
+              {% include "core/partials/layer_controls.html" with prefix="phone" title="Phone" x=p.x|default:0 y=p.y|default:0 size=p.size|default:48 color=p.color|default:"#131111" max_width=p.max_width|default:450 align=p.align|default:"center" bold=p.bold %}
             </div>
           </div>
         </div>
@@ -702,8 +702,8 @@
         color: d.description.color || '#FFFFFF', maxWidth: d.description.max_width || 650, align: d.description.align || 'center', bold: d.description.bold
       });
       setLayer('phone', {
-        x: d.phone.x || 0, y: d.phone.y || 0, size: d.phone.size || 50,
-        color: d.phone.color || '#131111', maxWidth: d.phone.max_width || 550, align: d.phone.align || 'center', bold: d.phone.bold
+        x: d.phone.x || 0, y: d.phone.y || 0, size: d.phone.size || 48,
+        color: d.phone.color || '#131111', maxWidth: d.phone.max_width || 450, align: d.phone.align || 'center', bold: d.phone.bold
       });
       queueRender();
     });

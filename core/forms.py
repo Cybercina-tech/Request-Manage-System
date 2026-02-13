@@ -78,7 +78,7 @@ class TemplateTesterForm(forms.Form):
     )
     phone_number = forms.CharField(
         required=False,
-        initial="+98 912 345 6789",
+        initial="+44 20 7123 4567",
         max_length=32,
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )

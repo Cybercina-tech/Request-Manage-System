@@ -359,17 +359,45 @@ class DeliveryService:
 
     @staticmethod
     def _send_instagram(ad: AdRequest, log: DeliveryLog | None = None) -> bool:
-        """Post ad to Instagram Feed via InstagramService. Populates log.error_message on failure."""
+        """
+        Post ad to Instagram Feed. Uses ad.generated_image (generated if missing).
+        Public URL must be absolute (e.g. https://request.iraniu.uk/media/...) so Meta can fetch it.
+        """
+        from core.services.image_engine import ensure_feed_image
+        from core.services.instagram_api import get_absolute_media_url
+        from core.services.instagram_client import create_container, publish_media
         from core.services.instagram import InstagramService
 
-        result = InstagramService.post_ad(ad)
-        if isinstance(result, dict) and result.get('success'):
+        if not ensure_feed_image(ad):
             if log:
-                log.response_payload = {'media_id': result.get('id', '')}
-            return True
-        if log is not None and isinstance(result, dict) and result.get('message'):
-            log.error_message = result.get('message', '')[:500]
-        return False
+                log.error_message = 'Feed image generation or save failed.'
+            return False
+        image_url = get_absolute_media_url(ad.generated_image)
+        if not image_url or not image_url.startswith('http'):
+            if log:
+                log.error_message = 'Feed image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
+            return False
+        logger.info('Sending Feed URL to Instagram: %s', image_url)
+        caption = InstagramService.format_caption(ad, lang='fa')
+        result = create_container(image_url, caption[:2200], is_story=False)
+        if not result.get('success') or not result.get('creation_id'):
+            msg = result.get('message', 'Container creation failed')[:500]
+            if log:
+                log.error_message = msg
+            return False
+        pub = publish_media(result['creation_id'])
+        if not pub.get('success'):
+            msg = pub.get('message', 'Publish failed')[:500]
+            if log:
+                log.error_message = msg
+            return False
+        media_id = pub.get('id', '')
+        if log:
+            log.response_payload = {'media_id': media_id}
+        ad.instagram_post_id = media_id
+        ad.is_instagram_published = True
+        ad.save(update_fields=['instagram_post_id', 'is_instagram_published'])
+        return True
 
     # ------------------------------------------------------------------
     # Channel: Instagram Story (9:16 via Graph API)
@@ -378,49 +406,41 @@ class DeliveryService:
     @staticmethod
     def _send_instagram_story(ad: AdRequest, log: DeliveryLog) -> bool:
         """
-        Generate a 9:16 story image from the ad and post as Instagram Story.
-        Uses the image engine with format_type='STORY', then Graph API with media_type='STORIES'.
+        Post ad to Instagram Story (9:16). Uses ad.generated_story_image (generated if missing).
+        Public URL must be absolute so Meta crawler can fetch it (no login).
         """
-        from core.services.image_engine import generate_ad_image
-        from core.services.instagram_api import _path_to_public_url
+        from core.services.image_engine import ensure_story_image
+        from core.services.instagram_api import get_absolute_media_url
         from core.services.instagram_client import create_container, publish_media
 
-        # Generate story image using the high-level Ad-based API
-        try:
-            story_path = generate_ad_image(ad, is_story=True)
-        except Exception as exc:
-            log.error_message = f"Story image generation failed: {exc!s}"[:500]
-            logger.warning("_send_instagram_story: image gen failed ad=%s: %s", ad.uuid, exc)
+        if not ensure_story_image(ad):
+            log.error_message = 'Story image generation or save failed.'
             return False
-
-        if not story_path:
-            log.error_message = "Story image generation returned None."
+        story_url = get_absolute_media_url(ad.generated_story_image)
+        if not story_url or not story_url.startswith('http'):
+            log.error_message = 'Story image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
             return False
-
-        story_url = _path_to_public_url(story_path)
-        if not story_url:
-            log.error_message = "Could not resolve story image to public URL."
-            return False
-
-        # Post as Story (no caption — Graph API doesn't support captions on Stories)
+        logger.info('Sending Story URL to Instagram: %s', story_url)
         try:
             container = create_container(story_url, "", is_story=True)
             if not container.get("success") or not container.get("creation_id"):
-                msg = container.get("message", "Container creation failed")
-                log.error_message = msg[:500]
+                msg = container.get("message", "Container creation failed")[:500]
+                log.error_message = msg
                 logger.warning("_send_instagram_story: container failed ad=%s: %s", ad.uuid, msg)
                 return False
-
             pub = publish_media(container["creation_id"])
             if pub.get("success"):
-                log.response_payload = {'media_id': pub.get('id', '')}
+                media_id = pub.get('id', '')
+                log.response_payload = {'media_id': media_id}
+                ad.instagram_story_id = media_id
+                ad.is_instagram_published = True
+                ad.save(update_fields=['instagram_story_id', 'is_instagram_published'])
                 logger.info("_send_instagram_story: published for ad %s", ad.uuid)
                 return True
-            else:
-                msg = pub.get("message", "Publish failed")
-                log.error_message = msg[:500]
-                logger.warning("_send_instagram_story: publish failed ad=%s: %s", ad.uuid, msg)
-                return False
+            msg = pub.get("message", "Publish failed")[:500]
+            log.error_message = msg
+            logger.warning("_send_instagram_story: publish failed ad=%s: %s", ad.uuid, msg)
+            return False
         except Exception as exc:
             log.error_message = str(exc)[:500]
             logger.exception("_send_instagram_story: crash ad=%s: %s", ad.uuid, exc)

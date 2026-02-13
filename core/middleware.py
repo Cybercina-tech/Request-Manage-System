@@ -7,14 +7,16 @@ from django.conf import settings
 
 
 # Paths (exact or prefix) that anonymous users may access
+# /media/ must be public so Instagram (Meta) crawler can fetch image URLs (200 OK, no login).
 PUBLIC_PATHS = (
     "/",
     "/login/",
     "/logout/",
     "/i18n/",       # Language switching (set_language) must be public
     "/api/submit/",
-    "/api/v1/",  # Partner API uses X-API-KEY
+    "/api/v1/",     # Partner API uses X-API-KEY
     "/telegram/webhook/",
+    "/media/",      # Public media for Instagram Graph API image_url (Feed + Story)
 )
 
 
