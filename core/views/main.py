@@ -1158,9 +1158,11 @@ def instagram_check_permissions(request):
 @require_http_methods(['GET', 'POST'])
 def instagram_webhook(request):
     """
-    Instagram webhook endpoint for Meta to verify and send real-time updates.
-    GET: Meta sends hub.mode, hub.verify_token, hub.challenge; return hub.challenge if token matches.
-    POST: Meta sends payload; log to instagram logger (file + console) and return 200.
+    Public Instagram webhook (no @login_required). Meta sends GET for verify, POST for payloads.
+    GET with hub.mode=subscribe & hub.verify_token & hub.challenge: return challenge if token matches (200).
+    GET without params (e.g. browser): return 200 with short text so endpoint is reachable.
+    GET with wrong verify_token: return 403.
+    POST: log body and return 200.
     """
     logger_ig = logging.getLogger('core.services.instagram')
     if request.method == 'GET':
@@ -1171,8 +1173,11 @@ def instagram_webhook(request):
         if hub_mode == 'subscribe' and hub_verify_token == expected_token and hub_challenge:
             logger_ig.info('Instagram webhook verified: challenge returned.')
             return HttpResponse(hub_challenge, content_type='text/plain', status=200)
-        logger_ig.warning('Instagram webhook GET verification failed: mode=%s token_match=%s', hub_mode, hub_verify_token == expected_token)
-        return HttpResponseForbidden()
+        if hub_verify_token and hub_verify_token != expected_token:
+            logger_ig.warning('Instagram webhook GET verification failed: token mismatch.')
+            return HttpResponseForbidden()
+        # No params or missing challenge: e.g. browser visit. Return 200 so URL is not 403.
+        return HttpResponse('Instagram webhook endpoint.', content_type='text/plain', status=200)
     if request.method == 'POST':
         try:
             body = request.body.decode('utf-8') if request.body else ''

@@ -43,8 +43,10 @@ class LoginRequiredMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Explicit bypass: /media/ is always public (read-only; no directory listing). Skip auth.
+        # Explicit bypass: these paths are always public (no login). Skip auth.
         if request.path.startswith('/media/'):
+            return self.get_response(request)
+        if request.path.startswith('/instagram/webhook/'):
             return self.get_response(request)
         if not _is_public(request.path):
             if not request.user.is_authenticated:
