@@ -3,12 +3,15 @@ Iraniu — Distribute approved ads: Telegram via DeliveryService (professional c
 Telegram is always sent through DeliveryService.send(ad, 'telegram_channel') so only the professional
 caption (🚀 #آگهی_جدید) is used. Single-execution guard is in DeliveryService.
 
+Instagram delivery runs in a background thread when queue is OFF to avoid blocking the UI (30+ second API round-trip).
+
 NOTE: For automatic distribution on approval, see DeliveryService in core/services/delivery.py.
 This module's distribute_ad() is for the manual "Preview & Publish" button; it delegates Telegram to DeliveryService.
 """
 
 import logging
-from typing import Optional
+import threading
+from typing import Optional, Tuple
 
 from django.conf import settings
 
@@ -18,6 +21,60 @@ from core.services.image_engine import ensure_feed_image
 from core.services.delivery import DeliveryService
 
 logger = logging.getLogger(__name__)
+
+
+def _run_instagram_delivery_background(ad_pk: int) -> None:
+    """
+    Background worker: send ad to Instagram Feed + Story via DeliveryService.
+    Runs in a separate thread so the UI returns immediately. Closes DB connection when done.
+    """
+    import django
+    django.setup()
+
+    from django.db import connection
+
+    try:
+        ad = AdRequest.objects.select_related('category', 'user', 'bot').get(pk=ad_pk)
+    except AdRequest.DoesNotExist:
+        logger.error("_run_instagram_delivery_background: ad pk=%s not found", ad_pk)
+        return
+
+    feed_ok = False
+    story_ok = False
+    try:
+        feed_ok = DeliveryService.send(ad, 'instagram', force_deliver=True)
+        story_ok = DeliveryService.send(ad, 'instagram_story', force_deliver=True)
+    except Exception as exc:
+        logger.exception("_run_instagram_delivery_background: crash ad=%s: %s", ad.uuid, exc)
+        try:
+            send_notification(
+                "error",
+                "Instagram delivery crashed. Check System Logs.",
+                link=f"/requests/{ad.uuid}/",
+            )
+        except Exception:
+            pass
+    else:
+        if feed_ok or story_ok:
+            try:
+                send_notification(
+                    "success",
+                    f"آگهی {str(ad.uuid)[:8]} با موفقیت در اینستاگرام منتشر شد.",
+                    link=f"/requests/{ad.uuid}/",
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                send_notification(
+                    "error",
+                    "Instagram post or story failed. Check token and that image URL is public.",
+                    link="/settings/hub/instagram/",
+                )
+            except Exception:
+                pass
+    finally:
+        connection.close()
 
 
 def _channel_from_site_config():
@@ -71,21 +128,23 @@ def get_default_channel() -> Optional[TelegramChannel]:
     )
 
 
-def distribute_ad(ad_obj: AdRequest) -> bool:
+def distribute_ad(ad_obj: AdRequest) -> Tuple[bool, bool]:
     """
     Manual distribution (from Preview & Publish page):
     1. Telegram: delegated to DeliveryService.send(ad, 'telegram_channel') — professional caption only, single-execution guard there.
     2. Generate Feed image for Instagram if needed.
-    3. Instagram Feed + Story: create_container + publish_media, or queue when enable_instagram_queue is ON.
+    3. Instagram Feed + Story: queue, or run in background thread when queue is OFF (non-blocking).
 
-    Returns True if at least Telegram or Instagram succeeded, False otherwise.
+    Returns (ok, instagram_in_background):
+      - ok: True if at least Telegram succeeded or Instagram was queued/started.
+      - instagram_in_background: True when Instagram is being processed in a background thread (UI should show "در صف انتشار" message).
     """
     if not isinstance(ad_obj, AdRequest):
         logger.warning("post_manager.distribute_ad: invalid ad type")
-        return False
+        return False, False
     if ad_obj.status != AdRequest.Status.APPROVED:
         logger.debug("post_manager.distribute_ad: ad %s not approved, status=%s", ad_obj.uuid, ad_obj.status)
-        return False
+        return False, False
 
     # Generate Feed image so DeliveryService and Instagram have it
     ensure_feed_image(ad_obj)
@@ -103,8 +162,10 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
     # ──────────────────────────────────────────────
     # Instagram Feed + Story (strict separation: Feed URL vs Story URL)
     # When enable_instagram_queue is ON: queue instead of posting immediately.
+    # When OFF: run in background thread so UI returns immediately.
     # ──────────────────────────────────────────────
     instagram_ok = False
+    instagram_in_background = False
     config = SiteConfiguration.get_config()
     if not getattr(config, 'is_instagram_enabled', False):
         logger.info("post_manager.distribute_ad: Instagram disabled, skipping for ad %s", ad_obj.uuid)
@@ -119,19 +180,16 @@ def distribute_ad(ad_obj: AdRequest) -> bool:
             logger.info("post_manager.distribute_ad: Instagram queue ON, ad %s queued", ad_obj.uuid)
             instagram_ok = True
         else:
-            # Use DeliveryService for Instagram so token check, 30s delay, and container status are applied
-            try:
-                instagram_ok = DeliveryService.send(ad_obj, 'instagram')
-                story_ok = DeliveryService.send(ad_obj, 'instagram_story')
-                if story_ok:
-                    instagram_ok = True
-                if not instagram_ok:
-                    send_notification(
-                        "error",
-                        "Instagram post or story failed. Check token and that image URL is public.",
-                        link="/settings/hub/instagram/",
-                    )
-            except Exception as exc:
-                logger.exception("post_manager.distribute_ad: Instagram delivery crashed ad=%s: %s", ad_obj.uuid, exc)
+            # Run Instagram delivery in background thread — do not block UI (30+ second API round-trip)
+            thread = threading.Thread(
+                target=_run_instagram_delivery_background,
+                args=(ad_obj.pk,),
+                name=f"instagram-distribute-{ad_obj.uuid}",
+                daemon=True,
+            )
+            thread.start()
+            logger.info("post_manager.distribute_ad: Instagram delivery started in background for ad %s", ad_obj.uuid)
+            instagram_ok = True
+            instagram_in_background = True
 
-    return telegram_ok or instagram_ok
+    return (telegram_ok or instagram_ok, instagram_in_background)

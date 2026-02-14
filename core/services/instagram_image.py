@@ -3,7 +3,7 @@ Iraniu — Dynamic image generation for Instagram posts.
 
 Uses static/banner_config.json for font path and colors.
 Font: static/fonts/YekanBakh-Bold.ttf. Raw text (no arabic_reshaper/python-bidi).
-Canvas: 1080x1080 (Square). Meets Instagram: min 320px, max 1080px.
+Canvas: 1080x1350 (Portrait 4:5). Meets Instagram: min 320px, max 1080px.
 """
 
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_MIN_SIZE = 320
 INSTAGRAM_MAX_SIZE = 1080
 DEFAULT_WIDTH = 1080
-DEFAULT_HEIGHT = 1080
+DEFAULT_HEIGHT = 1350
 
 
 def _ensure_pillow():

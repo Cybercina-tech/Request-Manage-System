@@ -1,8 +1,10 @@
 """
 Iraniu — Management command: generate an example ad banner for testing.
 Run: python manage.py generate_example_banner [--format POST|STORY] [--output FILENAME]
+     python manage.py generate_example_banner --portrait
 
 Use this to verify ad banner generation and the monstrat.ttf phone font.
+Portrait (1080x1350) is the default format for Telegram and Instagram Feed.
 """
 
 from pathlib import Path
@@ -14,28 +16,48 @@ from core.services.image_engine import generate_example_ad_banner, FORMAT_POST, 
 
 
 class Command(BaseCommand):
-    help = "Generate a sample ad banner for testing (phone font: monstrat.ttf)."
+    help = "Generate a sample ad banner for testing (phone font: monstrat.ttf). Portrait 1080x1350 default."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--format",
             choices=["POST", "STORY"],
             default="POST",
-            help="Output format: POST (1080x1350) or STORY (1080x1920)",
+            help="Output format: POST (1080x1350 Portrait) or STORY (1080x1920)",
         )
         parser.add_argument(
             "--output",
             type=str,
-            default="example_ad_test.png",
-            help="Output filename (default: example_ad_test.png)",
+            default=None,
+            help="Output filename (default: example_ad_test.png, or test_portrait_banner.jpg with --portrait)",
+        )
+        parser.add_argument(
+            "--portrait",
+            action="store_true",
+            help="Generate portrait sample and save to media/test_portrait_banner.jpg",
         )
 
     def handle(self, *args, **options):
         fmt = options["format"]
         output = options["output"]
+        portrait = options["portrait"]
 
-        self.stdout.write(f"Generating example ad banner ({fmt})...")
-        path = generate_example_ad_banner(format_type=fmt, output_filename=output)
+        output_path_arg = None
+        if portrait:
+            output = "test_portrait_banner.jpg"
+            fmt = "POST"
+            media_root = Path(settings.MEDIA_ROOT or "media")
+            output_path_arg = media_root / output
+
+        if output is None:
+            output = "example_ad_test.png"
+
+        self.stdout.write(f"Generating example ad banner ({fmt} 1080x1350)...")
+        path = generate_example_ad_banner(
+            format_type=fmt,
+            output_filename=output,
+            output_path=output_path_arg,
+        )
 
         if not path:
             self.stderr.write(self.style.ERROR("Failed to generate banner."))

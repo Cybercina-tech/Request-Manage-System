@@ -403,9 +403,12 @@ def preview_publish(request, uuid):
 
     if request.method == 'POST':
         from core.services.post_manager import distribute_ad
-        ok = distribute_ad(ad)
+        ok, instagram_in_background = distribute_ad(ad)
         if ok:
-            messages.success(request, 'Ad distributed to Telegram and Instagram.')
+            if instagram_in_background:
+                messages.success(request, 'آگهی در صف انتشار قرار گرفت و در پس‌زمینه در حال پردازش است.')
+            else:
+                messages.success(request, 'Ad distributed to Telegram and Instagram.')
         else:
             messages.error(request, 'Distribution failed. Check logs and channel/bot configuration.')
         return redirect('ad_detail', uuid=ad.uuid)
@@ -2445,9 +2448,9 @@ def template_manual_edit(request, template_id):
 
     template = get_object_or_404(AdTemplate, pk=template_id)
 
-    # Get background image URL and dimensions
+    # Get background image URL and dimensions (POST: 1080x1350 Portrait)
     background_url = ''
-    img_width, img_height = 1080, 1080
+    img_width, img_height = FORMAT_DIMENSIONS[FORMAT_POST]
     if template.background_image:
         try:
             background_url = template.background_image.url
@@ -2508,7 +2511,7 @@ def template_manual_edit(request, template_id):
         v = (value or '').strip().lower()
         return v if v in ('left', 'center', 'right') else default
 
-    def _layer_config(prefix: str, base: dict, *, include_max_width: bool = False, ref_w: int = 1080, ref_h: int = 1080) -> dict:
+    def _layer_config(prefix: str, base: dict, *, include_max_width: bool = False, ref_w: int = 1080, ref_h: int = 1350) -> dict:
         min_x, max_x = -ref_w, ref_w * 2
         min_y, max_y = -ref_h, ref_h * 2
         parsed = {

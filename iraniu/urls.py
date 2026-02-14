@@ -22,3 +22,9 @@ urlpatterns = [
 # Media: public read-only. Not wrapped in any login_required; middleware bypasses auth for /media/
 if settings.DEBUG and settings.MEDIA_URL:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# Custom error handlers (technical diagnostics for staff when DEBUG=False)
+handler400 = 'core.views.error_views.custom_bad_request'
+handler403 = 'core.views.error_views.custom_permission_denied'
+handler404 = 'core.views.error_views.custom_page_not_found'
+handler500 = 'core.views.error_views.custom_server_error'

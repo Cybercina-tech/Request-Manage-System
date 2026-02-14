@@ -1,0 +1,94 @@
+{% load static i18n %}
+{% extends "base_page.html" %}
+{% block title %}{{ error_title }} ({{ error_code }}) — Iraniu{% endblock %}
+
+{% block content %}
+<div class="error-page-custom container-fluid py-4">
+  <div class="alert alert-{{ error_alert_class }} alert-dismissible fade show mb-4" role="alert">
+    <h2 class="alert-heading h4 mb-2">
+      <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>
+      {% trans "Oops! A problem occurred." %}
+    </h2>
+    <p class="mb-1"><strong>{{ error_title }}</strong> ({{ error_code }})</p>
+    <p class="mb-0">{{ error_message }}</p>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+
+  <div class="action-buttons mb-4">
+    {% if user.is_authenticated %}
+      <a href="{% url 'dashboard' %}" class="btn btn-primary">
+        <i class="fa-solid fa-house me-1" aria-hidden="true"></i>
+        {% trans "Back to Dashboard" %}
+      </a>
+    {% else %}
+      <a href="{% url 'landing' %}" class="btn btn-primary">
+        <i class="fa-solid fa-house me-1" aria-hidden="true"></i>
+        {% trans "Go Home" %}
+      </a>
+    {% endif %}
+    <button type="button" class="btn btn-outline-secondary" onclick="window.location.reload();">
+      <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>
+      {% trans "Retry" %}
+    </button>
+    {% if user.is_authenticated %}
+      <a href="{% url 'system_logs_list' %}" class="btn btn-outline-secondary">
+        <i class="fa-solid fa-clipboard-list me-1" aria-hidden="true"></i>
+        {% trans "Check System Logs" %}
+      </a>
+    {% endif %}
+  </div>
+
+  <section class="technical-diagnostics border rounded p-3 bg-dark text-light" aria-labelledby="tech-heading">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+      <h3 id="tech-heading" class="h6 mb-0 text-warning">
+        <i class="fa-solid fa-code me-1" aria-hidden="true"></i>
+        {% trans "Technical Diagnostics" %}
+      </h3>
+      <button type="button" class="btn btn-sm btn-outline-light" id="copyErrorBtn" data-bs-toggle="tooltip" title="{% trans 'Copy error to clipboard' %}">
+        <i class="fa-solid fa-copy me-1" aria-hidden="true"></i>
+        <span class="copy-btn-text">{% trans "Copy Error to Clipboard" %}</span>
+      </button>
+    </div>
+    <p class="small text-muted mb-2">{% trans "Request path" %}: <code class="text-info">{{ request_path }}</code></p>
+    <pre id="technicalDetails" class="technical-pre mb-0 p-3 rounded bg-black text-light overflow-auto" style="max-height: 400px; font-size: 0.85rem;"><code>{{ technical_details }}</code></pre>
+  </section>
+</div>
+
+<script>
+(function() {
+  var pre = document.getElementById('technicalDetails');
+  var btn = document.getElementById('copyErrorBtn');
+  var code = pre ? (pre.textContent || pre.innerText || '') : '';
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    if (!code) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(function() {
+        var span = btn.querySelector('.copy-btn-text');
+        if (span) { var t = span.textContent; span.textContent = 'Copied!'; setTimeout(function() { span.textContent = t; }, 2000); }
+      }).catch(function() { fallbackCopy(); });
+    } else {
+      fallbackCopy();
+    }
+  });
+  function fallbackCopy() {
+    var ta = document.createElement('textarea');
+    ta.value = code;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'absolute';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      var span = btn.querySelector('.copy-btn-text');
+      if (span) { var t = span.textContent; span.textContent = 'Copied!'; setTimeout(function() { span.textContent = t; }, 2000); }
+    } catch (e) {}
+    document.body.removeChild(ta);
+  }
+})();
+if (typeof bootstrap !== 'undefined' && document.getElementById('copyErrorBtn')) {
+  new bootstrap.Tooltip(document.getElementById('copyErrorBtn'));
+}
+</script>
+{% endblock %}

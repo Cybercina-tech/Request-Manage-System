@@ -6,7 +6,7 @@ Features:
 - Coordinates, font sizes, and colors from static/banner_config.json only (no hardcoded values).
 - Font: static/fonts/YekanBakh-Bold.ttf for Category and Description; no pseudo-bold stroke.
 - Raw text passed to draw.text() (no arabic_reshaper or python-bidi).
-- POST: 1080x1080 (Square); STORY: 1080x1920 (9:16); Story uses Y+285 offset.
+- POST: 1080x1350 (Portrait 4:5); STORY: 1080x1920 (9:16); Story uses Y+285 offset.
 - Three text layers: Category, Description, Phone.
 """
 
@@ -335,10 +335,11 @@ def _get_media_root() -> Path:
 # ---------------------------------------------------------------------------
 
 # Fallback only when static/banner_config.json is missing (mirrors that file).
+# Portrait 1080x1350 layout: Category y=290, Message y=600, Phone y=1180 (yellow area at bottom)
 _DEFAULT_BANNER_CONFIG = {
-    "category": {"x": 180, "y": 288, "size": 93, "color": "#EEFF00", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 700, "align": "center"},
-    "message": {"x": 215, "y": 598, "size": 58, "color": "#FFFFFF", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 650, "align": "center"},
-    "phone": {"x": 300, "y": 1150, "size": 48, "color": "#131111", "max_width": 450, "align": "center", "letter_spacing": 2},
+    "category": {"x": 180, "y": 290, "size": 90, "color": "#EEFF00", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 700, "align": "center"},
+    "message": {"x": 215, "y": 600, "size": 55, "color": "#FFFFFF", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 650, "align": "center"},
+    "phone": {"x": 300, "y": 1140, "size": 52, "color": "#000000", "max_width": 450, "align": "center", "letter_spacing": 2},
 }
 
 
@@ -506,7 +507,7 @@ def create_ad_image(
         phone: Phone number text.
         background_file: Optional override for background. Can be str path,
                          file-like object, or None to use template's image.
-        format_type: 'POST' (1080x1080) or 'STORY' (1080x1920).
+        format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
         use_default_phone_coords: If True, ignore template's phone coords; use code defaults.
         output_filename: Optional filename for output (e.g. 'example_ad_test.png').
         coords_override: Optional dict to override coordinates (keys: category, message/description, phone).
@@ -596,7 +597,7 @@ def create_ad_image(
         logger.warning("create_ad_image: failed to load background for template %s: %s", tpl.pk, e)
         return None
 
-    # POST: 1080x1080 (Square); resize background to exact dimensions
+    # POST: 1080x1350 (Portrait 4:5); resize background to exact dimensions
     if not is_story:
         target_w, target_h = FORMAT_DIMENSIONS[FORMAT_POST]
         if img.size != (target_w, target_h):
@@ -629,7 +630,7 @@ def create_ad_image(
     c_conf = coords.get("category", {})
     cat_font = _load_font(
         ImageFont,
-        _coerce_int(c_conf.get("size"), default=93, minimum=1, maximum=400),
+        _coerce_int(c_conf.get("size"), default=90, minimum=1, maximum=400),
         c_conf.get("font_path"),
     )
     cat_color = _hex_to_rgb(c_conf.get("color") or "#EEFF00")
@@ -648,7 +649,7 @@ def create_ad_image(
     d_conf = coords.get("description", {})
     desc_font = _load_font(
         ImageFont,
-        _coerce_int(d_conf.get("size"), default=58, minimum=1, maximum=400),
+        _coerce_int(d_conf.get("size"), default=55, minimum=1, maximum=400),
         d_conf.get("font_path"),
     )
     desc_color = _hex_to_rgb(d_conf.get("color") or "#FFFFFF")
@@ -666,18 +667,18 @@ def create_ad_image(
         desc_y += (bbox[3] - bbox[1]) + 6
 
     # ── Phone Layer: English font only (monstrat/arialbd/trebucbd), LTR, Western digits ──
-    # Default: x300 y1150, size 48, max_width 450, letter_spacing 2.
+    # Default: x300 y1140 (yellow area at bottom), size 52, max_width 450, letter_spacing 2.
     # is_phone=True: no reshaping, no RTL — numbers stay strictly LTR.
     PHONE_BOTTOM_PADDING = 80  # Minimum clearance from image bottom to avoid overlap
     p_conf = coords.get("phone", {})
     phone_font = _load_english_font(
         p_conf.get("font_path") or "",
         ImageFont,
-        _coerce_int(p_conf.get("size"), default=48, minimum=20, maximum=400),
+        _coerce_int(p_conf.get("size"), default=52, minimum=20, maximum=400),
     )
-    phone_color = _hex_to_rgb(p_conf.get("color") or "#131111")
+    phone_color = _hex_to_rgb(p_conf.get("color") or "#000000")
     phone_x = _coerce_int(p_conf.get("x"), default=300, minimum=-img.width * 2, maximum=img.width * 2)
-    phone_y_raw = _coerce_int(p_conf.get("y"), default=1150, minimum=-img.height * 2, maximum=img.height * 2)
+    phone_y_raw = _coerce_int(p_conf.get("y"), default=1140, minimum=-img.height * 2, maximum=img.height * 2)
     # Clamp Y so phone bottom stays above img bottom (min 80px clearance)
     est_phone_height = int(phone_font.size * 1.2)
     max_phone_y = img.height - PHONE_BOTTOM_PADDING - est_phone_height
@@ -709,7 +710,7 @@ def create_ad_image(
             for x in range(0, img.width, 20):
                 draw.line([(x, zone_y), (min(x + 10, img.width), zone_y)], fill=(255, 50, 50, 80), width=1)
 
-    # Ensure exact dimensions before save: POST 1080x1080, STORY 1080x1920
+    # Ensure exact dimensions before save: POST 1080x1350, STORY 1080x1920
     target_w, target_h = FORMAT_DIMENSIONS[format_type]
     if img.size != (target_w, target_h):
         img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
@@ -759,7 +760,7 @@ def generate_ad_image(ad, is_story: bool = False) -> str | None:
 
     Args:
         ad: An AdRequest instance (must be approved).
-        is_story: If True, generates 1080x1920 story format.
+        is_story: If True, generates 1080x1920 story format. Else 1080x1350 portrait.
 
     Returns:
         Filesystem path to the generated image, or None on failure.
@@ -856,18 +857,19 @@ def ensure_story_image(ad) -> bool:
 def generate_example_ad_banner(
     format_type: str = FORMAT_POST,
     output_filename: str | None = None,
+    output_path: str | Path | None = None,
 ) -> str | None:
     """
     Generate a sample ad banner for testing (e.g. phone font with monstrat.ttf).
 
     Uses sample Persian category, description, and phone number to verify
     layout and font rendering. Saves to MEDIA_ROOT/generated_ads/ with
-    a predictable filename for easy inspection.
+    a predictable filename for easy inspection, or to output_path if given.
 
     Args:
-        format_type: 'POST' (1080x1080) or 'STORY' (1080x1920).
+        format_type: 'POST' (1080x1350) or 'STORY' (1080x1920).
         output_filename: Optional custom filename (e.g. 'example_test.png').
-                        Default: example_ad_<format>_<uuid8>.png
+        output_path: Optional absolute path (overrides subdir + filename).
 
     Returns:
         Absolute path to the generated image, or None on failure.
@@ -895,6 +897,7 @@ def generate_example_ad_banner(
         format_type=format_type,
         use_default_phone_coords=True,
         output_filename=fn,
+        output_path=output_path,
     )
     return path
 

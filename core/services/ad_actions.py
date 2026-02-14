@@ -30,17 +30,23 @@ def _run_full_delivery(ad_pk: int) -> None:
 
     Each channel is independent — a failure in one does NOT stop the others.
     After all channels complete, a summary notification is fired.
+    Closes DB connection when done (thread-safe for long-running processes).
     """
     import django
     django.setup()  # ensure Django is initialized in the thread
 
-    from core.models import AdRequest as AR, DeliveryLog
+    from django.db import connection
+    from core.models import AdRequest as AR
     from core.notifications import send_notification
 
     try:
         ad = AR.objects.select_related('category', 'user', 'bot').get(pk=ad_pk)
     except AR.DoesNotExist:
         logger.error("_run_full_delivery: ad pk=%s not found", ad_pk)
+        try:
+            connection.close()
+        except Exception:
+            pass
         return
 
     # Max retries for slow/external channels (Telegram Channel, Instagram, Story)
@@ -48,73 +54,85 @@ def _run_full_delivery(ad_pk: int) -> None:
     RETRY_DELAY_SECONDS = 5
 
     results = {}
-    for channel in DeliveryService.SUPPORTED_CHANNELS:
-        retries = MAX_CHANNEL_RETRIES if channel in DeliveryService.SLOW_CHANNELS else 0
-        ok = False
-        for attempt in range(retries + 1):
+    try:
+        for channel in DeliveryService.SUPPORTED_CHANNELS:
+            retries = MAX_CHANNEL_RETRIES if channel in DeliveryService.SLOW_CHANNELS else 0
+            ok = False
+            for attempt in range(retries + 1):
+                try:
+                    ok = DeliveryService.send(ad, channel)
+                    if ok:
+                        break
+                except Exception as e:
+                    logger.exception(
+                        "_run_full_delivery channel=%s ad=%s attempt=%s/%s: %s",
+                        channel, ad.uuid, attempt + 1, retries + 1, e,
+                    )
+                if attempt < retries:
+                    import time
+                    logger.info(
+                        "_run_full_delivery: retrying channel=%s ad=%s in %ss (attempt %s/%s)",
+                        channel, ad.uuid, RETRY_DELAY_SECONDS, attempt + 2, retries + 1,
+                    )
+                    time.sleep(RETRY_DELAY_SECONDS)
+            results[channel] = ok
+
+        # Build summary
+        succeeded = [ch for ch, ok in results.items() if ok]
+        failed = [ch for ch, ok in results.items() if not ok]
+
+        # Map channel codes to display names
+        display_names = {
+            'telegram': 'Telegram DM',
+            'telegram_channel': 'Telegram Channel',
+            'instagram': 'Instagram Post',
+            'instagram_story': 'Instagram Story',
+            'api': 'API',
+            'webhook': 'External Webhook',
+        }
+
+        if failed:
+            failed_names = ", ".join(display_names.get(ch, ch) for ch in failed)
+            succeeded_names = ", ".join(display_names.get(ch, ch) for ch in succeeded) if succeeded else "—"
             try:
-                ok = DeliveryService.send(ad, channel)
-                if ok:
-                    break
-            except Exception as e:
-                logger.exception(
-                    "_run_full_delivery channel=%s ad=%s attempt=%s/%s: %s",
-                    channel, ad.uuid, attempt + 1, retries + 1, e,
+                send_notification(
+                    level='warning',
+                    message=(
+                        f"آگهی {str(ad.uuid)[:8]} — توزیع ناقص.\n"
+                        f"✅ موفق: {succeeded_names}\n"
+                        f"❌ ناموفق: {failed_names}"
+                    ),
+                    link=f"/ad/{ad.uuid}/",
                 )
-            if attempt < retries:
-                import time
-                logger.info(
-                    "_run_full_delivery: retrying channel=%s ad=%s in %ss (attempt %s/%s)",
-                    channel, ad.uuid, RETRY_DELAY_SECONDS, attempt + 2, retries + 1,
+            except Exception:
+                logger.exception("_run_full_delivery: notification error")
+        else:
+            try:
+                send_notification(
+                    level='success',
+                    message=f"آگهی {str(ad.uuid)[:8]} با موفقیت در تمامی پلتفرم‌ها منتشر شد.",
+                    link=f"/ad/{ad.uuid}/",
                 )
-                time.sleep(RETRY_DELAY_SECONDS)
-        results[channel] = ok
+            except Exception:
+                logger.exception("_run_full_delivery: notification error")
 
-    # Build summary
-    succeeded = [ch for ch, ok in results.items() if ok]
-    failed = [ch for ch, ok in results.items() if not ok]
-
-    # Map channel codes to display names
-    display_names = {
-        'telegram': 'Telegram DM',
-        'telegram_channel': 'Telegram Channel',
-        'instagram': 'Instagram Post',
-        'instagram_story': 'Instagram Story',
-        'api': 'API',
-        'webhook': 'External Webhook',
-    }
-
-    if failed:
-        failed_names = ", ".join(display_names.get(ch, ch) for ch in failed)
-        succeeded_names = ", ".join(display_names.get(ch, ch) for ch in succeeded) if succeeded else "—"
+        logger.info(
+            "Distribution complete ad=%s succeeded=%s failed=%s",
+            ad.uuid,
+            succeeded,
+            failed,
+        )
+    except Exception as exc:
+        logger.exception("_run_full_delivery: unexpected error ad_pk=%s: %s", ad_pk, exc)
         try:
-            send_notification(
-                level='warning',
-                message=(
-                    f"آگهی {str(ad.uuid)[:8]} — توزیع ناقص.\n"
-                    f"✅ موفق: {succeeded_names}\n"
-                    f"❌ ناموفق: {failed_names}"
-                ),
-                link=f"/ad/{ad.uuid}/",
-            )
+            send_notification("error", f"Distribution crashed for ad. Check logs.", link="/settings/")
         except Exception:
-            logger.exception("_run_full_delivery: notification error")
-    else:
+            pass
+    finally:
         try:
-            send_notification(
-                level='success',
-                message=f"آگهی {str(ad.uuid)[:8]} با موفقیت در تمامی پلتفرم‌ها منتشر شد.",
-                link=f"/ad/{ad.uuid}/",
-            )
+            connection.close()
         except Exception:
-            logger.exception("_run_full_delivery: notification error")
-
-    logger.info(
-        "Distribution complete ad=%s succeeded=%s failed=%s",
-        ad.uuid,
-        succeeded,
-        failed,
-    )
+            pass
 
 
 def approve_one_ad(ad: AdRequest, edited_content: str | None = None, approved_by=None) -> None:

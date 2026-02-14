@@ -3,6 +3,8 @@ Iraniu — Require authentication for all internal URLs.
 Only these are public: /, /login/, /logout/, /i18n/, /api/submit/, /telegram/webhook/*, /media/, etc.
 """
 
+import sys
+
 from django.conf import settings
 
 
@@ -124,3 +126,21 @@ class ApiKeyAuthMiddleware:
         client.save(update_fields=['last_used_at'])
         request.api_client = client
         return self.get_response(request)
+
+
+class ExceptionCaptureMiddleware:
+    """
+    Store unhandled exception info on the request so the custom 500 handler
+    can render the full traceback for staff (observability over obscurity).
+    Must be last in MIDDLEWARE so process_exception runs first when an exception occurs.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        request._exception_info = sys.exc_info()
+        return None

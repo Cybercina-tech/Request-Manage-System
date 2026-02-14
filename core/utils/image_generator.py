@@ -3,7 +3,7 @@ Iraniu — Image generation for Instagram posts and stories from AdRequest.
 
 Uses static/banner_config.json for coordinates, font sizes, and colors.
 Font: static/fonts/YekanBakh-Bold.ttf. Raw text to draw (no arabic_reshaper/python-bidi).
-Canvas: Feed 1080x1080, Story 1080x1920.
+Canvas: Feed 1080x1350, Story 1080x1920.
 """
 
 import json
@@ -16,7 +16,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 FEED_WIDTH = 1080
-FEED_HEIGHT = 1080
+FEED_HEIGHT = 1350
 STORY_WIDTH = 1080
 STORY_HEIGHT = 1920
 STORY_Y_OFFSET = 285
@@ -160,7 +160,7 @@ def generate_request_image(request_id: int, is_story: bool = False) -> str | Non
 
     Uses banner_config.json for coordinates, font sizes, colors.
     Font: YekanBakh-Bold.ttf. Raw text (no arabic_reshaper/python-bidi).
-    Feed: 1080x1080; Story: 1080x1920.
+    Feed: 1080x1350; Story: 1080x1920.
     Saves to MEDIA_ROOT/instagram/ and returns absolute path.
     """
     Image, ImageDraw, ImageFont = _ensure_pillow()

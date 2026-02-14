@@ -75,6 +75,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.LoginRequiredMiddleware',
     'core.middleware.ApiKeyAuthMiddleware',
+    'core.middleware.ExceptionCaptureMiddleware',
 ]
 
 ROOT_URLCONF = 'iraniu.urls'

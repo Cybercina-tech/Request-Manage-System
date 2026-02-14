@@ -1238,11 +1238,11 @@ def default_adtemplate_coordinates():
 
 
 # Instagram format constants
-FORMAT_POST = 'POST'   # 1080x1080 (Square)
+FORMAT_POST = 'POST'   # 1080x1350 (Portrait 4:5)
 FORMAT_STORY = 'STORY'  # 1080x1920 (9:16)
 
 FORMAT_DIMENSIONS = {
-    FORMAT_POST: (1080, 1080),
+    FORMAT_POST: (1080, 1350),
     FORMAT_STORY: (1080, 1920),
 }
 

@@ -22,7 +22,7 @@ class AdTemplateCreateForm(forms.ModelForm):
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'form-control',
-                'placeholder': 'e.g. Standard 1080x1080',
+                'placeholder': 'e.g. Standard 1080x1350',
                 'maxlength': 128,
             }),
             'background_image': forms.FileInput(attrs={
