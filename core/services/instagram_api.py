@@ -44,6 +44,46 @@ def get_instagram_base_url() -> str:
     return DEFAULT_INSTAGRAM_BASE_URL
 
 
+def is_public_media_url(url: str) -> bool:
+    """
+    Return True only if the URL is suitable for Instagram (public, HTTPS, not local/private).
+
+    Instagram must be able to fetch the image from the internet; localhost or a server's
+    private IP will cause Error 9007 or similar. Reject:
+    - non-HTTPS
+    - localhost, 127.0.0.1
+    - Private IP ranges: 10.x, 172.16-31.x, 192.168.x
+    """
+    if not url or not isinstance(url, str):
+        return False
+    url = url.strip()
+    if not url.startswith("https://"):
+        return False
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            return False
+        if host in ("localhost", "127.0.0.1", "::1"):
+            return False
+        # Private IP ranges (IPv4)
+        if host.startswith("10.") or host.startswith("192.168.") or host.startswith("172."):
+            parts = host.split(".")
+            if len(parts) == 4:
+                try:
+                    second = int(parts[1])
+                    if host.startswith("172.") and 16 <= second <= 31:
+                        return False
+                    if host.startswith("10.") or host.startswith("192.168."):
+                        return False
+                except ValueError:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
 def get_absolute_media_url(file_field) -> str | None:
     """
     Build a public absolute URL for a FileField/ImageField so Instagram can fetch the image.

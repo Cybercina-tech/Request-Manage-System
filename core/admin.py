@@ -11,6 +11,7 @@ from datetime import timedelta
 from .models import (
     SiteConfiguration,
     SystemStatus,
+    SystemLog,
     Notification,
     AdTemplate,
     Category,
@@ -409,6 +410,23 @@ class ScheduledInstagramPostAdmin(admin.ModelAdmin):
     readonly_fields = ['instagram_media_id', 'error_message', 'published_at', 'created_at']
     date_hierarchy = 'scheduled_at'
     list_editable = ['status']
+
+
+@admin.register(SystemLog)
+class SystemLogAdmin(admin.ModelAdmin):
+    list_display = ['id', 'created_at', 'level', 'category', 'message_short', 'status_code', 'ad_request']
+    list_filter = ['level', 'category', 'created_at']
+    search_fields = ['message', 'ad_request__uuid']
+    readonly_fields = ['created_at', 'level', 'category', 'ad_request', 'status_code', 'message', 'request_data', 'response_data', 'metadata']
+    date_hierarchy = 'created_at'
+    ordering = ['-created_at']
+
+    def message_short(self, obj):
+        return (obj.message or '')[:80] + ('…' if len(obj.message or '') > 80 else '')
+    message_short.short_description = 'Message'
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(DeliveryLog)

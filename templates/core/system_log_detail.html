@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% load static iraniu_tags %}
+
+{% block title %}System Log #{{ log.pk }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <a href="{% url 'system_logs_list' %}" class="btn btn-sm btn-outline-secondary mb-2">← Back to System Logs</a>
+    <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+      Log #{{ log.pk }}
+    </h1>
+    <small class="text-muted">{{ log.created_at|date:"Y-m-d H:i:s" }}</small>
+  </div>
+  {% if can_rerun %}
+  <button type="button" class="btn btn-warning" id="rerunBtn" data-url="{% url 'system_log_rerun' log.pk %}">Re-run Task</button>
+  {% endif %}
+</div>
+
+<div class="card-soul mb-3">
+  <div class="card-body">
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Level</div>
+      <div class="col-md-10">
+        <span class="badge {% if log.level == 'ERROR' or log.level == 'CRITICAL' %}bg-danger{% elif log.level == 'WARNING' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ log.level }}</span>
+      </div>
+    </div>
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Category</div>
+      <div class="col-md-10">{{ log.get_category_display }}</div>
+    </div>
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Status Code</div>
+      <div class="col-md-10">{{ log.status_code|default:"—" }}</div>
+    </div>
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Message</div>
+      <div class="col-md-10">{{ log.message }}</div>
+    </div>
+    {% if log.ad_request %}
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Ad Request</div>
+      <div class="col-md-10"><a href="{% url 'ad_detail' log.ad_request.uuid %}">{{ log.ad_request.uuid }}</a></div>
+    </div>
+    {% endif %}
+    {% if media_url %}
+    <div class="row mb-2">
+      <div class="col-md-2 fw-bold">Image URL</div>
+      <div class="col-md-10"><a href="{{ media_url }}" target="_blank" rel="noopener">{{ media_url|truncatechars:60 }}</a></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if log.request_data %}
+<div class="card-soul mb-3">
+  <div class="card-header">Request Data</div>
+  <div class="card-body p-0">
+    <pre class="system-log-json mb-0 p-3">{{ log.request_data|json_pretty }}</pre>
+  </div>
+</div>
+{% endif %}
+
+{% if log.response_data %}
+<div class="card-soul mb-3">
+  <div class="card-header">Response / Stacktrace</div>
+  <div class="card-body p-0">
+    {% if log.response_data.traceback %}
+    <div class="p-3 border-bottom">
+      <h6 class="text-danger">Technical Details (Traceback)</h6>
+      <pre class="system-log-traceback mb-0">{{ log.response_data.traceback }}</pre>
+    </div>
+    {% endif %}
+    <pre class="system-log-json mb-0 p-3">{{ log.response_data|json_pretty }}</pre>
+  </div>
+</div>
+{% endif %}
+
+{% if log.metadata %}
+<div class="card-soul mb-3">
+  <div class="card-header">Metadata</div>
+  <div class="card-body p-0">
+    <pre class="system-log-json mb-0 p-3">{{ log.metadata|json_pretty }}</pre>
+  </div>
+</div>
+{% endif %}
+
+<div id="rerunResult" class="mt-2 small"></div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.system-log-json {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  background: var(--bs-dark);
+  color: #e2e8f0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.system-log-traceback {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  background: #1e293b;
+  color: #fca5a5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || document.cookie.split('; ').find(function(c) { return c.startsWith('csrftoken='); })?.split('=')[1];
+  var btn = document.getElementById('rerunBtn');
+  if (btn && csrfToken) {
+    btn.addEventListener('click', function() {
+      var resultEl = document.getElementById('rerunResult');
+      resultEl.textContent = 'Re-running…';
+      resultEl.className = 'mt-2 small text-muted';
+      fetch(btn.getAttribute('data-url'), { method: 'POST', headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          resultEl.className = d.status === 'success' ? 'mt-2 small text-success' : 'mt-2 small text-danger';
+          resultEl.textContent = d.message || (d.status === 'success' ? 'Re-run completed. Feed: ' + d.feed_ok + ', Story: ' + d.story_ok : 'Re-run failed');
+          if (d.status === 'success') setTimeout(function() { window.location.reload(); }, 1500);
+        })
+        .catch(function() { document.getElementById('rerunResult').className = 'mt-2 small text-danger'; document.getElementById('rerunResult').textContent = 'Request failed'; });
+    });
+  }
+})();
+</script>
+{% endblock %}

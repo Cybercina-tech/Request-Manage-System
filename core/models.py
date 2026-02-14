@@ -1047,6 +1047,93 @@ class ScheduledInstagramPost(models.Model):
         return f'{self.status} @ {self.scheduled_at}'
 
 
+class SystemLog(models.Model):
+    """
+    Unified centralized log for every event, error, and API interaction.
+    Replaces delivery-only logs with a global observability model.
+    """
+
+    class Level(models.TextChoices):
+        INFO = 'INFO', 'Info'
+        WARNING = 'WARNING', 'Warning'
+        ERROR = 'ERROR', 'Error'
+        CRITICAL = 'CRITICAL', 'Critical'
+
+    class Category(models.TextChoices):
+        INSTAGRAM_API = 'INSTAGRAM_API', 'Instagram API'
+        TELEGRAM_BOT = 'TELEGRAM_BOT', 'Telegram Bot'
+        IMAGE_GENERATION = 'IMAGE_GENERATION', 'Image Generation'
+        WEBHOOK = 'WEBHOOK', 'Webhook'
+        SYSTEM_CORE = 'SYSTEM_CORE', 'System Core'
+        DATABASE = 'DATABASE', 'Database'
+
+    level = models.CharField(
+        max_length=16,
+        choices=Level.choices,
+        default=Level.INFO,
+        db_index=True,
+    )
+    category = models.CharField(
+        max_length=32,
+        choices=Category.choices,
+        default=Category.SYSTEM_CORE,
+        db_index=True,
+    )
+    ad_request = models.ForeignKey(
+        AdRequest,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='system_logs',
+        help_text='Link to AdRequest if applicable',
+    )
+    status_code = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='HTTP status (e.g. 200, 400, 500) or internal code',
+    )
+    message = models.CharField(
+        max_length=512,
+        help_text='Brief summary of the event',
+    )
+    request_data = models.JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+        help_text='Payload sent to external services or function arguments',
+    )
+    response_data = models.JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+        help_text='API response or Python traceback on crash',
+    )
+    metadata = models.JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+        help_text='Browser info, IP, fb_trace_id, etc.',
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['category', 'level']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['status_code']),
+        ]
+        verbose_name = 'System Log'
+        verbose_name_plural = 'System Logs'
+
+    def __str__(self):
+        return f'{self.level} {self.category} — {self.message[:50]}'
+
+
 class DeliveryLog(models.Model):
     """Per-channel delivery result for an ad (approval notification / posting)."""
 

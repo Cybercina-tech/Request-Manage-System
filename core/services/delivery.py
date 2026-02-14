@@ -6,7 +6,7 @@ Iraniu — Unified delivery layer. Routes approved ads to all platforms:
   4. Instagram Story (9:16 story via Graph API)
   5. API (passive — partners fetch via /api/v1/list/)
 
-Centralized error handling and DeliveryLog. Business logic only; no request objects.
+Centralized error handling, DeliveryLog, and SystemLog. Business logic only; no request objects.
 Each channel is independent: failure in one does NOT block others.
 """
 
@@ -17,9 +17,16 @@ from django.utils import timezone
 from core.models import (
     AdRequest,
     AdTemplate,
-    SiteConfiguration,
     DeliveryLog,
     InstagramSettings,
+    SiteConfiguration,
+    SystemLog,
+)
+from core.services.log_service import (
+    log_event,
+    log_exception,
+    parse_facebook_error,
+    parse_telegram_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +36,19 @@ _log_bot = logging.getLogger('core.instagram.bot')
 def _log_instagram_bot(status: str, target: str, ad_uuid, detail: str = ''):
     """Write one line to bot_log.txt for Instagram post/story success or failure."""
     _log_bot.info('Instagram %s %s ad=%s %s', status, target, ad_uuid, detail)
+
+
+def _channel_to_category(channel: str) -> str:
+    """Map delivery channel to SystemLog category."""
+    m = {
+        'telegram': 'TELEGRAM_BOT',
+        'telegram_channel': 'TELEGRAM_BOT',
+        'instagram': 'INSTAGRAM_API',
+        'instagram_story': 'INSTAGRAM_API',
+        'webhook': 'WEBHOOK',
+        'api': 'SYSTEM_CORE',
+    }
+    return m.get(channel, 'SYSTEM_CORE')
 
 
 class DeliveryService:
@@ -136,8 +156,18 @@ class DeliveryService:
             log.status = DeliveryLog.DeliveryStatus.SUCCESS if ok else DeliveryLog.DeliveryStatus.FAILED
             if not ok and log.error_message == '':
                 log.error_message = 'Delivery returned failure'
-            log.response_payload = {'success': ok}
+            log.response_payload = (log.response_payload or {}) | {'success': ok}
             log.save(update_fields=['status', 'error_message', 'response_payload'])
+            cat = _channel_to_category(channel)
+            if ok:
+                log_event(SystemLog.Level.INFO, cat, f"Delivery success {channel} ad={ad.uuid}", ad_request=ad, status_code=200, response_data=log.response_payload)
+            else:
+                meta = {}
+                if channel in ('instagram', 'instagram_story') and log.response_payload:
+                    fb_err = parse_facebook_error(log.response_payload)
+                    if fb_err.get('fb_trace_id'):
+                        meta['fb_trace_id'] = fb_err['fb_trace_id']
+                log_event(SystemLog.Level.ERROR, cat, f"Delivery failed {channel}: {log.error_message[:200]}", ad_request=ad, status_code=500, request_data={'channel': channel}, response_data=log.response_payload, metadata=meta or None)
             return ok
         except Exception as e:
             logger.exception("DeliveryService.send channel=%s ad=%s: %s", channel, ad.uuid, e)
@@ -145,6 +175,7 @@ class DeliveryService:
             log.error_message = str(e)[:500]
             log.response_payload = {}
             log.save(update_fields=['status', 'error_message', 'response_payload'])
+            log_exception(e, _channel_to_category(channel), f"Delivery failed {channel}: {str(e)[:200]}", ad_request=ad)
             return False
 
     # ------------------------------------------------------------------
@@ -388,7 +419,9 @@ class DeliveryService:
                 )
 
             if not ok:
-                log.error_message = (err or "Telegram send returned failure.")[:500]
+                err_str = (err or "Telegram send returned failure.")[:500]
+                log.error_message = err_str
+                log.response_payload = {'ok': False, 'description': err_str}
                 logger.warning(
                     "_send_telegram_channel: send failed ad=%s err=%s",
                     ad.uuid, err,
@@ -410,11 +443,32 @@ class DeliveryService:
         """
         Post ad to Instagram Feed. Uses ad.generated_image (generated if missing).
         Public URL must be absolute (e.g. https://request.iraniu.uk/media/...) so Meta can fetch it.
+        Validates token before upload; waits for container FINISHED before publishing.
         """
         from core.services.image_engine import ensure_feed_image
-        from core.services.instagram_api import get_absolute_media_url
-        from core.services.instagram_client import create_container, publish_media
-        from core.services.instagram import InstagramService
+        from core.services.instagram_api import get_absolute_media_url, is_public_media_url
+        from core.services.instagram_client import (
+            _get_credentials,
+            create_container,
+            publish_media,
+            wait_for_container_ready,
+        )
+        from core.services.instagram import InstagramService, validate_instagram_token
+
+        # Token valid? Check before starting upload
+        _, token = _get_credentials()
+        if not token:
+            if log:
+                log.error_message = 'Instagram not configured (no access token).'
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'no token')
+            return False
+        valid, msg = validate_instagram_token(token)
+        if not valid:
+            logger.warning("Token Expired or invalid before Feed upload: %s", msg)
+            if log:
+                log.error_message = f'Token Expired: {(msg or "invalid token")[:200]}'
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'Token Expired')
+            return False
 
         if not ensure_feed_image(ad):
             if log:
@@ -427,6 +481,14 @@ class DeliveryService:
                 log.error_message = 'Feed image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
             _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'image URL not public')
             return False
+        if not is_public_media_url(image_url):
+            if log:
+                log.error_message = (
+                    'Feed image URL must be public HTTPS (no localhost or private IP). '
+                    'Set production_base_url to your public domain.'
+                )
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, 'image URL not public (localhost/private IP)')
+            return False
         logger.info('Sending Feed URL to Instagram: %s', image_url)
         caption = InstagramService.format_caption(ad, lang='fa')
         result = create_container(image_url, caption[:2200], is_story=False)
@@ -434,13 +496,24 @@ class DeliveryService:
             msg = result.get('message', 'Container creation failed')[:500]
             if log:
                 log.error_message = msg
+                log.response_payload = {'error_data': result.get('error_data'), 'http_status': result.get('http_status'), 'raw_response': result.get('raw_response')}
             _log_instagram_bot('FAILED', 'Feed', ad.uuid, msg)
             return False
-        pub = publish_media(result['creation_id'])
+        creation_id = result['creation_id']
+        # 30s delay so Instagram can fetch and process the image before we check status
+        time.sleep(30)
+        ready, status_msg = wait_for_container_ready(creation_id)
+        if not ready:
+            if log:
+                log.error_message = status_msg or 'Container did not reach FINISHED'
+            _log_instagram_bot('FAILED', 'Feed', ad.uuid, status_msg or 'container not FINISHED')
+            return False
+        pub = publish_media(creation_id)
         if not pub.get('success'):
             msg = pub.get('message', 'Publish failed')[:500]
             if log:
                 log.error_message = msg
+                log.response_payload = {'error_data': pub.get('error_data'), 'http_status': pub.get('http_status'), 'raw_response': pub.get('raw_response')}
             _log_instagram_bot('FAILED', 'Feed', ad.uuid, msg)
             return False
         media_id = pub.get('id', '')
@@ -461,11 +534,30 @@ class DeliveryService:
         """
         Post ad to Instagram Story (9:16). Uses ad.generated_story_image (generated if missing).
         Public URL must be absolute so Meta crawler can fetch it (no login).
-        A 10s delay between container creation and publish gives Instagram time to fetch the image.
+        Validates token before upload; 30s delay then wait for container FINISHED before publishing.
         """
         from core.services.image_engine import ensure_story_image
-        from core.services.instagram_api import get_absolute_media_url, get_instagram_base_url
-        from core.services.instagram_client import create_container, publish_media
+        from core.services.instagram_api import get_absolute_media_url, get_instagram_base_url, is_public_media_url
+        from core.services.instagram_client import (
+            _get_credentials,
+            create_container,
+            publish_media,
+            wait_for_container_ready,
+        )
+        from core.services.instagram import validate_instagram_token
+
+        # Token valid? Check before starting upload
+        _, token = _get_credentials()
+        if not token:
+            log.error_message = 'Instagram not configured (no access token).'
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'no token')
+            return False
+        valid, msg = validate_instagram_token(token)
+        if not valid:
+            logger.warning("Token Expired or invalid before Story upload: %s", msg)
+            log.error_message = f'Token Expired: {(msg or "invalid token")[:200]}'
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'Token Expired')
+            return False
 
         if not ensure_story_image(ad):
             log.error_message = 'Story image generation or save failed.'
@@ -476,6 +568,13 @@ class DeliveryService:
             log.error_message = 'Story image URL not public (set production_base_url or INSTAGRAM_BASE_URL).'
             _log_instagram_bot('FAILED', 'Story', ad.uuid, 'image URL not public')
             return False
+        if not is_public_media_url(story_url):
+            log.error_message = (
+                'Story image URL must be public HTTPS (no localhost or private IP). '
+                'Set production_base_url to your public domain.'
+            )
+            _log_instagram_bot('FAILED', 'Story', ad.uuid, 'image URL not public (localhost/private IP)')
+            return False
         # Require URL to be under our production media base so Instagram can fetch it
         expected_media_prefix = get_instagram_base_url().rstrip('/') + '/media/'
         if not story_url.startswith(expected_media_prefix):
@@ -484,7 +583,6 @@ class DeliveryService:
             )
             _log_instagram_bot('FAILED', 'Story', ad.uuid, 'URL not under production media base')
             return False
-        # Debug: log exact URL to bot_log.txt so it can be manually checked for accessibility
         _log_bot.info(
             'Instagram Story URL sent to Meta (verify in browser): ad=%s url=%s',
             ad.uuid,
@@ -496,12 +594,20 @@ class DeliveryService:
             if not container.get("success") or not container.get("creation_id"):
                 msg = container.get("message", "Container creation failed")[:500]
                 log.error_message = msg
+                log.response_payload = {'error_data': container.get('error_data'), 'http_status': container.get('http_status'), 'raw_response': container.get('raw_response')}
                 logger.warning("_send_instagram_story: container failed ad=%s: %s", ad.uuid, msg)
                 _log_instagram_bot('FAILED', 'Story', ad.uuid, msg)
                 return False
-            # Give Instagram servers time to fetch and process the image before publishing
-            time.sleep(10)
-            pub = publish_media(container["creation_id"])
+            creation_id = container["creation_id"]
+            # 30s delay so Instagram can fetch and process the image before we check status
+            time.sleep(30)
+            ready, status_msg = wait_for_container_ready(creation_id)
+            if not ready:
+                log.error_message = status_msg or 'Container did not reach FINISHED'
+                logger.warning("_send_instagram_story: container not ready ad=%s: %s", ad.uuid, status_msg)
+                _log_instagram_bot('FAILED', 'Story', ad.uuid, status_msg or 'container not FINISHED')
+                return False
+            pub = publish_media(creation_id)
             if pub.get("success"):
                 media_id = pub.get('id', '')
                 log.response_payload = {'media_id': media_id}
@@ -513,6 +619,7 @@ class DeliveryService:
                 return True
             msg = pub.get("message", "Publish failed")[:500]
             log.error_message = msg
+            log.response_payload = {'error_data': pub.get('error_data'), 'http_status': pub.get('http_status'), 'raw_response': pub.get('raw_response')}
             logger.warning("_send_instagram_story: publish failed ad=%s: %s", ad.uuid, msg)
             _log_instagram_bot('FAILED', 'Story', ad.uuid, msg)
             return False

@@ -35,6 +35,7 @@ from core.models import (
     AdminProfile,
     Category,
     SiteConfiguration,
+    SystemLog,
     SystemStatus,
     TelegramBot,
     TelegramChannel,
@@ -2254,6 +2255,103 @@ def settings_api_edit(request, pk=None):
         messages.success(request, 'API client saved.')
         return redirect('settings_api')
     return render(request, 'core/settings_api_form.html', {'client': client, 'is_create': client is None})
+
+
+# ---------- System Logs (unified observability) ----------
+
+@staff_member_required
+@require_http_methods(['GET'])
+def system_logs_list(request):
+    """List system logs with filters; click opens detail page. No modals."""
+    qs = SystemLog.objects.select_related('ad_request').order_by('-created_at')
+    category = request.GET.get('category', '').strip()
+    level = request.GET.get('level', '').strip()
+    status_code = request.GET.get('status_code', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+
+    if category and category in dict(SystemLog.Category.choices):
+        qs = qs.filter(category=category)
+    if level and level in dict(SystemLog.Level.choices):
+        qs = qs.filter(level=level)
+    if status_code:
+        try:
+            qs = qs.filter(status_code=int(status_code))
+        except ValueError:
+            pass
+    if date_from:
+        try:
+            d = datetime.strptime(date_from, '%Y-%m-%d')
+            qs = qs.filter(created_at__gte=timezone.make_aware(d) if timezone.is_naive(d) else d)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            d = datetime.strptime(date_to, '%Y-%m-%d')
+            end = d.replace(hour=23, minute=59, second=59, microsecond=999999)
+            qs = qs.filter(created_at__lte=timezone.make_aware(end) if timezone.is_naive(end) else end)
+        except ValueError:
+            pass
+
+    paginator = Paginator(qs, 50)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'core/system_logs_list.html', {
+        'page_obj': page_obj,
+        'category_choices': SystemLog.Category.choices,
+        'level_choices': SystemLog.Level.choices,
+        'filters': {'category': category, 'level': level, 'status_code': status_code, 'date_from': date_from, 'date_to': date_to},
+    })
+
+
+@staff_member_required
+@require_http_methods(['GET'])
+def system_log_detail(request, pk):
+    """Full detail page for a system log. JSON formatter, traceback, media link, Re-run button."""
+    log = get_object_or_404(SystemLog.objects.select_related('ad_request'), pk=pk)
+
+    # Resolve media URL if log is about image (IMAGE_GENERATION or INSTAGRAM_API with ad)
+    media_url = None
+    if log.ad_request and log.category in (SystemLog.Category.IMAGE_GENERATION, SystemLog.Category.INSTAGRAM_API):
+        try:
+            media_url = log.ad_request.get_absolute_feed_image_url()
+            if not media_url and log.ad_request.generated_story_image:
+                media_url = log.ad_request.get_absolute_story_image_url()
+        except Exception:
+            pass
+
+    # Can re-run if it's a failed Instagram delivery for an ad
+    can_rerun = (
+        log.level in (SystemLog.Level.ERROR, SystemLog.Level.CRITICAL)
+        and log.ad_request_id
+        and log.category == SystemLog.Category.INSTAGRAM_API
+    )
+    return render(request, 'core/system_log_detail.html', {
+        'log': log,
+        'media_url': media_url,
+        'can_rerun': can_rerun,
+    })
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def system_log_rerun(request, pk):
+    """Re-run delivery for a failed Instagram log. Returns JSON."""
+    from core.services.delivery import DeliveryService
+
+    log = get_object_or_404(SystemLog, pk=pk)
+    if not log.ad_request_id:
+        return JsonResponse({'status': 'error', 'message': 'No linked AdRequest'}, status=400)
+    if log.category != SystemLog.Category.INSTAGRAM_API:
+        return JsonResponse({'status': 'error', 'message': 'Re-run only for Instagram API logs'}, status=400)
+
+    ad = log.ad_request
+    if ad.status != AdRequest.Status.APPROVED:
+        return JsonResponse({'status': 'error', 'message': 'Ad is not approved'}, status=400)
+
+    # Re-trigger Feed and Story delivery
+    ok_feed = DeliveryService.send(ad, 'instagram', force_deliver=True)
+    ok_story = DeliveryService.send(ad, 'instagram_story', force_deliver=True)
+    return JsonResponse({'status': 'success', 'feed_ok': ok_feed, 'story_ok': ok_story})
 
 
 # ---------- Delivery log ----------

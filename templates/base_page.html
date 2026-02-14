@@ -144,6 +144,10 @@
             <i class="fa-solid fa-robot icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Bots" %}
           </a>
+          <a href="{% url 'system_logs_list' %}" class="{% if request.resolver_match.url_name == 'system_logs_list' or request.resolver_match.url_name == 'system_log_detail' %}active{% endif %}">
+            <i class="fa-solid fa-clipboard-list icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "System Logs" %}
+          </a>
           <a href="{% url 'delivery_list' %}" class="{% if request.resolver_match.url_name == 'delivery_list' %}active{% endif %}">
             <i class="fa-solid fa-paper-plane icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Delivery Logs" %}

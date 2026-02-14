@@ -17,6 +17,8 @@ from pathlib import Path
 
 from django.conf import settings
 
+from core.services.log_service import log_exception
+
 from core.models import (
     AdTemplate,
     default_adtemplate_coordinates,
@@ -784,7 +786,17 @@ def generate_ad_image(ad, is_story: bool = False) -> str | None:
         phone = (ad.user.phone_number or '').strip()
 
     format_type = FORMAT_STORY if is_story else FORMAT_POST
-    return create_ad_image(template.pk, category_text, description, phone, format_type=format_type)
+    try:
+        return create_ad_image(template.pk, category_text, description, phone, format_type=format_type)
+    except Exception as exc:
+        log_exception(
+            exc,
+            'IMAGE_GENERATION',
+            f'Image generation failed (Pillow) ad={getattr(ad, "pk", "?")}: {str(exc)[:150]}',
+            ad_request=ad if hasattr(ad, 'pk') else None,
+            request_data={'template_id': template.pk, 'format_type': format_type, 'category': category_text[:50]},
+        )
+        raise
 
 
 def ensure_feed_image(ad) -> bool:
@@ -810,6 +822,7 @@ def ensure_feed_image(ad) -> bool:
         return True
     except Exception as e:
         logger.warning("ensure_feed_image: failed to attach path for ad %s: %s", ad.uuid, e)
+        log_exception(e, 'IMAGE_GENERATION', f'ensure_feed_image attach failed ad={ad.uuid}: {str(e)[:150]}', ad_request=ad)
         return False
 
 
@@ -836,6 +849,7 @@ def ensure_story_image(ad) -> bool:
         return True
     except Exception as e:
         logger.warning("ensure_story_image: failed to attach path for ad %s: %s", ad.uuid, e)
+        log_exception(e, 'IMAGE_GENERATION', f'ensure_story_image attach failed ad={ad.uuid}: {str(e)[:150]}', ad_request=ad)
         return False
 
 

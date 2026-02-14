@@ -12,10 +12,11 @@ import threading
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 
-from core.models import AdRequest, AdminProfile, SiteConfiguration, TelegramBot, TelegramChannel
+from core.models import AdRequest, AdminProfile, SiteConfiguration, SystemLog, TelegramBot, TelegramChannel
 from core.services.admin_notifications import send_admin_notification
 from core.bot_handler import send_message_to_chat
 from core.services.activity_log import log_activity
+from core.services.log_service import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,16 @@ def on_ad_status_changed_to_approved(sender, instance, created, **kwargs):
     old_status = _ad_old_status.pop(instance.pk, None)
     if old_status == instance.status:
         return  # no status change
+
+    # Log every Ad status change to SystemLog (INFO)
+    log_event(
+        SystemLog.Level.INFO,
+        SystemLog.Category.SYSTEM_CORE,
+        f"Ad status changed: {old_status or 'new'} → {instance.status}",
+        ad_request=instance,
+        metadata={'old_status': old_status, 'new_status': instance.status},
+    )
+
     if instance.status != AdRequest.Status.APPROVED:
         return  # not approving
 
