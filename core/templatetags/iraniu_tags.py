@@ -11,8 +11,7 @@ register = template.Library()
 def persian_display(text):
     """
     Return Persian/Arabic text as-is for template display.
-    Reshaping (arabic_reshaper + bidi) is used only for image drawing,
-    not for captions or stored data.
+    Image drawing uses raw text (no arabic_reshaper/python-bidi).
     """
     if not text:
         return ''

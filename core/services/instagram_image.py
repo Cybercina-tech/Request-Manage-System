@@ -1,10 +1,13 @@
 """
 Iraniu — Dynamic image generation for Instagram posts.
-Creates branded images with message, email, phone overlay.
-Meets Instagram requirements: min 320px width, max 1080px, aspect 1:1 to 4:5.
+
+Uses static/banner_config.json for font path and colors.
+Font: static/fonts/YekanBakh-Bold.ttf. Raw text (no arabic_reshaper/python-bidi).
+Canvas: 1080x1080 (Square). Meets Instagram: min 320px, max 1080px.
 """
 
 import io
+import json
 import logging
 import os
 import uuid
@@ -14,7 +17,6 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-# Instagram: min 320, max 1080 per side; square (1:1) or portrait (4:5)
 INSTAGRAM_MIN_SIZE = 320
 INSTAGRAM_MAX_SIZE = 1080
 DEFAULT_WIDTH = 1080
@@ -30,24 +32,79 @@ def _ensure_pillow():
         return None, None, None
 
 
+def _load_banner_config() -> dict | None:
+    """Load static/banner_config.json. Returns None if missing or invalid."""
+    config_path = Path(settings.BASE_DIR) / "static" / "banner_config.json"
+    if not config_path.exists():
+        return None
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.debug("instagram_image: could not load banner_config: %s", e)
+        return None
+
+
+def _hex_to_rgb(value: str):
+    value = (value or "#FFFFFF").strip()
+    if value.startswith("#"):
+        value = value[1:]
+    if len(value) == 3:
+        value = "".join(c * 2 for c in value)
+    try:
+        return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+    except (ValueError, IndexError):
+        return (255, 255, 255)
+
+
+def _yekan_bakh_path() -> Path | None:
+    base = Path(settings.BASE_DIR)
+    for p in [base / "static" / "fonts" / "YekanBakh-Bold.ttf", base / "YekanBakh-Bold.ttf"]:
+        if p.exists():
+            return p
+    return None
+
+
+def _load_banner_font(ImageFont, size: int):
+    """Load YekanBakh-Bold.ttf. No fake bold."""
+    path = _yekan_bakh_path()
+    if path:
+        return ImageFont.truetype(str(path), size)
+    return ImageFont.load_default()
+
+
 def generate_instagram_image(
     message: str,
     email: str = '',
     phone: str = '',
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
-    bg_color: tuple[int, int, int] = (255, 255, 255),
-    text_color: tuple[int, int, int] = (33, 37, 41),
-    accent_color: tuple[int, int, int] = (13, 110, 253),
+    bg_color: tuple[int, int, int] | None = None,
+    text_color: tuple[int, int, int] | None = None,
+    accent_color: tuple[int, int, int] | None = None,
     lang: str = 'en',
 ) -> bytes | None:
     """
     Generate a branded image with message, email, phone overlay.
+
+    Font and colors from banner_config.json; font: YekanBakh-Bold.ttf; raw text.
     Returns PNG bytes or None if Pillow unavailable.
     """
     Image, ImageDraw, ImageFont = _ensure_pillow()
     if not Image:
         return None
+
+    config = _load_banner_config() or {}
+    msg_conf = config.get("message", config.get("description", {}))
+    cat_conf = config.get("category", {})
+    # Colors from config; fallbacks only when config missing
+    if text_color is None:
+        text_color = _hex_to_rgb(msg_conf.get("color") or "#FFFFFF")
+    if accent_color is None:
+        accent_color = _hex_to_rgb(cat_conf.get("color") or "#EEFF00")
+    if bg_color is None:
+        bg_color = (28, 28, 38)
 
     width = max(INSTAGRAM_MIN_SIZE, min(INSTAGRAM_MAX_SIZE, width))
     height = max(INSTAGRAM_MIN_SIZE, min(INSTAGRAM_MAX_SIZE, height))
@@ -55,34 +112,16 @@ def generate_instagram_image(
     img = Image.new('RGB', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
 
-    font_paths_large = [
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-        'C:/Windows/Fonts/arialbd.ttf',
-        'arialbd.ttf',
-    ]
-    font_paths_small = [
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        'C:/Windows/Fonts/arial.ttf',
-        'arial.ttf',
-    ]
-    font_large = font_small = ImageFont.load_default()
-    for path in font_paths_large:
-        try:
-            font_large = ImageFont.truetype(path, 48)
-            break
-        except OSError:
-            continue
-    for path in font_paths_small:
-        try:
-            font_small = ImageFont.truetype(path, 32)
-            break
-        except OSError:
-            continue
+    size_large = int(msg_conf.get("size", 58)) + 10
+    size_small = int(msg_conf.get("size", 58))
+    font_large = _load_banner_font(ImageFont, min(size_large, 72))
+    font_small = _load_banner_font(ImageFont, size_small)
 
     padding = 60
     y = padding
+    max_text_width = width - 2 * padding
 
-    def _wrap_text(text: str, font, max_width: int) -> list[str]:
+    def _wrap_text(text: str, font, max_w: int) -> list[str]:
         lines = []
         for paragraph in (text or '').split('\n'):
             words = paragraph.split()
@@ -90,7 +129,7 @@ def generate_instagram_image(
             for w in words:
                 test = ' '.join(current + [w])
                 bbox = draw.textbbox((0, 0), test, font=font)
-                if bbox[2] - bbox[0] <= max_width:
+                if bbox[2] - bbox[0] <= max_w:
                     current.append(w)
                 else:
                     if current:
@@ -99,8 +138,6 @@ def generate_instagram_image(
             if current:
                 lines.append(' '.join(current))
         return lines
-
-    max_text_width = width - 2 * padding
 
     brand = 'Iraniu' if lang == 'en' else 'ایرانيو'
     draw.text((padding, y), brand, fill=accent_color, font=font_large)

@@ -1125,48 +1125,37 @@ class ActivityLog(models.Model):
 def default_adtemplate_coordinates():
     """
     Default coordinates JSON for AdTemplate.
-    Primary source for production is static/banner_config.json; these are fallbacks.
+    Loaded from static/banner_config.json (single source of truth).
     Keys: category, description, phone — each with x, y, size, color, font_path, align; description has max_width; phone has letter_spacing.
-    No pseudo-bold (stroke); font weight from .ttf only.
+    When file is missing, returns empty structure; image_engine uses its fallback.
     """
-    return {
-        'category': {
-            'x': 180,
-            'y': 288,
-            'size': 93,
-            'color': '#EEFF00',
-            'font_path': '',
-            'max_width': 700,
-            'align': 'center',
-        },
-        'description': {
-            'x': 215,
-            'y': 598,
-            'size': 58,
-            'color': '#FFFFFF',
-            'font_path': '',
-            'max_width': 650,
-            'align': 'center',
-        },
-        'phone': {
-            'x': 300,
-            'y': 1150,
-            'size': 48,
-            'color': '#131111',
-            'font_path': '',
-            'max_width': 450,
-            'align': 'center',
-            'letter_spacing': 2,
-        },
-    }
+    import json
+    from pathlib import Path
+    config_path = Path(settings.BASE_DIR) / "static" / "banner_config.json"
+    if not config_path.exists():
+        return {'category': {}, 'description': {}, 'phone': {}}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {'category': {}, 'description': {}, 'phone': {}}
+        out = dict(data)
+        if "message" in out and "description" not in out:
+            out["description"] = out.pop("message")
+        for key in ("category", "description", "phone"):
+            if key not in out:
+                out[key] = {}
+        return {k: v for k, v in out.items() if k in ("category", "description", "phone")}
+    except Exception:
+        return {'category': {}, 'description': {}, 'phone': {}}
 
 
 # Instagram format constants
-FORMAT_POST = 'POST'   # 1080x1350 (4:5)
+FORMAT_POST = 'POST'   # 1080x1080 (Square)
 FORMAT_STORY = 'STORY'  # 1080x1920 (9:16)
 
 FORMAT_DIMENSIONS = {
-    FORMAT_POST: (1080, 1350),
+    FORMAT_POST: (1080, 1080),
     FORMAT_STORY: (1080, 1920),
 }
 
