@@ -119,13 +119,13 @@ def _load_font(ImageFont, size: int, font_path_override: str | None = None):
 
 
 # Preferred font for phone numbers on ad banners
-PHONE_FONT_NAME = "monstrat.ttf"
+PHONE_FONT_NAME = "Montserrat.ttf"
 
 
 def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     """
     Load a Latin/English TrueType font for the Phone layer.
-    Prefers monstrat.ttf for ad banners; then explicit override; then fallbacks.
+    Prefers Montserrat.ttf for ad banners; then explicit override; then fallbacks.
 
     Search order:
     1. Explicit override path (from coordinates JSON).
@@ -145,7 +145,7 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
         p = _resolve_absolute(Path(font_path_override))
         paths.append(p)
 
-    # monstrat.ttf: preferred font for phone numbers on ad banners
+    # Montserrat.ttf: preferred font for phone numbers on ad banners
     for d in [base_dir / "static" / "fonts", media_root / "ad_templates" / "fonts"]:
         paths.append(d / PHONE_FONT_NAME)
 
@@ -172,14 +172,26 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
         for name in ["arial.ttf", "segoeui.ttf", "calibri.ttf", "verdana.ttf", "trebuc.ttf"]:
             paths.append(win_fonts / name)
     else:
+        # Linux/macOS: DejaVu, Liberation, Noto, TTF, system fonts
         linux_dirs = [
             Path("/usr/share/fonts/truetype/dejavu"),
             Path("/usr/share/fonts/truetype/liberation"),
+            Path("/usr/share/fonts/truetype/noto"),
+            Path("/usr/share/fonts/opentype/noto"),
             Path("/usr/share/fonts/TTF"),
+            Path("/usr/share/fonts/truetype/freefont"),
             Path("/System/Library/Fonts"),
+            Path("/usr/share/fonts"),
+        ]
+        linux_names = [
+            "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
+            "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf",
+            "NotoSans-Bold.ttf", "NotoSans-Regular.ttf", "NotoSansCJK-Regular.ttc",
+            "FreeSansBold.otf", "FreeSans.otf",
+            "Arial.ttf", "arial.ttf",
         ]
         for d in linux_dirs:
-            for name in ["DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]:
+            for name in linux_names:
                 paths.append(d / name)
 
     paths.append(base_dir / "static" / "fonts" / "DejaVuSans.ttf")
@@ -666,15 +678,16 @@ def create_ad_image(
         bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=0)
         desc_y += (bbox[3] - bbox[1]) + 6
 
-    # ── Phone Layer: English font only (monstrat/arialbd/trebucbd), LTR, Western digits ──
-    # Default: x300 y1140 (yellow area at bottom), size 52, max_width 450, letter_spacing 2.
+    # ── Phone Layer: English font only (Montserrat/arialbd/trebucbd), LTR, Western digits ──
+    # Default: x300 y1140 (yellow area at bottom), size 48, max_width 450, letter_spacing 2.
     # is_phone=True: no reshaping, no RTL — numbers stay strictly LTR.
+    # IMPORTANT: Never use font_path from config for phone — must always use English font.
     PHONE_BOTTOM_PADDING = 80  # Minimum clearance from image bottom to avoid overlap
     p_conf = coords.get("phone", {})
     phone_font = _load_english_font(
-        p_conf.get("font_path") or "",
+        "",  # Ignore font_path; phone must always use English/Latin font
         ImageFont,
-        _coerce_int(p_conf.get("size"), default=52, minimum=20, maximum=400),
+        _coerce_int(p_conf.get("size"), default=48, minimum=20, maximum=400),
     )
     phone_color = _hex_to_rgb(p_conf.get("color") or "#000000")
     phone_x = _coerce_int(p_conf.get("x"), default=300, minimum=-img.width * 2, maximum=img.width * 2)
