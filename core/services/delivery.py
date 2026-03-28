@@ -241,9 +241,11 @@ class DeliveryService:
 
     @staticmethod
     def _get_ad_phone(ad: AdRequest) -> str:
-        """Extract phone number from ad contact_snapshot or user profile."""
+        """Extract phone number from AdRequest.phone_number, snapshot, or user profile."""
+        phone = (getattr(ad, "phone_number", None) or "").strip()
         contact = getattr(ad, "contact_snapshot", None) or {}
-        phone = (contact.get("phone") or "").strip() if isinstance(contact, dict) else ""
+        if not phone and isinstance(contact, dict):
+            phone = (contact.get("phone") or "").strip()
         if not phone and getattr(ad, "user_id", None) and ad.user:
             phone = (ad.user.phone_number or "").strip()
         return phone
@@ -323,31 +325,17 @@ class DeliveryService:
         return caption
 
     @staticmethod
-    def _send_telegram_channel(ad: AdRequest, log: DeliveryLog) -> bool:
+    def _get_telegram_channel_chat_and_token():
         """
-        Generate ad image and post to the default Telegram channel.
-        Uses local file upload (multipart) instead of URL for reliability.
-        Caption is HTML-formatted, Persian, professional.
+        Resolve (chat_id, bot_token) for the default ads Telegram channel.
+        Same logic as channel posting: SiteConfiguration default channel or TelegramChannel fallback.
         """
-        from core.services.telegram_client import send_message, send_photo
-        from core.services.image_engine import generate_ad_image
-        from core.models import TelegramBot, TelegramChannel as TelegramChannelModel
+        from django.conf import settings as django_settings
+
+        from core.models import TelegramChannel as TelegramChannelModel
 
         config = SiteConfiguration.get_config()
-
-        # ---- Build caption ----
-        caption = DeliveryService._build_channel_caption(ad)
-
-        # ---- Generate image (local file path) ----
-        feed_path = None
-        try:
-            feed_path = generate_ad_image(ad, is_story=False)
-        except Exception as exc:
-            logger.warning("_send_telegram_channel: image gen failed ad=%s: %s", ad.uuid, exc)
-
-        # ---- Resolve channel & bot token ----
         chat_id, token = None, None
-
         if (
             config.is_channel_active
             and (config.telegram_channel_id or "").strip()
@@ -362,10 +350,7 @@ class DeliveryService:
                     )
                 except Exception:
                     pass
-
         if not token or chat_id is None:
-            from django.conf import settings as django_settings
-
             env = getattr(django_settings, "ENVIRONMENT", "PROD")
             channel_obj = (
                 TelegramChannelModel.objects.filter(
@@ -384,8 +369,59 @@ class DeliveryService:
                     )
                 except Exception as e:
                     logger.warning(
-                        "_send_telegram_channel: channel resolution failed: %s", e
+                        "_get_telegram_channel_chat_and_token: channel resolution failed: %s",
+                        e,
                     )
+        return chat_id, token
+
+    @staticmethod
+    def _resolve_telegram_channel_message_id(ad: AdRequest) -> int | None:
+        """Message id from AdRequest or last successful telegram_channel DeliveryLog."""
+        if getattr(ad, "telegram_channel_message_id", None) is not None:
+            try:
+                return int(ad.telegram_channel_message_id)
+            except (TypeError, ValueError):
+                pass
+        log = (
+            DeliveryLog.objects.filter(
+                ad=ad,
+                channel=DeliveryLog.Channel.TELEGRAM_CHANNEL,
+                status=DeliveryLog.DeliveryStatus.SUCCESS,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if log and isinstance(log.response_payload, dict):
+            mid = log.response_payload.get("telegram_message_id")
+            if mid is not None:
+                try:
+                    return int(mid)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    @staticmethod
+    def _send_telegram_channel(ad: AdRequest, log: DeliveryLog) -> bool:
+        """
+        Generate ad image and post to the default Telegram channel.
+        Uses local file upload (multipart) instead of URL for reliability.
+        Caption is HTML-formatted, Persian, professional.
+        """
+        from core.services.telegram_client import send_message, send_photo
+        from core.services.image_engine import generate_ad_image
+
+        # ---- Build caption ----
+        caption = DeliveryService._build_channel_caption(ad)
+
+        # ---- Generate image (local file path) ----
+        feed_path = None
+        try:
+            feed_path = generate_ad_image(ad, is_story=False)
+        except Exception as exc:
+            logger.warning("_send_telegram_channel: image gen failed ad=%s: %s", ad.uuid, exc)
+
+        # ---- Resolve channel & bot token ----
+        chat_id, token = DeliveryService._get_telegram_channel_chat_and_token()
 
         if not token or chat_id is None:
             log.error_message = "No active Telegram channel configured."
@@ -426,7 +462,18 @@ class DeliveryService:
                     "_send_telegram_channel: send failed ad=%s err=%s",
                     ad.uuid, err,
                 )
-            return ok
+                return False
+            log.response_payload = {'ok': True, 'telegram_message_id': msg_id}
+            if msg_id is not None:
+                try:
+                    ad.telegram_channel_message_id = int(msg_id)
+                    ad.save(update_fields=['telegram_channel_message_id'])
+                except Exception as e:
+                    logger.warning(
+                        "_send_telegram_channel: could not save telegram_channel_message_id ad=%s: %s",
+                        ad.uuid, e,
+                    )
+            return True
         except Exception as exc:
             log.error_message = str(exc)[:500]
             logger.exception(
@@ -691,3 +738,104 @@ class DeliveryService:
         No outbound HTTP; availability via API is the delivery.
         """
         return True
+
+    # ------------------------------------------------------------------
+    # Global delete (Telegram + Instagram + local files + DB row)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def delete_everywhere(ad: AdRequest) -> dict:
+        """
+        Remove the ad from the Telegram channel (deleteMessage), Instagram Feed/Story (Graph DELETE),
+        delete generated image files, then delete the AdRequest row.
+        Remote failures are logged to SystemLog; the DB row is still removed unless an error aborts early.
+        """
+        from core.services.instagram_client import delete_ig_media
+        from core.services.log_service import log_event, log_exception
+        from core.services.telegram_client import delete_message as tg_delete_message
+
+        summary: dict = {
+            'telegram': None,
+            'instagram_feed': None,
+            'instagram_story': None,
+            'files_removed': False,
+            'db_deleted': False,
+        }
+        uuid_str = str(ad.uuid)
+        pk = ad.pk
+
+        # Telegram channel message
+        try:
+            mid = DeliveryService._resolve_telegram_channel_message_id(ad)
+            chat_id, token = DeliveryService._get_telegram_channel_chat_and_token()
+            if mid and token and chat_id is not None:
+                ok, err = tg_delete_message(token, chat_id, mid)
+                summary['telegram'] = 'ok' if ok else (err or 'failed')
+                if not ok:
+                    log_event(
+                        SystemLog.Level.WARNING,
+                        'TELEGRAM_BOT',
+                        f'Global delete: deleteMessage failed ad={uuid_str}: {err}',
+                        ad_request=ad,
+                        response_data={'error': err},
+                    )
+            else:
+                summary['telegram'] = 'skipped' if not mid else 'no_channel'
+        except Exception as e:
+            summary['telegram'] = str(e)[:200]
+            log_exception(e, 'TELEGRAM_BOT', f'Global delete Telegram ad={uuid_str}', ad_request=ad)
+
+        # Instagram Feed / Story
+        for key, field_name in (
+            ('instagram_feed', 'instagram_post_id'),
+            ('instagram_story', 'instagram_story_id'),
+        ):
+            raw_id = (getattr(ad, field_name, None) or '').strip()
+            if not raw_id:
+                summary[key] = 'skipped'
+                continue
+            try:
+                res = delete_ig_media(raw_id)
+                if res.get('success'):
+                    summary[key] = 'ok'
+                else:
+                    summary[key] = (res.get('message') or 'failed')[:300]
+                    log_event(
+                        SystemLog.Level.WARNING,
+                        'INSTAGRAM_API',
+                        f'Global delete: Instagram DELETE failed ({key}) ad={uuid_str}: '
+                        f'{res.get("message", "")[:200]}',
+                        ad_request=ad,
+                        response_data=res,
+                    )
+            except Exception as e:
+                summary[key] = str(e)[:200]
+                log_exception(e, 'INSTAGRAM_API', f'Global delete Instagram {key} ad={uuid_str}', ad_request=ad)
+
+        # Local generated images
+        try:
+            if ad.generated_image:
+                try:
+                    ad.generated_image.delete(save=False)
+                except Exception as e:
+                    logger.warning('delete_everywhere: feed image ad=%s: %s', uuid_str, e)
+            if ad.generated_story_image:
+                try:
+                    ad.generated_story_image.delete(save=False)
+                except Exception as e:
+                    logger.warning('delete_everywhere: story image ad=%s: %s', uuid_str, e)
+            summary['files_removed'] = True
+        except Exception as e:
+            log_exception(e, 'IMAGE_GENERATION', f'Global delete files ad={uuid_str}', ad_request=ad)
+
+        log_event(
+            SystemLog.Level.INFO,
+            'SYSTEM_CORE',
+            f'Global delete: removing AdRequest pk={pk} uuid={uuid_str}',
+            ad_request=ad,
+            request_data=dict(summary),
+        )
+
+        ad.delete()
+        summary['db_deleted'] = True
+        return summary

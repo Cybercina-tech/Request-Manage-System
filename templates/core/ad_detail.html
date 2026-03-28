@@ -127,6 +127,15 @@
   </div>
 </div>
 {% endif %}
+
+{# —— Global delete (kill switch) —— #}
+<div class="card-soul mt-4 border-danger" style="border-color: rgba(220, 53, 69, 0.45) !important;">
+  <h6 class="text-danger mb-2"><i class="fa-solid fa-triangle-exclamation icon" aria-hidden="true"></i> Danger zone</h6>
+  <p class="text-muted small mb-3">Remove this ad from the Telegram channel, Instagram, local files, and the database.</p>
+  <button type="button" class="btn btn-outline-danger btn-sm action-delete-global" data-delete-url="{% url 'ad_global_delete' ad.uuid %}">
+    <i class="fa-solid fa-trash icon" aria-hidden="true"></i> Delete everywhere
+  </button>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -167,6 +176,30 @@
   var btnStory = document.getElementById('btnPostStory');
   if (btnFeed) btnFeed.addEventListener('click', function() { postToInstagram(this); });
   if (btnStory) btnStory.addEventListener('click', function() { postToInstagram(this); });
+
+  var delBtn = document.querySelector('.action-delete-global[data-delete-url]');
+  if (delBtn) {
+    delBtn.addEventListener('click', function() {
+      if (!confirm('آیا مطمئن هستید که می‌خواهید این آگهی را از تلگرام، اینستاگرام و دیتابیس پاک کنید؟')) return;
+      delBtn.disabled = true;
+      var tok = (typeof csrfToken !== 'undefined' ? csrfToken : '') || (document.querySelector('[name=csrfmiddlewaretoken]') || {}).value || '';
+      fetch(delBtn.getAttribute('data-delete-url'), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': tok, 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin'
+      })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+      .then(function(x) {
+        delBtn.disabled = false;
+        if (x.ok && x.d.status === 'success') {
+          window.location.href = '{% url "ad_list" %}';
+        } else {
+          alert((x.d && x.d.message) || 'Delete failed');
+        }
+      })
+      .catch(function() { delBtn.disabled = false; alert('Request failed'); });
+    });
+  }
 })();
 </script>
 {% endblock %}

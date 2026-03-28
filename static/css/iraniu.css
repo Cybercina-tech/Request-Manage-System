@@ -6,28 +6,28 @@
 /* Inter — default web font for English (self-hosted) */
 @font-face {
   font-family: "Inter";
-  src: url("../fonts/inter/inter-latin-400-normal.woff2") format("woff2");
+  src: url("../fonts/web/inter/inter-latin-400-normal.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter";
-  src: url("../fonts/inter/inter-latin-500-normal.woff2") format("woff2");
+  src: url("../fonts/web/inter/inter-latin-500-normal.woff2") format("woff2");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter";
-  src: url("../fonts/inter/inter-latin-600-normal.woff2") format("woff2");
+  src: url("../fonts/web/inter/inter-latin-600-normal.woff2") format("woff2");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter";
-  src: url("../fonts/inter/inter-latin-700-normal.woff2") format("woff2");
+  src: url("../fonts/web/inter/inter-latin-700-normal.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -35,7 +35,7 @@
 
 @font-face {
   font-family: "VazirFallback";
-  src: url("../fonts/Persian.ttf") format("truetype");
+  src: url("../fonts/web/persian/Persian.ttf") format("truetype");
   font-display: swap;
 }
 

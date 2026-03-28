@@ -515,6 +515,11 @@ class AdRequest(models.Model):
         blank=True,
         help_text='Contact at submission time: phone, email, verified_phone, verified_email'
     )
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Phone at submission time, stored as raw string (e.g. +98… or leading zeros).',
+    )
     category = models.ForeignKey(
         Category,
         on_delete=models.SET_NULL,
@@ -560,6 +565,12 @@ class AdRequest(models.Model):
         blank=True,
         null=True,
         help_text='Generated image for Instagram Story (9:16). Never mixed with Feed.',
+    )
+    # Telegram channel: message id of the published ad post (for global delete via deleteMessage)
+    telegram_channel_message_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Telegram message_id in the ads channel when posted; used to delete the channel post.',
     )
     # Instagram publish state (per target)
     instagram_post_id = models.CharField(max_length=64, null=True, blank=True)

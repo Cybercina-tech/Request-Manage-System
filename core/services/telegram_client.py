@@ -415,6 +415,46 @@ def send_photo(
     return False, None, error
 
 
+def delete_message(
+    token: str,
+    chat_id: int,
+    message_id: int,
+    max_retries: int = MAX_RETRIES,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Delete a message in a chat or channel via Telegram Bot API deleteMessage.
+
+    Returns (True, None) on success. If the message was already removed, Telegram may
+    return an error; callers may treat 'message to delete not found' as success for idempotency.
+
+    Returns (False, error_message) on failure.
+    """
+    if not token or not chat_id or not message_id:
+        logger.warning("delete_message: missing token, chat_id, or message_id")
+        return False, "Missing token, chat_id, or message_id"
+
+    session = _create_session()
+    payload = {"chat_id": chat_id, "message_id": message_id}
+    for attempt in range(max_retries + 1):
+        success, _result, error = _make_request(
+            session,
+            "POST",
+            "deleteMessage",
+            token,
+            json_data=payload,
+        )
+        if success:
+            return True, None
+        err_low = (error or "").lower()
+        if "message to delete not found" in err_low or "message can't be deleted" in err_low:
+            logger.info("delete_message: message already gone chat_id=%s message_id=%s", chat_id, message_id)
+            return True, None
+        if attempt < max_retries:
+            time.sleep(BACKOFF_FACTOR * (2**attempt))
+    logger.warning("delete_message failed chat_id=%s message_id=%s: %s", chat_id, message_id, error)
+    return False, error
+
+
 def edit_message_text(
     token: str,
     chat_id: int,

@@ -126,8 +126,8 @@ MESSAGES = {
         "fa": "⚠️ استفاده از ایموجی، استیکر و گیف در متن آگهی مجاز نیست. لطفاً فقط متن ساده بفرستید.",
     },
     "ad_content_too_long": {
-        "en": "⚠️ Your ad text is too long. Maximum allowed: 80 characters.\nمتن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۸۰ کاراکتر.",
-        "fa": "⚠️ متن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۸۰ کاراکتر.\nYour ad text is too long. Maximum allowed: 80 characters.",
+        "en": "⚠️ Your ad text is too long. Maximum allowed: 500 characters.\nمتن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۵۰۰ کاراکتر.",
+        "fa": "⚠️ متن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۵۰۰ کاراکتر.\nYour ad text is too long. Maximum allowed: 500 characters.",
     },
     "ad_content_not_persian": {
         "en": "⚠️ Please write your ad in Persian only.\nلطفاً آگهی خود را فقط به زبان فارسی بنویسید.",
@@ -136,8 +136,8 @@ MESSAGES = {
     "enter_ad_text_detailed": {
         "en": "✍️ **Write your ad — Category: {category_name}**\n\n"
         "Please send your ad in **one message**. We'll review it and publish if it meets our guidelines.\n\n"
-        "**Important limits (حداکثر ۸۰ کاراکتر / max 80 characters):**\n"
-        "• Maximum **80 characters** (including spaces).\n"
+        "**Important limits (حداکثر ۵۰۰ کاراکتر / max 500 characters):**\n"
+        "• Maximum **500 characters** (including spaces).\n"
         "• **Persian only** — لأتین مجاز نیست / No Latin letters.\n\n"
         "**Tips for better results:**\n"
         "• Use a clear title or opening line.\n"
@@ -147,8 +147,8 @@ MESSAGES = {
         "You can use normal line breaks. When you're ready, send your text below. We're here to help! 🙏",
         "fa": "✍️ **متن آگهی را بنویسید — دسته: {category_name}**\n\n"
         "لطفاً آگهی را در **یک پیام** بفرستید. ما آن را بررسی می‌کنیم و در صورت رعایت ضوابط منتشر می‌کنیم.\n\n"
-        "**محدودیت‌های مهم (حداکثر ۸۰ کاراکتر / max 80 characters):**\n"
-        "• حداکثر **۸۰ کاراکتر** (با احتساب فاصله).\n"
+        "**محدودیت‌های مهم (حداکثر ۵۰۰ کاراکتر / max 500 characters):**\n"
+        "• حداکثر **۵۰۰ کاراکتر** (با احتساب فاصله).\n"
         "• **فقط فارسی** — لأتین مجاز نیست / No Latin letters.\n\n"
         "**نکات برای نتیجه بهتر:**\n"
         "• عنوان یا خط اول را واضح بنویسید.\n"
@@ -248,8 +248,8 @@ MESSAGES = {
         "fa": "📧 آدرس ایمیل را وارد کنید",
     },
     "invalid_phone": {
-        "en": "❌ Invalid phone format. Use E.164 (max 15 digits).",
-        "fa": "❌ فرمت تلفن نامعتبر است.",
+        "en": "❌ Invalid phone. Use up to 20 characters: digits, +, spaces, or dashes.",
+        "fa": "❌ شماره تلفن نامعتبر است. حداکثر ۲۰ کاراکتر (اعداد، +، فاصله، خط تیره).",
     },
     "invalid_email": {
         "en": "❌ Invalid email address.",
@@ -277,9 +277,9 @@ MESSAGES = {
     },
     "resubmit_edit_prompt": {
         "en": "✍️ Send your new ad text (you can copy and edit the text above).\n\n"
-        "**Limits:** max 80 characters | Persian only / حداکثر ۸۰ کاراکتر | فقط فارسی",
+        "**Limits:** max 500 characters | Persian only / حداکثر ۵۰۰ کاراکتر | فقط فارسی",
         "fa": "✍️ متن جدید آگهی را بفرستید (می‌توانید متن بالا را کپی و ویرایش کنید).\n\n"
-        "**محدودیت‌ها:** حداکثر ۸۰ کاراکتر | فقط فارسی / max 80 characters | Persian only",
+        "**محدودیت‌ها:** حداکثر ۵۰۰ کاراکتر | فقط فارسی / max 500 characters | Persian only",
     },
     "resubmit_confirm": {
         "en": "✅ Submit this new version?",

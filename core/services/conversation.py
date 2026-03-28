@@ -21,7 +21,7 @@ from core.i18n import get_message
 from core.models import TelegramSession, TelegramBot, AdRequest, Category, TelegramUser, SiteConfiguration
 from core.services.submit_ad_service import SubmitAdService
 from core.services.users import update_contact_info
-from core.validators import validate_ad_content_with_feedback
+from core.validators import validate_ad_content_with_feedback, AD_CONTENT_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -276,7 +276,7 @@ class ConversationEngine:
                 return self._reply_ad_content_validation_custom(
                     session, error_key, edit_previous, message_id
                 )
-            session.context["content"] = content_stripped[:80]
+            session.context["content"] = content_stripped[:AD_CONTENT_MAX_LENGTH]
             session.state = TelegramSession.State.CONFIRM
             session.save(update_fields=["state", "context", "last_activity"])
             logger.info("conversation state session_id=%s ENTER_CONTENT → CONFIRM", session.pk)
@@ -326,7 +326,18 @@ class ConversationEngine:
                 except ValueError:
                     return self._reply_invalid_phone(session)
             if text and text.strip():
-                return self._reply_ask_contact_use_button(session)
+                try:
+                    telegram_user = TelegramUser.objects.filter(telegram_user_id=session.telegram_user_id).first()
+                    if telegram_user:
+                        update_contact_info(telegram_user, phone=text.strip(), mark_phone_verified=False)
+                    session.state = TelegramSession.State.SELECT_CATEGORY
+                    session.save(update_fields=["state", "last_activity"])
+                    logger.info("conversation state session_id=%s ASK_CONTACT → SELECT_CATEGORY (typed phone)", session.pk)
+                    out = self._reply_select_category(session, edit_previous, message_id)
+                    out["remove_keyboard_first"] = {"text": get_message("phone_number_saved", session.language or "en")}
+                    return out
+                except ValueError:
+                    return self._reply_invalid_phone(session)
             return self._reply_ask_contact(session)
 
         if session.state == TelegramSession.State.ENTER_EMAIL:
@@ -374,7 +385,7 @@ class ConversationEngine:
                     return self._reply_ad_content_validation_custom(
                         session, error_key, edit_previous, message_id
                     )
-                session.context["content"] = content_stripped[:80]
+                session.context["content"] = content_stripped[:AD_CONTENT_MAX_LENGTH]
                 session.state = TelegramSession.State.RESUBMIT_CONFIRM
                 session.save(update_fields=["state", "context", "last_activity"])
                 return self._reply_resubmit_confirm(session, edit_previous, message_id)

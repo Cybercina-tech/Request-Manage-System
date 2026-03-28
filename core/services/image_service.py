@@ -19,7 +19,7 @@ def generate_ad_image(template_obj, category_text: str, ad_text: str, phone_numb
     Generate an ad image from an AdTemplate.
 
     Uses image_engine.create_ad_image: banner_config.json for coordinates/font/colors,
-    static/fonts/YekanBakh-Bold.ttf, raw text (no arabic_reshaper/python-bidi).
+    static/fonts/banner/YekanBakh-Bold.ttf, raw text (no arabic_reshaper/python-bidi).
     Returns a Django ContentFile (PNG bytes) for saving or streaming.
 
     Args:

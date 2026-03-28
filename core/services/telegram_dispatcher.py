@@ -125,9 +125,7 @@ def _parse_update(body: dict) -> tuple:
         contact_phone = None
         contact_user_id = None
         if contact and contact.get("phone_number"):
-            contact_phone = (contact.get("phone_number") or "").strip()
-            if contact_phone and not contact_phone.startswith("+"):
-                contact_phone = "+" + contact_phone
+            contact_phone = (contact.get("phone_number") or "").strip()[:20]
             try:
                 contact_user_id = int(contact.get("user_id")) if contact.get("user_id") is not None else None
             except (TypeError, ValueError):

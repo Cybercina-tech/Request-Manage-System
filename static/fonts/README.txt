@@ -1,7 +1,10 @@
-Fonts for Iraniu ad banners
----------------------------
+Iraniu — ساختار فونت‌ها / Fonts layout
+========================================
 
-- Persian.ttf, Yekan.ttf: used for category and description (Persian text)
-- monstrat.ttf: used for phone numbers on ad banners (place this file here)
+- banner/     فونت‌های TrueType برای تولید تصویر آگهی (Pillow): YekanBakh-Bold، monstrat، Montserrat، …
+- web/        فونت‌های رابط وب (@font-face): inter/ (woff2)، persian/ (فارسی UI)
 
-If monstrat.ttf is not found, the system falls back to Arial or other system fonts.
+مسیرهای قدیمی: فایل‌های داخل static/fonts/*.ttf هنوز توسط کد به‌عنوان پشتیبان شناخته می‌شوند؛
+برای استقرار جدید فایل‌ها را در banner/ یا web/ قرار دهید.
+
+Vendor (کتابخانه‌های ثالث): static/vendor/ — مثلاً vendor/fontawesome/ (css + webfonts).

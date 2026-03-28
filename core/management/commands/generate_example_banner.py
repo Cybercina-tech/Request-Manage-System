@@ -3,7 +3,7 @@ Iraniu — Management command: generate an example ad banner for testing.
 Run: python manage.py generate_example_banner [--format POST|STORY] [--output FILENAME]
      python manage.py generate_example_banner --portrait
 
-Use this to verify ad banner generation and the monstrat.ttf phone font.
+Use this to verify ad banner generation and the monstrat.ttf phone font (static/fonts/banner/).
 Portrait (1080x1350) is the default format for Telegram and Instagram Feed.
 """
 
@@ -77,4 +77,4 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Banner saved: {path}"))
 
         self.stdout.write("")
-        self.stdout.write("Phone numbers use monstrat.ttf (place in static/fonts/ or media/ad_templates/fonts/).")
+        self.stdout.write("Phone numbers use monstrat.ttf (place in static/fonts/banner/ or media/ad_templates/fonts/).")

@@ -302,6 +302,24 @@ def request_detail(request, uuid):
 
 
 @staff_member_required
+@require_http_methods(['POST'])
+def ad_global_delete(request, uuid):
+    """
+    Kill switch: remove ad from Telegram channel, Instagram, local media, then DB.
+    Returns JSON for dashboard fetch(); staff-only.
+    """
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    try:
+        from core.services.delivery import DeliveryService
+
+        DeliveryService.delete_everywhere(ad)
+    except Exception as e:
+        logger.exception('ad_global_delete failed uuid=%s', uuid)
+        return JsonResponse({'status': 'error', 'message': str(e)[:500]}, status=500)
+    return JsonResponse({'status': 'success'})
+
+
+@staff_member_required
 def confirm_approve(request, uuid):
     """
     Confirm approval page. GET: show confirmation; POST: approve ad via approve_one_ad.

@@ -141,7 +141,7 @@
         <th>Category</th>
         <th>Status</th>
         <th>Content</th>
-        <th style="width: 140px">Actions</th>
+        <th style="width: 184px">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -190,6 +190,10 @@
             <a href="{% url 'request_detail' ad.uuid %}" class="action-btn action-view" title="View Details">
               <i class="fa-solid fa-arrow-up-right-from-square icon" aria-hidden="true"></i>
             </a>
+            <button type="button" class="action-btn action-delete-global" title="Delete from Telegram, Instagram &amp; database"
+              data-delete-url="{% url 'ad_global_delete' ad.uuid %}">
+              <i class="fa-solid fa-trash icon" aria-hidden="true"></i>
+            </button>
           </div>
         </td>
       </tr>
@@ -492,6 +496,22 @@
   box-shadow: 0 0 12px rgba(124, 77, 255, 0.4);
 }
 
+.action-delete-global {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: rgba(220, 38, 38, 0.12);
+  color: #f87171;
+}
+.action-delete-global:hover {
+  color: #fff;
+  background: rgba(185, 28, 28, 0.9);
+  border-color: rgba(185, 28, 28, 0.9);
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.45);
+}
+.action-delete-global:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Row Hover — Lift Effect */
 .ad-main-row {
   transition: all 0.3s ease;
@@ -586,6 +606,39 @@
       window.location.href = url;
     });
   }
+
+  document.querySelectorAll('.action-delete-global').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (!confirm('آیا مطمئن هستید که می‌خواهید این آگهی را از تلگرام، اینستاگرام و دیتابیس پاک کنید؟')) return;
+      var url = btn.getAttribute('data-delete-url');
+      if (!url) return;
+      btn.disabled = true;
+      fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin'
+      })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+      .then(function(x) {
+        btn.disabled = false;
+        if (x.ok && x.d.status === 'success') {
+          var row = btn.closest('.ad-main-row');
+          if (row) {
+            row.classList.add('row-slide-out');
+            setTimeout(function() {
+              if (row.nextElementSibling) row.nextElementSibling.remove();
+              row.remove();
+            }, 350);
+          } else {
+            window.location.reload();
+          }
+        } else {
+          alert((x.d && x.d.message) || 'Delete failed');
+        }
+      })
+      .catch(function() { btn.disabled = false; alert('Request failed'); });
+    });
+  });
 })();
 </script>
 {% endblock %}

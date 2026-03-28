@@ -217,3 +217,39 @@ def publish_media(creation_id: str) -> dict:
     except requests.RequestException as e:
         logger.warning("Instagram publish_media request error: %s", e)
         return {"success": False, "message": str(e), "error_data": {"message": str(e)}}
+
+
+def delete_ig_media(media_id: str) -> dict:
+    """
+    DELETE /{media-id}?access_token=... — remove a published Instagram media object
+    created by this app (Feed or Story). Meta returns success or an error if already deleted.
+    """
+    _, token = _get_credentials()
+    mid = (media_id or "").strip()
+    if not token:
+        return {"success": False, "message": "Instagram not configured (no access token)."}
+    if not mid:
+        return {"success": False, "message": "media_id is required."}
+    url = f"{GRAPH_API_BASE}/{mid}"
+    params = {"access_token": token}
+    try:
+        r = requests.delete(url, params=params, timeout=REQUEST_TIMEOUT)
+        data = r.json() if r.text else {}
+        if r.status_code == 200 and data.get("success") is True:
+            return {"success": True, "message": "OK", "raw_response": data}
+        err = data.get("error", {}) or {}
+        msg = err.get("message", r.text or f"HTTP {r.status_code}")
+        code = err.get("code")
+        # 100 = invalid parameter / object may be gone; 200 permission — log and let caller continue
+        logger.warning("Instagram delete_ig_media failed media_id=%s: %s", mid, msg)
+        return {
+            "success": False,
+            "message": msg,
+            "http_status": r.status_code,
+            "error_data": err,
+            "error_code": code,
+            "raw_response": data,
+        }
+    except requests.RequestException as e:
+        logger.warning("Instagram delete_ig_media request error: %s", e)
+        return {"success": False, "message": str(e), "error_data": {"message": str(e)}}

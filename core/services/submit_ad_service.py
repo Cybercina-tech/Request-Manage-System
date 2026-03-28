@@ -48,6 +48,7 @@ class SubmitAdService:
             category = Category.objects.filter(slug='other').first() or Category.objects.order_by('order').first()
 
         snapshot = contact_snapshot if isinstance(contact_snapshot, dict) else {}
+        phone_field = (snapshot.get("phone") or "").strip()[:20] if isinstance(snapshot, dict) else ""
 
         ad = AdRequest.objects.create(
             content=content,
@@ -59,6 +60,7 @@ class SubmitAdService:
             raw_telegram_json=raw_telegram_json,
             user=user,
             contact_snapshot=snapshot,
+            phone_number=phone_field,
         )
 
         if config.is_ai_enabled:

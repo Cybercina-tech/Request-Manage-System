@@ -138,7 +138,9 @@ def on_ad_request_created(sender, instance, created, **kwargs):
         return
     try:
         user_phone = "—"
-        if instance.contact_snapshot and isinstance(instance.contact_snapshot, dict):
+        if getattr(instance, "phone_number", None) and str(instance.phone_number).strip():
+            user_phone = str(instance.phone_number).strip()
+        elif instance.contact_snapshot and isinstance(instance.contact_snapshot, dict):
             user_phone = (instance.contact_snapshot.get("phone") or "").strip() or user_phone
         if user_phone == "—" and instance.user_id and instance.user:
             user_phone = (getattr(instance.user, "phone_number", None) or "").strip() or user_phone
@@ -155,8 +157,8 @@ def on_ad_request_created(sender, instance, created, **kwargs):
         panel_url = f"{base}/admin-management/" if base else ""
 
         request_details = {
-            "title": (instance.content or "").strip()[:80],
-            "content_preview": (instance.content or "").strip()[:80],
+            "title": (instance.content or "").strip()[:120],
+            "content_preview": (instance.content or "").strip()[:120],
             "user_phone": user_phone,
             "user_display": user_phone,
             "created_at": instance.created_at,

@@ -20,9 +20,9 @@ class PhoneLayerDefaultsTests(TestCase):
         coords = default_adtemplate_coordinates()
         phone = coords.get("phone", {})
         self.assertEqual(phone.get("x"), 300)
-        self.assertEqual(phone.get("y"), 1150)
+        self.assertEqual(phone.get("y"), 1140)
         self.assertEqual(phone.get("max_width"), 450)
-        self.assertEqual(phone.get("color"), "#131111")
+        self.assertEqual(phone.get("color"), "#000000")
         self.assertEqual(phone.get("letter_spacing"), 2)
 
 

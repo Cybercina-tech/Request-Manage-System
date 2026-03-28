@@ -1,0 +1,23 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<p>آیا مطمئن هستید که می‌خواهید این آگهی را از تلگرام، اینستاگرام و دیتابیس پاک کنید؟</p>
+<ul>
+  {% for obj in queryset %}
+  <li><strong>{{ obj.uuid }}</strong> — {{ obj.content|truncatewords:20 }}</li>
+  {% endfor %}
+</ul>
+<form method="post">{% csrf_token %}
+  {% for obj in queryset %}
+  <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
+  {% endfor %}
+  <input type="hidden" name="action" value="delete_ad_from_all_platforms">
+  <input type="hidden" name="post" value="yes">
+  <div class="submit-row">
+    <input type="submit" class="default" value="{% trans 'Yes, delete everywhere' %}" style="background:#b91c1c;color:#fff;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;">
+    <a href="{% url 'admin:core_adrequest_changelist' %}" class="button" style="margin-inline-start:12px;">{% trans 'No, take me back' %}</a>
+  </div>
+</form>
+{% endblock %}

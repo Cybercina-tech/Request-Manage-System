@@ -1,5 +1,5 @@
 """
-Iraniu — Tests for ad content validators (length 80, Persian-only).
+Iraniu — Tests for ad content validators (length limit, Persian-only).
 """
 
 from django.core.exceptions import ValidationError
@@ -15,19 +15,19 @@ from core.validators import (
 
 
 class AdContentLengthValidatorTests(TestCase):
-    """Test 80-character limit."""
+    """Test AD_CONTENT_MAX_LENGTH limit."""
 
     def test_valid_length_passes(self):
         validate_ad_content_length("متن کوتاه")
         validate_ad_content_length("a" * 0)  # empty
-        validate_ad_content_length("ف" * 80)
+        validate_ad_content_length("ف" * AD_CONTENT_MAX_LENGTH)
 
-    def test_over_80_raises(self):
+    def test_over_limit_raises(self):
         with self.assertRaises(ValidationError) as cm:
-            validate_ad_content_length("ف" * 81)
+            validate_ad_content_length("ف" * (AD_CONTENT_MAX_LENGTH + 1))
         code = cm.exception.error_list[0].code if cm.exception.error_list else None
         self.assertEqual(code, "ad_content_too_long")
-        self.assertIn("۸۰", str(cm.exception))
+        self.assertIn("۵۰۰", str(cm.exception))
 
 
 class AdContentPersianValidatorTests(TestCase):
@@ -58,7 +58,7 @@ class AdContentFullValidatorTests(TestCase):
 
     def test_too_long_raises(self):
         with self.assertRaises(ValidationError):
-            validate_ad_content("ف" * 81)
+            validate_ad_content("ف" * (AD_CONTENT_MAX_LENGTH + 1))
 
     def test_latin_raises(self):
         with self.assertRaises(ValidationError):
@@ -74,7 +74,7 @@ class ValidateAdContentWithFeedbackTests(TestCase):
         self.assertIsNone(err)
 
     def test_too_long_returns_false_key(self):
-        valid, err = validate_ad_content_with_feedback("ف" * 81)
+        valid, err = validate_ad_content_with_feedback("ف" * (AD_CONTENT_MAX_LENGTH + 1))
         self.assertFalse(valid)
         self.assertEqual(err, "ad_content_too_long")
 

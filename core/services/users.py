@@ -13,8 +13,12 @@ from core.models import TelegramUser
 
 logger = logging.getLogger(__name__)
 
-# E.164: optional +, digits only, max 15
+# E.164: optional +, digits only, max 15 (strict normalization for non-bot callers)
 E164_PATTERN = re.compile(r"^\+?[0-9]{10,15}$")
+
+# Raw Telegram/display phone: max 20 chars; digits, separators, optional +
+PHONE_RAW_MAX_LEN = 20
+PHONE_RAW_PATTERN = re.compile(r"^[\d\s+\-().]+$")
 
 
 def _extract_from_user(update: dict) -> dict | None:
@@ -103,6 +107,23 @@ def get_or_create_user_from_update(update: dict) -> TelegramUser | None:
 get_or_create_telegram_user = get_or_create_user_from_update
 
 
+def sanitize_phone_raw(value: str) -> str:
+    """
+    Store phone exactly as the user/shared contact provided (after strip), max 20 chars.
+    Allows digits, +, spaces, dashes, parentheses. No E.164 reformatting.
+    """
+    if not value or not isinstance(value, str):
+        raise ValueError("Phone is required")
+    s = value.strip()
+    if not s:
+        raise ValueError("Phone is required")
+    if len(s) > PHONE_RAW_MAX_LEN:
+        raise ValueError("Phone must be at most 20 characters")
+    if not PHONE_RAW_PATTERN.match(s):
+        raise ValueError("Invalid phone characters")
+    return s
+
+
 def validate_phone(value: str) -> str:
     """
     Validate E.164 phone. Max 15 digits.
@@ -145,7 +166,7 @@ def update_contact_info(
     """
     update_fields = []
     if phone is not None:
-        telegram_user.phone_number = validate_phone(phone)
+        telegram_user.phone_number = sanitize_phone_raw(phone)
         telegram_user.phone_verified = mark_phone_verified
         update_fields.extend(["phone_number", "phone_verified"])
     if email is not None:

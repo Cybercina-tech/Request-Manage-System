@@ -472,4 +472,5 @@ class SubmitAdServiceTests(TestCase):
         self.assertEqual(ad.bot_id, self.bot.pk)
         self.assertEqual(ad.user_id, self.user.pk)
         self.assertEqual(ad.contact_snapshot.get("phone"), "+989123456789")
+        self.assertEqual(ad.phone_number, "+989123456789")
         self.assertEqual(ad.status, AdRequest.Status.PENDING_MANUAL)

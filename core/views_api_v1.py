@@ -68,6 +68,7 @@ def api_v1_submit(request):
             status=AdRequest.Status.PENDING_AI,
             submitted_via_api_client=request.api_client,
             contact_snapshot=contact,
+            phone_number=(contact.get("phone") or "")[:20],
         )
         if config.is_ai_enabled:
             approved, reason = run_ai_moderation(ad.content, config)

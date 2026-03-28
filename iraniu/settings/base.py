@@ -11,7 +11,8 @@ try:
 except Exception:  # pragma: no cover - optional dependency guard
     load_dotenv = None
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Project root (repository root): iraniu/settings/base.py -> parent ×3
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 if load_dotenv is not None:
     load_dotenv(BASE_DIR / ".env")

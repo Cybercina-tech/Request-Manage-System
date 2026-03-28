@@ -2,7 +2,7 @@
 Iraniu — Dynamic image generation for Instagram posts.
 
 Uses static/banner_config.json for font path and colors.
-Font: static/fonts/YekanBakh-Bold.ttf. Raw text (no arabic_reshaper/python-bidi).
+Font: static/fonts/banner/YekanBakh-Bold.ttf. Raw text (no arabic_reshaper/python-bidi).
 Canvas: 1080x1350 (Portrait 4:5). Meets Instagram: min 320px, max 1080px.
 """
 
@@ -14,6 +14,8 @@ import uuid
 from pathlib import Path
 
 from django.conf import settings
+
+from core.static_paths import banner_font_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +61,7 @@ def _hex_to_rgb(value: str):
 
 
 def _yekan_bakh_path() -> Path | None:
-    base = Path(settings.BASE_DIR)
-    for p in [base / "static" / "fonts" / "YekanBakh-Bold.ttf", base / "YekanBakh-Bold.ttf"]:
+    for p in banner_font_candidates("YekanBakh-Bold.ttf"):
         if p.exists():
             return p
     return None

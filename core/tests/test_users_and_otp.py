@@ -12,6 +12,7 @@ from core.models import TelegramUser, VerificationCode, SiteConfiguration
 from core.services.users import (
     get_or_create_user_from_update,
     update_contact_info,
+    sanitize_phone_raw,
     validate_phone,
     validate_email,
 )
@@ -94,6 +95,18 @@ class ContactValidationTests(TestCase):
             validate_phone("123")  # too short
         with self.assertRaises(ValueError):
             validate_phone("")
+
+    def test_sanitize_phone_raw_preserves_formatting(self):
+        self.assertEqual(sanitize_phone_raw("+98 912 345 6789"), "+98 912 345 6789")
+        self.assertEqual(sanitize_phone_raw("09123456789"), "09123456789")
+
+    def test_sanitize_phone_raw_rejects_too_long(self):
+        with self.assertRaises(ValueError):
+            sanitize_phone_raw("1" * 21)
+
+    def test_sanitize_phone_raw_rejects_invalid_chars(self):
+        with self.assertRaises(ValueError):
+            sanitize_phone_raw("abc")
 
     def test_validate_email(self):
         self.assertEqual(validate_email("user@example.com"), "user@example.com")

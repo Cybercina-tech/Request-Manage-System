@@ -1,13 +1,13 @@
 """
 Iraniu — Validators for AdRequest content.
-Enforces 80-char limit and Persian-only (letters, numbers, punctuation).
+Enforces 500-char limit and Persian-only (letters, numbers, punctuation).
 """
 
 import re
 
 from django.core.exceptions import ValidationError
 
-AD_CONTENT_MAX_LENGTH = 80
+AD_CONTENT_MAX_LENGTH = 500
 
 # Latin letters (a-z, A-Z) — if present, content is invalid (must be Persian-only)
 LATIN_LETTER_PATTERN = re.compile(r"[a-zA-Z]")
@@ -15,13 +15,13 @@ LATIN_LETTER_PATTERN = re.compile(r"[a-zA-Z]")
 
 def validate_ad_content_length(value: str) -> None:
     """
-    Ensure ad content does not exceed 80 characters (including spaces).
+    Ensure ad content does not exceed AD_CONTENT_MAX_LENGTH characters (including spaces).
     """
     if not value:
         return
     if len(value) > AD_CONTENT_MAX_LENGTH:
         raise ValidationError(
-            "متن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۸۰ کاراکتر.",
+            "متن آگهی شما بیش از حد طولانی است. حداکثر مجاز: ۵۰۰ کاراکتر.",
             code="ad_content_too_long",
         )
 
@@ -42,7 +42,7 @@ def validate_ad_content_persian(value: str) -> None:
 
 def validate_ad_content(value: str) -> None:
     """
-    Run all ad content validations: length (80 chars) and Persian-only.
+    Run all ad content validations: length and Persian-only.
     Raises ValidationError with appropriate message on failure.
     """
     validate_ad_content_length(value)

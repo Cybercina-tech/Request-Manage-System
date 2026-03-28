@@ -4,7 +4,10 @@ Privacy: mask email/phone in list; full data only in detail. Never log contact i
 """
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.core.exceptions import PermissionDenied
+from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.html import format_html
 from datetime import timedelta
@@ -199,7 +202,44 @@ class AdRequestAdmin(admin.ModelAdmin):
     list_display = ['uuid', 'category', 'status', 'instagram_queue_status', 'bot', 'user', 'created_at']
     list_filter = ['status', 'instagram_queue_status', 'category']
     search_fields = ['content', 'uuid']
-    readonly_fields = ['uuid', 'created_at', 'updated_at', 'raw_telegram_json', 'instagram_queue_status']
+    readonly_fields = [
+        'uuid', 'created_at', 'updated_at', 'raw_telegram_json', 'instagram_queue_status',
+        'telegram_channel_message_id',
+    ]
+    actions = ['delete_ad_from_all_platforms']
+
+    def delete_ad_from_all_platforms(self, request, queryset):
+        from core.services.delivery import DeliveryService
+
+        if not self.has_delete_permission(request):
+            raise PermissionDenied
+        if request.POST.get('post') == 'yes':
+            count = 0
+            for ad in queryset:
+                DeliveryService.delete_everywhere(ad)
+                count += 1
+            self.message_user(
+                request,
+                f'حذف سراسری انجام شد — {count} آگهی از تلگرام، اینستاگرام و دیتابیس پاک شد.',
+                messages.SUCCESS,
+            )
+            return None
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'تأیید حذف سراسری',
+            'queryset': queryset,
+            'opts': self.model._meta,
+            'action_checkbox_name': ACTION_CHECKBOX_NAME,
+        }
+        return TemplateResponse(
+            request,
+            'admin/core/adrequest/delete_everywhere_confirmation.html',
+            context,
+        )
+
+    delete_ad_from_all_platforms.short_description = (
+        'حذف از همه پلتفرم‌ها (تلگرام، اینستاگرام، دیتابیس)'
+    )
 
 
 class TelegramBotAdminForm(forms.ModelForm):

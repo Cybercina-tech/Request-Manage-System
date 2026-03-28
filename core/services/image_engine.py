@@ -4,7 +4,7 @@ High-level image engine for AdTemplate-based ad generation.
 Features:
 - Uses Pillow for compositing.
 - Coordinates, font sizes, and colors from static/banner_config.json only (no hardcoded values).
-- Font: static/fonts/YekanBakh-Bold.ttf for Category and Description; no pseudo-bold stroke.
+- Font: static/fonts/banner/YekanBakh-Bold.ttf for Category and Description; no pseudo-bold stroke.
 - Raw text passed to draw.text() (no arabic_reshaper or python-bidi).
 - POST: 1080x1350 (Portrait 4:5); STORY: 1080x1920 (9:16); Story uses Y+285 offset.
 - Three text layers: Category, Description, Phone.
@@ -18,6 +18,8 @@ from pathlib import Path
 from django.conf import settings
 
 from core.services.log_service import log_exception
+from core.static_paths import banner_font_candidates, banner_font_dir, legacy_font_dir, resolve_font_path
+from core.validators import AD_CONTENT_MAX_LENGTH
 
 from core.models import (
     AdTemplate,
@@ -35,20 +37,17 @@ logger = logging.getLogger(__name__)
 # Default template background (used when AdTemplate has no background_image)
 DEFAULT_TEMPLATE_IMAGE_REL = "static/images/default_template/Template.png"
 
-# ── Banner font: static/fonts/YekanBakh-Bold.ttf only (no fake bold) ──
+# ── Banner font: static/fonts/banner/YekanBakh-Bold.ttf (no fake bold) ──
 def _get_persian_font_path():
-    base = Path(settings.BASE_DIR)
-    candidate = base / "static" / "fonts" / "YekanBakh-Bold.ttf"
-    if candidate.exists():
-        return str(candidate)
-    if (base / "YekanBakh-Bold.ttf").exists():
-        return str(base / "YekanBakh-Bold.ttf")
+    for candidate in banner_font_candidates("YekanBakh-Bold.ttf"):
+        if candidate.exists():
+            return str(candidate)
     return None
 
 
 PERSIAN_FONT_PATH = _get_persian_font_path()
 assert PERSIAN_FONT_PATH, (
-    "FATAL: Banner font not found. Place YekanBakh-Bold.ttf in static/fonts/ or project root."
+    "FATAL: Banner font not found. Place YekanBakh-Bold.ttf in static/fonts/banner/ (or legacy static/fonts/)."
 )
 
 
@@ -103,15 +102,15 @@ def _resolve_absolute(p: Path) -> Path:
 def _load_font(ImageFont, size: int, font_path_override: str | None = None):
     """
     Load banner font for Category and Description (Farsi text).
-    Default: static/fonts/YekanBakh-Bold.ttf (PERSIAN_FONT_PATH).
+    Default: static/fonts/banner/YekanBakh-Bold.ttf (PERSIAN_FONT_PATH).
     If font_path_override is set (e.g. from banner_config.json), resolve against BASE_DIR and use when valid.
     Phone numbers use _load_english_font. No stroke/pseudo-bold — use .ttf weight only.
     """
     path = PERSIAN_FONT_PATH
     override = (font_path_override or "").strip()
     if override:
-        resolved = _resolve_absolute(Path(override))
-        if resolved.exists():
+        resolved = resolve_font_path(override)
+        if resolved is not None:
             path = str(resolved)
     font = ImageFont.truetype(path, size)
     logger.debug("Loaded banner font: %s (size %d)", path, size)
@@ -144,9 +143,12 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     if font_path_override:
         p = _resolve_absolute(Path(font_path_override))
         paths.append(p)
+        alt = resolve_font_path(font_path_override)
+        if alt is not None and alt.resolve() != p.resolve():
+            paths.append(alt)
 
     # Montserrat.ttf: preferred font for phone numbers on ad banners
-    for d in [base_dir / "static" / "fonts", media_root / "ad_templates" / "fonts"]:
+    for d in [banner_font_dir(), legacy_font_dir(), media_root / "ad_templates" / "fonts"]:
         paths.append(d / PHONE_FONT_NAME)
 
     import platform
@@ -160,7 +162,8 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
     english_font_names = ["English.ttf", "Roboto.ttf", "Inter.ttf", "OpenSans.ttf"]
     search_dirs = [
         media_root / "ad_templates" / "fonts",
-        base_dir / "static" / "fonts",
+        banner_font_dir(),
+        legacy_font_dir(),
     ]
     for d in search_dirs:
         for name in english_font_names:
@@ -194,7 +197,8 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
             for name in linux_names:
                 paths.append(d / name)
 
-    paths.append(base_dir / "static" / "fonts" / "DejaVuSans.ttf")
+    paths.append(banner_font_dir() / "DejaVuSans.ttf")
+    paths.append(legacy_font_dir() / "DejaVuSans.ttf")
 
     for p in paths:
         try:
@@ -208,7 +212,7 @@ def _load_english_font(font_path_override: str | None, ImageFont, size: int):
 
     logger.warning(
         "No English font found; phone numbers will use Pillow default. "
-        "Place monstrat.ttf in static/fonts/ or media/ad_templates/fonts/ for best results."
+        "Place monstrat.ttf in static/fonts/banner/ or media/ad_templates/fonts/ for best results."
     )
     return ImageFont.load_default()
 
@@ -300,17 +304,62 @@ def draw_spaced_text(
             current_x += spacing_px
 
 
+def _line_pixel_width(draw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text or " ", font=font, stroke_width=0)
+    return max(1, bbox[2] - bbox[0])
+
+
+def _split_long_word_to_width(draw, word: str, font, max_width: int) -> list[str]:
+    """Break a single token into segments that each fit within max_width."""
+    if not word:
+        return []
+    if _line_pixel_width(draw, word, font) <= max_width:
+        return [word]
+    parts: list[str] = []
+    chunk = ""
+    for ch in word:
+        cand = chunk + ch
+        if _line_pixel_width(draw, cand, font) <= max_width:
+            chunk = cand
+        else:
+            if chunk:
+                parts.append(chunk)
+            chunk = ch
+    if chunk:
+        parts.append(chunk)
+    return parts if parts else [word[:1]]
+
+
+def _reflow_overwide_lines(draw, lines: list[str], font, max_width: int) -> list[str]:
+    """Ensure every line fits max_width (character-split long words)."""
+    out: list[str] = []
+    for line in lines:
+        if not line.strip():
+            out.append(line)
+            continue
+        if _line_pixel_width(draw, line, font) <= max_width:
+            out.append(line)
+            continue
+        for w in line.split():
+            if _line_pixel_width(draw, w, font) <= max_width:
+                out.append(w)
+            else:
+                out.extend(_split_long_word_to_width(draw, w, font, max_width))
+    return out
+
+
 def _wrap_persian_text(draw, text: str, font, max_width: int):
     """
     Word-wrap text to fit within max_width. Raw text (no reshaping).
+    Long single words are split by characters so nothing overflows horizontally.
     """
     if max_width <= 0:
         return [text] if text else []
 
-    lines: list[str] = []
+    preliminary: list[str] = []
     for paragraph in (text or "").split("\n"):
         if not paragraph.strip():
-            lines.append("")
+            preliminary.append("")
             continue
 
         words = paragraph.split()
@@ -326,13 +375,60 @@ def _wrap_persian_text(draw, text: str, font, max_width: int):
                 current.append(w)
             else:
                 if current:
-                    lines.append(" ".join(current))
+                    preliminary.append(" ".join(current))
                 current = [w]
 
         if current:
-            lines.append(" ".join(current))
+            preliminary.append(" ".join(current))
 
-    return lines
+    return _reflow_overwide_lines(draw, preliminary, font, max_width)
+
+
+def _measure_description_block_height(lines: list[str], font, draw, line_gap: int) -> int:
+    if not lines:
+        return 0
+    total = 0
+    for i, line in enumerate(lines):
+        bbox = draw.textbbox((0, 0), line or " ", font=font, stroke_width=0)
+        total += bbox[3] - bbox[1]
+        if i < len(lines) - 1:
+            total += line_gap
+    return total
+
+
+def _truncate_wrapped_lines_for_height(
+    draw,
+    lines: list[str],
+    font,
+    max_width: int,
+    max_height: int,
+    line_gap: int,
+) -> list[str]:
+    """Drop lines from the end and shorten the last line until block height fits max_height."""
+    if max_height <= 0:
+        return ["…"]
+    out = list(lines)
+    ell = "…"
+    while len(out) > 1 and _measure_description_block_height(out, font, draw, line_gap) > max_height:
+        out.pop()
+    while out and _measure_description_block_height(out, font, draw, line_gap) > max_height:
+        last = out[-1]
+        if len(last) <= 1:
+            out.pop()
+            continue
+        trimmed = False
+        for end in range(len(last) - 1, -1, -1):
+            cand = (last[:end].rstrip() + ell) if end else ell
+            if _line_pixel_width(draw, cand, font) > max_width:
+                continue
+            trial = out[:-1] + [cand]
+            if _measure_description_block_height(trial, font, draw, line_gap) <= max_height:
+                out = trial
+                trimmed = True
+                break
+        if not trimmed:
+            out.pop()
+    return out if out else [ell]
 
 
 def _get_media_root() -> Path:
@@ -349,8 +445,8 @@ def _get_media_root() -> Path:
 # Fallback only when static/banner_config.json is missing (mirrors that file).
 # Portrait 1080x1350 layout: Category y=290, Message y=600, Phone y=1180 (yellow area at bottom)
 _DEFAULT_BANNER_CONFIG = {
-    "category": {"x": 180, "y": 290, "size": 90, "color": "#EEFF00", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 700, "align": "center"},
-    "message": {"x": 215, "y": 600, "size": 55, "color": "#FFFFFF", "font_path": "static/fonts/YekanBakh-Bold.ttf", "max_width": 650, "align": "center"},
+    "category": {"x": 180, "y": 290, "size": 90, "color": "#EEFF00", "font_path": "static/fonts/banner/YekanBakh-Bold.ttf", "max_width": 700, "align": "center"},
+    "message": {"x": 215, "y": 600, "size": 55, "color": "#FFFFFF", "font_path": "static/fonts/banner/YekanBakh-Bold.ttf", "max_width": 650, "align": "center"},
     "phone": {"x": 300, "y": 1140, "size": 52, "color": "#000000", "max_width": 450, "align": "center", "letter_spacing": 2},
 }
 
@@ -657,13 +753,25 @@ def create_ad_image(
     if cat_text:
         _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=False)
 
-    # ── Description Layer (YekanBakh-Bold.ttf from config, no pseudo-bold, multi-line) ──
-    d_conf = coords.get("description", {})
-    desc_font = _load_font(
+    # ── Phone band (computed before description so body text stays above phone) ──
+    PHONE_BOTTOM_PADDING = 80
+    DESCRIPTION_PHONE_GAP = 36
+    DESCRIPTION_FALLBACK_FONT_SIZE = 45
+    p_conf = coords.get("phone", {})
+    phone_font = _load_english_font(
+        "",  # Ignore font_path; phone must always use English/Latin font
         ImageFont,
-        _coerce_int(d_conf.get("size"), default=55, minimum=1, maximum=400),
-        d_conf.get("font_path"),
+        _coerce_int(p_conf.get("size"), default=48, minimum=20, maximum=400),
     )
+    phone_y_raw = _coerce_int(p_conf.get("y"), default=1140, minimum=-img.height * 2, maximum=img.height * 2)
+    est_phone_height = int(phone_font.size * 1.2)
+    max_phone_y = img.height - PHONE_BOTTOM_PADDING - est_phone_height
+    phone_y = min(phone_y_raw, max_phone_y)
+
+    # ── Description Layer (YekanBakh-Bold.ttf from config, multi-line, vertical fit) ──
+    d_conf = coords.get("description", {})
+    desc_base_size = _coerce_int(d_conf.get("size"), default=55, minimum=1, maximum=400)
+    desc_font_path = d_conf.get("font_path")
     desc_color = _hex_to_rgb(d_conf.get("color") or "#FFFFFF")
     desc_x = _coerce_int(d_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
     desc_y = _coerce_int(d_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
@@ -672,30 +780,37 @@ def create_ad_image(
     if desc_align not in ("left", "center", "right"):
         desc_align = "center"
 
-    wrapped_lines = _wrap_persian_text(draw, text or "", desc_font, max_width)
+    body = prepare_text(text or "", is_phone=False)
+    available_height = max(0, phone_y - DESCRIPTION_PHONE_GAP - desc_y)
+
+    desc_font = _load_font(ImageFont, desc_base_size, desc_font_path)
+    line_gap = max(6, int(desc_base_size * 0.15))
+    wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
+    block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
+
+    if block_h > available_height and desc_base_size > DESCRIPTION_FALLBACK_FONT_SIZE:
+        desc_font = _load_font(ImageFont, DESCRIPTION_FALLBACK_FONT_SIZE, desc_font_path)
+        line_gap = max(6, int(DESCRIPTION_FALLBACK_FONT_SIZE * 0.15))
+        wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
+        block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
+
+    if block_h > available_height:
+        wrapped_lines = _truncate_wrapped_lines_for_height(
+            draw, wrapped_lines, desc_font, max_width, available_height, line_gap
+        )
+
+    y = desc_y
     for line in wrapped_lines:
-        _draw_aligned_line(draw, line, desc_x, desc_y, desc_font, desc_color, desc_align, max_width, bold=False)
-        bbox = draw.textbbox((0, 0), line, font=desc_font, stroke_width=0)
-        desc_y += (bbox[3] - bbox[1]) + 6
+        _draw_aligned_line(draw, line, desc_x, y, desc_font, desc_color, desc_align, max_width, bold=False)
+        bbox = draw.textbbox((0, 0), line or " ", font=desc_font, stroke_width=0)
+        y += (bbox[3] - bbox[1]) + line_gap
 
     # ── Phone Layer: English font only (Montserrat/arialbd/trebucbd), LTR, Western digits ──
     # Default: x300 y1140 (yellow area at bottom), size 48, max_width 450, letter_spacing 2.
     # is_phone=True: no reshaping, no RTL — numbers stay strictly LTR.
     # IMPORTANT: Never use font_path from config for phone — must always use English font.
-    PHONE_BOTTOM_PADDING = 80  # Minimum clearance from image bottom to avoid overlap
-    p_conf = coords.get("phone", {})
-    phone_font = _load_english_font(
-        "",  # Ignore font_path; phone must always use English/Latin font
-        ImageFont,
-        _coerce_int(p_conf.get("size"), default=48, minimum=20, maximum=400),
-    )
     phone_color = _hex_to_rgb(p_conf.get("color") or "#000000")
     phone_x = _coerce_int(p_conf.get("x"), default=300, minimum=-img.width * 2, maximum=img.width * 2)
-    phone_y_raw = _coerce_int(p_conf.get("y"), default=1140, minimum=-img.height * 2, maximum=img.height * 2)
-    # Clamp Y so phone bottom stays above img bottom (min 80px clearance)
-    est_phone_height = int(phone_font.size * 1.2)
-    max_phone_y = img.height - PHONE_BOTTOM_PADDING - est_phone_height
-    phone_y = min(phone_y_raw, max_phone_y)
     phone_align = (p_conf.get("align") or "center").strip().lower()
     if phone_align not in ("left", "center", "right"):
         phone_align = "center"
@@ -790,12 +905,14 @@ def generate_ad_image(ad, is_story: bool = False) -> str | None:
     if not category_text:
         category_text = ad.get_category_display_fa() if hasattr(ad, 'get_category_display_fa') else "سایر"
 
-    # Description: limit to 250 chars
-    description = (ad.content or "").strip()[:250]
+    # Description: up to validated max length (500)
+    description = (ad.content or "").strip()[:AD_CONTENT_MAX_LENGTH]
 
-    # Phone: from contact_snapshot or user profile
+    # Phone: prefer denormalized field, then snapshot, then user profile
+    phone = (getattr(ad, "phone_number", None) or "").strip()
     contact = getattr(ad, 'contact_snapshot', None) or {}
-    phone = (contact.get('phone') or '').strip() if isinstance(contact, dict) else ''
+    if not phone and isinstance(contact, dict):
+        phone = (contact.get('phone') or '').strip()
     if not phone and getattr(ad, 'user_id', None) and ad.user:
         phone = (ad.user.phone_number or '').strip()
 

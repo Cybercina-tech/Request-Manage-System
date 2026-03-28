@@ -19,6 +19,7 @@ urlpatterns = [
     path('requests/', views.ad_list, name='ad_list'),
     path('requests/bulk-reject/', views.bulk_reject_page, name='bulk_reject_page'),
     path('requests/<uuid:uuid>/', views.ad_detail, name='ad_detail'),
+    path('requests/<uuid:uuid>/delete-everywhere/', views.ad_global_delete, name='ad_global_delete'),
     path('request/<uuid:uuid>/', views.request_detail, name='request_detail'),
     path('requests/<uuid:uuid>/approve/', views.confirm_approve, name='confirm_approve'),
     path('requests/<uuid:uuid>/reject/', views.confirm_reject, name='confirm_reject'),

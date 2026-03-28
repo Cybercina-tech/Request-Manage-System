@@ -11,14 +11,16 @@ Required packages (install in your environment):
     pip install arabic-reshaper
     pip install python-bidi
 
-Font: Place YekanBakh-Bold.ttf in the same directory as this script,
-      or set FONT_PATH below to the full path of the font file.
+Font: Prefer static/fonts/banner/YekanBakh-Bold.ttf, or place
+      YekanBakh-Bold.ttf next to this module, or set FONT_PATH to a full path.
+
+Run from project root: python -m core.utils.standalone_image_generator
 """
 
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
-# Font path: place YekanBakh-Bold.ttf next to this script, or set absolute path
+# Font path: see module docstring (static/fonts/ or next to this file)
 # -----------------------------------------------------------------------------
 FONT_PATH = "YekanBakh-Bold.ttf"
 
@@ -66,13 +68,21 @@ def _hex_to_rgb(hex_string: str) -> tuple[int, int, int]:
 
 
 def _resolve_font_path() -> Path:
-    """Resolve FONT_PATH: same dir as script first, then current dir."""
-    script_dir = Path(__file__).resolve().parent
-    for base in (script_dir, Path.cwd()):
+    """Resolve FONT_PATH: project static/fonts, same dir as module, then cwd."""
+    module_dir = Path(__file__).resolve().parent
+    # Project root: .../core/utils -> parent ×2
+    project_root = module_dir.parent.parent
+    banner_font = project_root / "static" / "fonts" / "banner" / Path(FONT_PATH).name
+    if banner_font.exists():
+        return banner_font
+    legacy_font = project_root / "static" / "fonts" / Path(FONT_PATH).name
+    if legacy_font.exists():
+        return legacy_font
+    for base in (module_dir, Path.cwd()):
         candidate = base / FONT_PATH
         if candidate.exists():
             return candidate
-    return script_dir / FONT_PATH
+    return module_dir / FONT_PATH
 
 
 def _reshape_for_drawing(text: str) -> str:
@@ -171,7 +181,7 @@ def generate_banner(
     if not font_path.exists():
         raise FileNotFoundError(
             f"Font not found: {font_path}. "
-            "Place YekanBakh-Bold.ttf in the same directory as this script."
+            "Add static/fonts/banner/YekanBakh-Bold.ttf or place the font next to this module."
         )
 
     # Create canvas with solid background

@@ -2,7 +2,7 @@
 Iraniu — Image generation for Instagram posts and stories from AdRequest.
 
 Uses static/banner_config.json for coordinates, font sizes, and colors.
-Font: static/fonts/YekanBakh-Bold.ttf. Raw text to draw (no arabic_reshaper/python-bidi).
+Font: static/fonts/banner/YekanBakh-Bold.ttf. Raw text to draw (no arabic_reshaper/python-bidi).
 Canvas: Feed 1080x1350, Story 1080x1920.
 """
 
@@ -12,6 +12,9 @@ import uuid
 from pathlib import Path
 
 from django.conf import settings
+
+from core.static_paths import banner_font_candidates, resolve_font_path
+from core.validators import AD_CONTENT_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ TEMPLATE_PATHS = [
     "static/images/insta_bg.png",
 ]
 
-YEKAN_BAKH_BOLD = "static/fonts/YekanBakh-Bold.ttf"
+YEKAN_BAKH_BOLD = "static/fonts/banner/YekanBakh-Bold.ttf"
 
 
 def _ensure_pillow():
@@ -70,14 +73,15 @@ def _hex_to_rgb(value: str):
 
 
 def _resolve_font_path(rel_path: str | None) -> Path | None:
-    """Resolve font_path from config against BASE_DIR. Fallback: YekanBakh-Bold.ttf."""
-    base = Path(settings.BASE_DIR)
+    """Resolve font_path from config against BASE_DIR. Fallback: banner then legacy Yekan."""
     if rel_path:
-        p = (base / rel_path.replace("\\", "/")).resolve()
+        p = resolve_font_path(rel_path)
+        if p is not None:
+            return p
+    for p in banner_font_candidates("YekanBakh-Bold.ttf"):
         if p.exists():
             return p
-    p = base / "static" / "fonts" / "YekanBakh-Bold.ttf"
-    return p if p.exists() else (base / "YekanBakh-Bold.ttf" if (base / "YekanBakh-Bold.ttf").exists() else None)
+    return None
 
 
 def _load_banner_font(ImageFont, size: int, font_path_override: str | None = None):
@@ -93,10 +97,10 @@ def _load_english_font(ImageFont, size: int):
     base = Path(settings.BASE_DIR)
     media_root = getattr(settings, "MEDIA_ROOT", base / "media") or (base / "media")
     for p in [
-        base / "static" / "fonts" / "monstrat.ttf",
+        *banner_font_candidates("monstrat.ttf"),
         Path(media_root) / "ad_templates" / "fonts" / "monstrat.ttf",
-        base / "static" / "fonts" / "English.ttf",
-        base / "static" / "fonts" / "Roboto.ttf",
+        *banner_font_candidates("English.ttf"),
+        *banner_font_candidates("Roboto.ttf"),
         Path("C:/Windows/Fonts/arial.ttf"),
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
     ]:
@@ -222,17 +226,18 @@ def generate_request_image(request_id: int, is_story: bool = False) -> str | Non
     if title:
         draw.text((cat_x, cat_y), title[:200], fill=cat_color, font=font_cat)
 
-    content = (ad.content or "")[:1500]
+    content = (ad.content or "")[:AD_CONTENT_MAX_LENGTH]
     for line in _wrap_text(draw, content, font_desc, max_width):
-        draw.text((desc_x, desc_y), line[:500], fill=desc_color, font=font_desc)
+        draw.text((desc_x, desc_y), line[:AD_CONTENT_MAX_LENGTH], fill=desc_color, font=font_desc)
         bbox = draw.textbbox((0, 0), line, font=font_desc)
         desc_y += (bbox[3] - bbox[1]) + 6
         if desc_y > height - 150:
             break
 
-    phone = ""
+    phone = (getattr(ad, "phone_number", None) or "").strip()
     contact = getattr(ad, "contact_snapshot", None) or {}
-    phone = (contact.get("phone") or "").strip()
+    if not phone:
+        phone = (contact.get("phone") or "").strip()
     if not phone and ad.user_id:
         phone = (ad.user.phone_number or "").strip()
     if phone:
