@@ -17,7 +17,6 @@ from django.db import models
 from django.utils import timezone
 
 from .encryption import decrypt_token, encrypt_token, mask_token
-from .utils.encoding import repair_utf8_misread_as_latin1
 from .validators import validate_ad_content_length
 
 
@@ -481,9 +480,6 @@ class Category(models.Model):
         return self.name_fa or self.name
 
     def save(self, *args, **kwargs):
-        if self.name:
-            self.name = repair_utf8_misread_as_latin1(self.name)
-        self.name_fa = repair_utf8_misread_as_latin1(self.name_fa or '')
         if not self.slug and self.name:
             from django.utils.text import slugify
             self.slug = slugify(self.name)[:64]

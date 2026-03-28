@@ -185,12 +185,7 @@ def api_v1_categories(request):
 
     data = list(qs.values('id', 'name', 'name_fa', 'slug', 'color', 'icon', 'order', 'ads_count'))
 
-    return JsonResponse(
-        {'results': data},
-        safe=False,
-        json_dumps_params={'ensure_ascii': False},
-        content_type='application/json; charset=utf-8',
-    )
+    return JsonResponse({'results': data})
 
 
 @require_http_methods(['GET'])
