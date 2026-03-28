@@ -4,9 +4,10 @@ All views assume request.api_client is set (middleware returns 401 otherwise), e
 GET /api/v1/categories/ which is public (no API key).
 """
 
+import json
 import logging
 from django.db.models import Count, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
@@ -20,6 +21,29 @@ from core.utils.phone_export import format_ad_phone_e164_export
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+def _utf8_misread_as_latin1(s: str) -> str:
+    """
+    If UTF-8 bytes were decoded as Latin-1, the string looks like mojibake (e.g. Ù†Ø¸…).
+    Re-encode as Latin-1 to recover the original bytes, then decode as UTF-8.
+    Some UIs map UTF-8 continuation bytes 0x86/0x87 to †/‡ (U+2020/U+2021); normalize those too.
+    Correct Persian (Arabic script) is unchanged: it cannot round-trip through latin-1.
+    """
+    if not s:
+        return s
+
+    def _attempt(t: str) -> str | None:
+        try:
+            return t.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return None
+
+    fixed = _attempt(s)
+    if fixed is not None:
+        return fixed
+    fixed = _attempt(s.replace('\u2020', '\x86').replace('\u2021', '\x87'))
+    return fixed if fixed is not None else s
 
 
 def _get_valid_category_slugs():
@@ -164,7 +188,8 @@ def api_v1_categories(request):
       sort: "order" (default) or "ads" — by catalog order, or by approved count descending
             then order, name (popular categories first).
 
-    Response is UTF-8 JSON with ensure_ascii=False so Persian text is not escaped as \\uXXXX in raw output.
+    Response is UTF-8 JSON (ensure_ascii=False, explicit charset in Content-Type). If name/name_fa were
+    stored as mojibake (UTF-8 misread as Latin-1), they are repaired in the payload.
     """
     qs = (
         Category.objects.filter(is_active=True)
@@ -192,8 +217,8 @@ def api_v1_categories(request):
     results = [
         {
             'id': c.pk,
-            'name': c.name,
-            'name_fa': c.name_fa or '',
+            'name': _utf8_misread_as_latin1((c.name or '').strip()),
+            'name_fa': _utf8_misread_as_latin1((c.name_fa or '').strip()),
             'slug': c.slug,
             'color': c.color,
             'icon': icon_for(c),
@@ -202,9 +227,10 @@ def api_v1_categories(request):
         }
         for c in qs
     ]
-    return JsonResponse(
-        {'results': results},
-        json_dumps_params={'ensure_ascii': False},
+    # Explicit UTF-8 bytes + charset so clients never mis-detect encoding; mojibake in DB is fixed above.
+    payload = json.dumps({'results': results}, ensure_ascii=False)
+    return HttpResponse(
+        payload.encode('utf-8'),
         content_type='application/json; charset=utf-8',
     )
 

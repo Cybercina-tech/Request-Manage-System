@@ -152,6 +152,9 @@ TIME_ZONE = 'Asia/Tehran'
 USE_I18N = True
 USE_TZ = True
 
+# All HttpResponse/JsonResponse bodies use this encoding unless overridden per-response.
+DEFAULT_CHARSET = 'utf-8'
+
 STATIC_URL = '/static/'
 # منبع فایل‌های استاتیک (collectstatic از این‌ها داخل STATIC_ROOT کپی می‌کند)
 STATICFILES_DIRS = [BASE_DIR / "static"]
