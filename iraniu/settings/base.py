@@ -34,7 +34,13 @@ def _env_list(name: str, default: Iterable[str] | None = None) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-DEBUG = _env_bool("DJANGO_DEBUG", default=True)  # default True for local; set False in production
+# Prefer DJANGO_DEBUG; DEBUG is accepted for Dokploy/tools that only set DEBUG=False.
+if "DJANGO_DEBUG" in os.environ:
+    DEBUG = _env_bool("DJANGO_DEBUG", default=True)
+elif "DEBUG" in os.environ:
+    DEBUG = _env_bool("DEBUG", default=True)
+else:
+    DEBUG = True  # default True for local; set False in production
 SECRET_KEY = (os.environ.get("DJANGO_SECRET_KEY") or "").strip() or "dev-change-in-production-iraniu"
 if not DEBUG and not (os.environ.get("DJANGO_SECRET_KEY") or "").strip():
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false.")
@@ -106,16 +112,27 @@ WSGI_APPLICATION = 'iraniu.wsgi.application'
 
 # SQLite: timeout reduces lock wait; WAL via connection_created in core.apps
 # For production concurrency, consider PostgreSQL (no file-level locking).
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        'OPTIONS': {
-            'timeout': 15,
-        },
-        'CONN_MAX_AGE': 0,
+_database_url = (os.environ.get("DATABASE_URL") or "").strip()
+if _database_url:
+    import dj_database_url
+
+    DATABASES = {
+        "default": dj_database_url.parse(
+            _database_url,
+            conn_max_age=600,
+        )
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 15,
+            },
+            'CONN_MAX_AGE': 0,
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},

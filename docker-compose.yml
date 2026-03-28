@@ -1,0 +1,23 @@
+# Local development: hot-reload via bind mount (.:/app).
+# Override entrypoint for faster iteration (skip migrate/collectstatic each start):
+#   entrypoint: ["python"]
+#   command: ["manage.py", "runserver", "0.0.0.0:8000"]
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./media:/app/media
+      # Optional SQLite persistence (create empty file first: touch db.sqlite3)
+      # - ./db.sqlite3:/app/db.sqlite3
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

@@ -1,5 +1,5 @@
 # --- Environment & secrets (security) ---
-# .env
+.env
 # .env.local
 # .env.*.local
 # .env.development

@@ -25,7 +25,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 
@@ -170,6 +170,12 @@ def _sanitize_workflow_stages(raw_stages):
         used_keys.add(key)
         cleaned.append({'key': key, 'label': label, 'enabled': bool(stage.get('enabled', True))})
     return cleaned or SiteConfiguration._meta.get_field('workflow_stages').default()
+
+
+@require_GET
+def health(request):
+    """Liveness probe for Docker / load balancers (always 200 if Django is up)."""
+    return HttpResponse("ok", content_type="text/plain")
 
 
 def landing(request):

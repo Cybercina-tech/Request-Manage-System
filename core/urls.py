@@ -9,6 +9,7 @@ from . import telegram_views
 from . import views_api_v1
 
 urlpatterns = [
+    path('health/', views.health, name='health'),
     path('', views.landing, name='landing'),
     path('dashboard/', views.dashboard, name='dashboard'),
     path('dashboard/channels/', views.channel_list, name='channel_list'),
