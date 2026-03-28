@@ -22,29 +22,6 @@ from django.core.exceptions import ValidationError
 logger = logging.getLogger(__name__)
 
 
-def _utf8_misread_as_latin1(s: str) -> str:
-    """
-    If UTF-8 bytes were decoded as Latin-1, the string looks like mojibake (e.g. Ù†Ø¸…).
-    Re-encode as Latin-1 to recover the original bytes, then decode as UTF-8.
-    Some UIs map UTF-8 continuation bytes 0x86/0x87 to †/‡ (U+2020/U+2021); normalize those too.
-    Correct Persian (Arabic script) is unchanged: it cannot round-trip through latin-1.
-    """
-    if not s:
-        return s
-
-    def _attempt(t: str) -> str | None:
-        try:
-            return t.encode('latin-1').decode('utf-8')
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            return None
-
-    fixed = _attempt(s)
-    if fixed is not None:
-        return fixed
-    fixed = _attempt(s.replace('\u2020', '\x86').replace('\u2021', '\x87'))
-    return fixed if fixed is not None else s
-
-
 def _get_valid_category_slugs():
     return set(Category.objects.filter(is_active=True).values_list('slug', flat=True))
 
@@ -186,9 +163,6 @@ def api_v1_categories(request):
       omit_empty / hide_empty: if 1/true, exclude categories with ads_count == 0.
       sort: "order" (default) or "ads" — by catalog order, or by approved count descending
             then order, name (popular categories first).
-
-    Response is JSON with non-ASCII text escaped as \\uXXXX (ensure_ascii=True). name/name_fa are repaired
-    if stored as mojibake. Content-Type includes charset=utf-8.
     """
     qs = (
         Category.objects.filter(is_active=True)
@@ -209,26 +183,12 @@ def api_v1_categories(request):
     else:
         qs = qs.order_by('order', 'name')
 
-    def icon_for(c):
-        v = (getattr(c, 'icon', None) or '').strip()
-        return v or 'circle'
+    data = list(qs.values('id', 'name', 'name_fa', 'slug', 'color', 'icon', 'order', 'ads_count'))
 
-    results = [
-        {
-            'id': c.pk,
-            'name': _utf8_misread_as_latin1((c.name or '').strip()),
-            'name_fa': _utf8_misread_as_latin1((c.name_fa or '').strip()),
-            'slug': c.slug,
-            'color': c.color,
-            'icon': icon_for(c),
-            'order': c.order,
-            'ads_count': c.ads_count,
-        }
-        for c in qs
-    ]
     return JsonResponse(
-        {'results': results},
-        json_dumps_params={'ensure_ascii': True},
+        {'results': data},
+        safe=False,
+        json_dumps_params={'ensure_ascii': False},
         content_type='application/json; charset=utf-8',
     )
 
