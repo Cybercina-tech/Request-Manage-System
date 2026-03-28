@@ -163,6 +163,8 @@ def api_v1_categories(request):
       omit_empty / hide_empty: if 1/true, exclude categories with ads_count == 0.
       sort: "order" (default) or "ads" — by catalog order, or by approved count descending
             then order, name (popular categories first).
+
+    Response is UTF-8 JSON with ensure_ascii=False so Persian text is not escaped as \\uXXXX in raw output.
     """
     qs = (
         Category.objects.filter(is_active=True)
@@ -200,7 +202,11 @@ def api_v1_categories(request):
         }
         for c in qs
     ]
-    return JsonResponse({'results': results})
+    return JsonResponse(
+        {'results': results},
+        safe=False,
+        json_dumps_params={'ensure_ascii': False},
+    )
 
 
 @require_http_methods(['GET'])
