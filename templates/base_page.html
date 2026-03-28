@@ -129,6 +129,10 @@
             <i class="fa-solid fa-rectangle-ad icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Ads Manager" %}
           </a>
+          <a href="{% url 'ad_create' %}" class="{% if request.resolver_match.url_name == 'ad_create' or request.resolver_match.url_name == 'ad_create_submit' %}active{% endif %}">
+            <i class="fa-solid fa-circle-plus icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
+            {% trans "Create Ad" %}
+          </a>
           <a href="{% url 'categories' %}" class="{% if request.resolver_match.url_name == 'categories' or request.resolver_match.url_name == 'category_edit' %}active{% endif %}">
             <i class="fa-solid fa-tags icon {% if request.LANGUAGE_CODE == 'fa' or request.LANGUAGE_CODE == 'fa-ir' %}ms-2{% else %}me-2{% endif %}" aria-hidden="true"></i>
             {% trans "Categories" %}

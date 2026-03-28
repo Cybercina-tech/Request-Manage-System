@@ -46,6 +46,20 @@ class AnonymousAccessTests(TestCase):
         )
         self.assertIn(response.status_code, (200, 400))
 
+    def test_anonymous_cannot_access_ad_create(self):
+        response = self.client.get(reverse('ad_create'), follow=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse('login')))
+
+    def test_anonymous_cannot_post_ad_create_submit(self):
+        response = self.client.post(
+            reverse('ad_create_submit'),
+            data={'content': 'test', 'phone': '+989123456789', 'category': 'other'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse('login')))
+
     def test_anonymous_cannot_access_approve_api(self):
         response = self.client.post(
             reverse('approve_ad'),
@@ -84,6 +98,10 @@ class StaffAccessTests(TestCase):
 
     def test_staff_can_access_requests(self):
         response = self.client.get(reverse('ad_list'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_can_access_ad_create(self):
+        response = self.client.get(reverse('ad_create'))
         self.assertEqual(response.status_code, 200)
 
     def test_staff_can_access_settings(self):

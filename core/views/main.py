@@ -1664,6 +1664,55 @@ def export_config(request):
     return JsonResponse(data, json_dumps_params={'indent': 2})
 
 
+@staff_member_required
+@require_GET
+def ad_create(request):
+    """Staff page: Create Ad form."""
+    return render(request, 'core/ad_create.html')
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def ad_create_submit(request):
+    """Staff AJAX: create an ad via SubmitAdService (CSRF-protected)."""
+    from core.services.submit_ad_service import SubmitAdService
+    from core.services.users import sanitize_phone_raw
+    try:
+        data = get_request_payload(request)
+        content = (data.get('content') or '').strip()
+        if not content:
+            return JsonResponse({'error': 'content is required.'}, status=400)
+        content = clean_ad_text(content)
+        try:
+            from core.validators import validate_ad_content as _validate
+            _validate(content)
+        except ValidationError as e:
+            msg = e.messages[0] if e.messages else 'Invalid content.'
+            return JsonResponse({'error': msg}, status=400)
+
+        phone_raw = (data.get('phone') or '').strip()
+        if not phone_raw:
+            return JsonResponse({'error': 'Phone number is required.'}, status=400)
+        try:
+            phone_raw = sanitize_phone_raw(phone_raw)
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+        slug = (data.get('category') or 'other').strip()
+        contact = {'phone': phone_raw, 'email': ''}
+        ad = SubmitAdService.submit(
+            content=content,
+            category=slug,
+            contact_snapshot=contact,
+        )
+        if ad is None:
+            return JsonResponse({'error': 'Submission failed (empty content after cleaning).'}, status=400)
+        return JsonResponse({'status': 'created', 'uuid': str(ad.uuid)}, status=201)
+    except Exception as exc:
+        logger.exception("ad_create_submit failed: %s", exc)
+        return JsonResponse({'error': 'Submission failed.'}, status=500)
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def submit_ad(request):

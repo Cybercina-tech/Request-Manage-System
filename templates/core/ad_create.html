@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% load static i18n %}
+
+{% block title %}{% trans "Create Ad" %}{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">{% trans "Dashboard" %}</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'ad_list' %}">{% trans "Ads Manager" %}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{% trans "Create Ad" %}</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    {% trans "Create Ad" %}
+  </h1>
+  <a href="{% url 'ad_list' %}" class="btn btn-action">
+    <i class="fa-solid fa-arrow-left icon me-1" aria-hidden="true"></i> {% trans "Back to Ads" %}
+  </a>
+</div>
+
+<div class="row g-4">
+  <!-- Main form column -->
+  <div class="col-lg-8">
+    <div class="card-soul p-4">
+      <form id="adCreateForm" novalidate>
+        {% csrf_token %}
+
+        <fieldset class="mb-4">
+          <legend class="fs-6 fw-semibold mb-3" style="color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            <i class="fa-solid fa-pen-to-square me-1"></i> {% trans "Ad Details" %}
+          </legend>
+
+          <div class="mb-3">
+            <label class="form-label" for="id_category">{% trans "Category" %} <span class="text-danger">*</span></label>
+            <select name="category" id="id_category" class="form-select form-control" required>
+              <option value="" disabled selected>{% trans "Loading categories..." %}</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="id_phone">{% trans "Phone Number" %} <span class="text-danger">*</span></label>
+            <input type="tel" name="phone" id="id_phone" class="form-control" required
+                   placeholder="{% trans '+98 912 345 6789' %}" maxlength="20" dir="ltr"
+                   inputmode="tel" autocomplete="tel">
+            <small class="text-muted">{% trans "Iranian mobile or international format (e.g. +989123456789)" %}</small>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="id_content">{% trans "Ad Content" %} <span class="text-danger">*</span></label>
+            <textarea name="content" id="id_content" class="form-control" required
+                      rows="6" maxlength="500" dir="rtl" lang="fa"
+                      placeholder="{% trans 'Write your ad text here...' %}"
+                      style="font-family: 'VazirFallback', 'Vazir', 'Tahoma', sans-serif; resize: vertical; min-height: 140px;"></textarea>
+            <div class="d-flex justify-content-between align-items-center mt-1">
+              <small class="text-muted">{% trans "Persian text only. Max 500 characters." %}</small>
+              <small class="ad-char-counter" id="charCounter" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">0 / 500</small>
+            </div>
+          </div>
+        </fieldset>
+
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-soul" id="submitBtn">
+            <span class="btn-label">
+              <i class="fa-solid fa-paper-plane icon me-1" aria-hidden="true"></i> {% trans "Submit Ad" %}
+            </span>
+            <span class="btn-spinner d-none">
+              <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+              {% trans "Submitting..." %}
+            </span>
+          </button>
+          <button type="reset" class="btn btn-secondary" id="resetBtn">{% trans "Clear" %}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Guidelines sidebar -->
+  <div class="col-lg-4">
+    <div class="card-soul p-4 ad-create-guidelines">
+      <h6 class="fw-semibold mb-3" style="color: var(--text-primary);">
+        <i class="fa-solid fa-lightbulb me-1" style="color: var(--brand-gold);"></i> {% trans "Submission Guidelines" %}
+      </h6>
+      <ul class="guidelines-list mb-0">
+        <li>
+          <i class="fa-solid fa-clock text-muted me-1"></i>
+          {% trans "Ads enter <strong>Pending Review</strong> status after submission and will be reviewed by an admin." %}
+        </li>
+        <li>
+          <i class="fa-solid fa-robot text-muted me-1"></i>
+          {% trans "If AI moderation is enabled, content is checked automatically before manual review." %}
+        </li>
+        <li>
+          <i class="fa-solid fa-language text-muted me-1"></i>
+          {% trans "Write ad content in Persian. Latin characters may be rejected." %}
+        </li>
+        <li>
+          <i class="fa-solid fa-ruler-horizontal text-muted me-1"></i>
+          {% trans "Maximum content length is <strong>500 characters</strong> including spaces." %}
+        </li>
+        <li>
+          <i class="fa-solid fa-phone text-muted me-1"></i>
+          {% trans "Provide a valid phone number. It will appear on the generated ad image." %}
+        </li>
+        <li>
+          <i class="fa-solid fa-image text-muted me-1"></i>
+          {% trans "After approval, a banner image is generated automatically using the active template." %}
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.ad-create-guidelines .guidelines-list {
+  list-style: none;
+  padding: 0;
+}
+.ad-create-guidelines .guidelines-list li {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.ad-create-guidelines .guidelines-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.ad-char-counter.warn {
+  color: var(--accent-hot) !important;
+  font-weight: 600;
+}
+#adCreateForm .form-control:invalid:not(:placeholder-shown),
+#adCreateForm .form-select:invalid:not([data-loaded]) {
+  border-color: var(--accent-hot) !important;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var form = document.getElementById('adCreateForm');
+  var categorySelect = document.getElementById('id_category');
+  var phoneInput = document.getElementById('id_phone');
+  var contentArea = document.getElementById('id_content');
+  var charCounter = document.getElementById('charCounter');
+  var submitBtn = document.getElementById('submitBtn');
+  var MAX_LEN = 500;
+
+  // --- Load categories ---
+  fetch('{% url "api_v1_categories" %}')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var cats = data.results || [];
+      categorySelect.innerHTML = '';
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      placeholder.textContent = '— {% trans "Select category" %} —';
+      categorySelect.appendChild(placeholder);
+      cats.forEach(function(c) {
+        var opt = document.createElement('option');
+        opt.value = c.slug;
+        opt.textContent = c.name_fa || c.name;
+        categorySelect.appendChild(opt);
+      });
+      categorySelect.setAttribute('data-loaded', '1');
+    })
+    .catch(function() {
+      categorySelect.innerHTML = '<option value="">{% trans "Failed to load categories" %}</option>';
+    });
+
+  // --- Character counter ---
+  function updateCounter() {
+    var len = contentArea.value.length;
+    charCounter.textContent = len + ' / ' + MAX_LEN;
+    if (len > MAX_LEN * 0.9) {
+      charCounter.classList.add('warn');
+    } else {
+      charCounter.classList.remove('warn');
+    }
+  }
+  contentArea.addEventListener('input', updateCounter);
+  updateCounter();
+
+  // --- Submit ---
+  function setLoading(on) {
+    var label = submitBtn.querySelector('.btn-label');
+    var spinner = submitBtn.querySelector('.btn-spinner');
+    if (on) {
+      submitBtn.disabled = true;
+      label.classList.add('d-none');
+      spinner.classList.remove('d-none');
+    } else {
+      submitBtn.disabled = false;
+      label.classList.remove('d-none');
+      spinner.classList.add('d-none');
+    }
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var category = categorySelect.value;
+    var phone = phoneInput.value.trim();
+    var content = contentArea.value.trim();
+
+    if (!category) { window.showToast('{% trans "Please select a category." %}', 'danger'); categorySelect.focus(); return; }
+    if (!phone) { window.showToast('{% trans "Please enter a phone number." %}', 'danger'); phoneInput.focus(); return; }
+    if (!content) { window.showToast('{% trans "Please enter the ad content." %}', 'danger'); contentArea.focus(); return; }
+
+    setLoading(true);
+    fetch('{% url "ad_create_submit" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken
+      },
+      body: JSON.stringify({ category: category, phone: phone, content: content })
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+    .then(function(res) {
+      setLoading(false);
+      if (res.ok) {
+        window.showToast('{% trans "Ad submitted successfully! It is now pending review." %}', 'success');
+        form.reset();
+        categorySelect.selectedIndex = 0;
+        updateCounter();
+      } else {
+        window.showToast(res.data.error || '{% trans "Submission failed." %}', 'danger');
+      }
+    })
+    .catch(function() {
+      setLoading(false);
+      window.showToast('{% trans "Network error. Please try again." %}', 'danger');
+    });
+  });
+
+  // --- Reset handler ---
+  form.addEventListener('reset', function() {
+    setTimeout(function() {
+      categorySelect.selectedIndex = 0;
+      updateCounter();
+    }, 0);
+  });
+})();
+</script>
+{% endblock %}
