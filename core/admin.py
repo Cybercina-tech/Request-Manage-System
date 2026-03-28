@@ -80,7 +80,7 @@ class SiteConfigurationAdmin(admin.ModelAdmin):
         }),
         ('Outbound API (External Webhook)', {
             'fields': ('external_webhook_url', 'enable_webhook_sync', 'webhook_secret_key'),
-            'description': 'When an ad is approved, POST JSON to external_webhook_url if enable_webhook_sync is ON. X-Webhook-Secret header sent when webhook_secret_key is set.',
+            'description': 'When an ad is approved, POST JSON to external_webhook_url if enable_webhook_sync is ON. Payload includes id, uuid, category, message, phone_number (E.164 +prefix), image_url, story_url, created_at. X-Webhook-Secret header sent when webhook_secret_key is set.',
         }),
         ('Default Telegram channel (ads)', {
             'fields': ('telegram_channel_id', 'telegram_channel_title', 'is_channel_active', 'default_telegram_bot'),

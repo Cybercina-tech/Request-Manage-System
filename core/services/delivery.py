@@ -28,6 +28,7 @@ from core.services.log_service import (
     parse_facebook_error,
     parse_telegram_error,
 )
+from core.utils.phone_export import format_ad_phone_e164_export, resolve_ad_request_phone
 
 logger = logging.getLogger(__name__)
 _log_bot = logging.getLogger('core.instagram.bot')
@@ -242,13 +243,7 @@ class DeliveryService:
     @staticmethod
     def _get_ad_phone(ad: AdRequest) -> str:
         """Extract phone number from AdRequest.phone_number, snapshot, or user profile."""
-        phone = (getattr(ad, "phone_number", None) or "").strip()
-        contact = getattr(ad, "contact_snapshot", None) or {}
-        if not phone and isinstance(contact, dict):
-            phone = (contact.get("phone") or "").strip()
-        if not phone and getattr(ad, "user_id", None) and ad.user:
-            phone = (ad.user.phone_number or "").strip()
-        return phone
+        return resolve_ad_request_phone(ad)
 
     @staticmethod
     def _build_channel_caption(ad: AdRequest) -> str:
@@ -684,7 +679,7 @@ class DeliveryService:
     def _send_webhook(ad: AdRequest, log: DeliveryLog) -> bool:
         """
         POST ad payload as JSON to external_webhook_url with X-Webhook-Secret header.
-        Payload: id, category, message, image_url, story_url, created_at.
+        Payload: id, uuid, category, message, phone_number (E.164 +prefix), image_url, story_url, created_at.
         """
         import requests
         from core.services.instagram_api import get_absolute_media_url
@@ -703,6 +698,7 @@ class DeliveryService:
             'uuid': str(ad.uuid),
             'category': category_name,
             'message': (ad.content or '')[:10000],
+            'phone_number': format_ad_phone_e164_export(ad),
             'image_url': image_url or '',
             'story_url': story_url or '',
             'created_at': ad.created_at.isoformat() if ad.created_at else None,

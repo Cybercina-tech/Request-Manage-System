@@ -16,7 +16,7 @@
 <div class="card-soul mb-4">
   <h5 class="card-header border-0 bg-transparent pb-0"><i class="fa-solid fa-paper-plane me-2"></i>External Webhook (Outbound)</h5>
   <div class="card-body">
-    <p class="text-muted small">When an ad is approved, its data is POSTed as JSON to the URL below. Use the secret in <code>X-Webhook-Secret</code> header for verification.</p>
+    <p class="text-muted small">When an ad is approved, its data is POSTed as JSON to the URL below (same shape as <code>/api/v1/ads/latest/</code>, including <code>phone_number</code> as E.164 with a leading <code>+</code>). Use the secret in <code>X-Webhook-Secret</code> header for verification.</p>
     <form action="{% url 'settings_api_save_webhook' %}" method="post" class="form-soul">
       {% csrf_token %}
       <div class="mb-3">

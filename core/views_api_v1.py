@@ -14,6 +14,7 @@ from core.view_utils import get_request_payload
 from core.services import clean_ad_text, run_ai_moderation
 from core.validators import validate_ad_content
 from core.services.instagram_api import get_absolute_media_url
+from core.utils.phone_export import format_ad_phone_e164_export
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -91,17 +92,21 @@ def api_v1_submit(request):
 def api_v1_status(request, uuid):
     """
     GET /api/v1/status/<uuid>/
-    Returns 200 { "uuid", "status", "category", "created_at" } for ads submitted by this client.
+    Returns 200 { "uuid", "status", "category", "phone_number", "created_at" } for ads submitted by this client.
     """
     if not getattr(request, 'api_client', None):
         return JsonResponse({'error': 'Unauthorized', 'message': 'Invalid or missing API key.'}, status=401)
-    ad = get_object_or_404(AdRequest, uuid=uuid)
+    ad = get_object_or_404(
+        AdRequest.objects.select_related('category', 'user'),
+        uuid=uuid,
+    )
     if ad.submitted_via_api_client_id != request.api_client.pk:
         return JsonResponse({'error': 'Not found', 'message': 'Ad not found or access denied.'}, status=404)
     return JsonResponse({
         'uuid': str(ad.uuid),
         'status': ad.status,
         'category': ad.category.slug if ad.category else None,
+        'phone_number': format_ad_phone_e164_export(ad),
         'created_at': ad.created_at.isoformat() if ad.created_at else None,
     })
 
@@ -110,11 +115,13 @@ def api_v1_status(request, uuid):
 def api_v1_list(request):
     """
     GET /api/v1/list/?status=...&category=...&limit=...&offset=...
-    Returns 200 { "results": [...], "count" } for ads submitted by this client.
+    Returns 200 { "results": [{ "uuid", "status", "category", "phone_number", "created_at" }, ...], "count" }.
     """
     if not getattr(request, 'api_client', None):
         return JsonResponse({'error': 'Unauthorized', 'message': 'Invalid or missing API key.'}, status=401)
-    qs = AdRequest.objects.filter(submitted_via_api_client=request.api_client).order_by('-created_at')
+    qs = AdRequest.objects.filter(submitted_via_api_client=request.api_client).select_related(
+        'category', 'user'
+    ).order_by('-created_at')
     status = request.GET.get('status', '').strip()
     if status and status in dict(AdRequest.Status.choices):
         qs = qs.filter(status=status)
@@ -136,6 +143,7 @@ def api_v1_list(request):
             'uuid': str(ad.uuid),
             'status': ad.status,
             'category': ad.category.slug if ad.category else None,
+            'phone_number': format_ad_phone_e164_export(ad),
             'created_at': ad.created_at.isoformat() if ad.created_at else None,
         }
         for ad in page
@@ -148,12 +156,14 @@ def api_v1_ads_latest(request):
     """
     GET /api/v1/ads/latest/
     Returns the latest approved ads for public consumption (any valid API key).
-    Format: [{ "id", "category", "message", "image_url", "story_url", "created_at" }, ...]
+    Format: [{ "id", "category", "message", "phone_number", "image_url", "story_url", "created_at" }, ...]
     Query: limit (default 50, max 100), offset (default 0).
     """
     if not getattr(request, 'api_client', None):
         return JsonResponse({'error': 'Unauthorized', 'message': 'Invalid or missing API key.'}, status=401)
-    qs = AdRequest.objects.filter(status=AdRequest.Status.APPROVED).select_related('category').order_by('-created_at')
+    qs = AdRequest.objects.filter(status=AdRequest.Status.APPROVED).select_related(
+        'category', 'user'
+    ).order_by('-created_at')
     try:
         limit = min(int(request.GET.get('limit', 50)), 100)
     except (ValueError, TypeError):
@@ -171,6 +181,7 @@ def api_v1_ads_latest(request):
             'id': ad.pk,
             'category': ad.category.name if ad.category else 'Other',
             'message': ad.content or '',
+            'phone_number': format_ad_phone_e164_export(ad),
             'image_url': image_url or '',
             'story_url': story_url or '',
             'created_at': ad.created_at.isoformat() if ad.created_at else None,
