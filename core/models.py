@@ -457,7 +457,12 @@ class Category(models.Model):
     )
     slug = models.SlugField(max_length=64, unique=True, help_text='URL-safe identifier; used as callback_data in bot')
     color = models.CharField(max_length=16, default='#7C4DFF', help_text='Hex color for badges (e.g. #7C4DFF)')
-    icon = models.CharField(max_length=64, blank=True, help_text='Optional: Lucide/icon name')
+    icon = models.CharField(
+        max_length=64,
+        blank=True,
+        default='circle',
+        help_text='Lucide icon name (e.g. home, briefcase). Default: circle.',
+    )
     is_active = models.BooleanField(default=True, db_index=True)
     order = models.PositiveIntegerField(default=0, help_text='Sort order (lower first)')
 

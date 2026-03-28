@@ -191,10 +191,10 @@ class VerificationCodeAdmin(admin.ModelAdmin):
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ['name', 'name_fa', 'slug', 'color', 'is_active', 'order']
+    list_display = ['name', 'name_fa', 'slug', 'icon', 'color', 'is_active', 'order']
     list_filter = ['is_active']
-    search_fields = ['name', 'name_fa', 'slug']
-    list_editable = ['is_active', 'order']
+    search_fields = ['name', 'name_fa', 'slug', 'icon']
+    list_editable = ['is_active', 'order', 'icon', 'color']
 
 
 @admin.register(AdRequest)

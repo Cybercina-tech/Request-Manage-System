@@ -158,6 +158,11 @@ def api_v1_categories(request):
     """
     GET /api/v1/categories/
     Public: no X-API-KEY required. Active categories with approved ad counts for filters/UI.
+
+    Query:
+      omit_empty / hide_empty: if 1/true, exclude categories with ads_count == 0.
+      sort: "order" (default) or "ads" — by catalog order, or by approved count descending
+            then order, name (popular categories first).
     """
     qs = (
         Category.objects.filter(is_active=True)
@@ -167,8 +172,21 @@ def api_v1_categories(request):
                 filter=Q(ad_requests__status=AdRequest.Status.APPROVED),
             )
         )
-        .order_by('order', 'name')
     )
+    omit = (request.GET.get('omit_empty') or request.GET.get('hide_empty') or '').strip().lower()
+    if omit in ('1', 'true', 'yes', 'on'):
+        qs = qs.filter(ads_count__gte=1)
+
+    sort = (request.GET.get('sort') or 'order').strip().lower()
+    if sort == 'ads':
+        qs = qs.order_by('-ads_count', 'order', 'name')
+    else:
+        qs = qs.order_by('order', 'name')
+
+    def icon_for(c):
+        v = (getattr(c, 'icon', None) or '').strip()
+        return v or 'circle'
+
     results = [
         {
             'id': c.pk,
@@ -176,7 +194,7 @@ def api_v1_categories(request):
             'name_fa': c.name_fa or '',
             'slug': c.slug,
             'color': c.color,
-            'icon': c.icon or '',
+            'icon': icon_for(c),
             'order': c.order,
             'ads_count': c.ads_count,
         }

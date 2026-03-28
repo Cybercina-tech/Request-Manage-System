@@ -1451,7 +1451,7 @@ def category_create(request):
             return render(request, 'core/category_form.html', {'category': None, 'error': 'Slug already exists'})
         Category.objects.create(
             name=name, name_fa=name_fa, slug=slug, color=color or '#7C4DFF',
-            icon=icon, is_active=is_active, order=order,
+            icon=icon or 'circle', is_active=is_active, order=order,
         )
         messages.success(request, 'Category added successfully!')
         return redirect('categories')
@@ -1484,7 +1484,7 @@ def category_edit(request, pk):
         category.name_fa = name_fa
         category.slug = slug
         category.color = color or '#7C4DFF'
-        category.icon = icon
+        category.icon = icon or 'circle'
         category.is_active = is_active
         category.order = order
         category.save()
