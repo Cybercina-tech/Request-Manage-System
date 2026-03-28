@@ -17,7 +17,7 @@ from django.db import models
 from django.utils import timezone
 
 from .encryption import decrypt_token, encrypt_token, mask_token
-from .validators import validate_ad_content_length, validate_ad_content_persian
+from .validators import validate_ad_content_length
 
 
 def default_workflow_stages():
@@ -535,7 +535,7 @@ class AdRequest(models.Model):
         db_index=True
     )
     content = models.TextField(
-        validators=[validate_ad_content_length, validate_ad_content_persian]
+        validators=[validate_ad_content_length]
     )
     rejection_reason = models.TextField(blank=True)
     ai_suggested_reason = models.TextField(blank=True)

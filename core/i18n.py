@@ -94,20 +94,14 @@ MESSAGES = {
         "fa": "📂 ابتدا دسته‌بندی آگهی را انتخاب کنید.",
     },
     "category_explanation": {
-        "en": "📂 **Category: {category_name}**\n\n"
-        "At **Iraniu** we help you reach the right audience. "
-        "This category is designed for ads like yours.\n\n"
-        "• **What we do:** We review and publish your ad so it appears to interested users.\n"
-        "• **How it works:** After you send your ad text, we check it and notify you when it goes live or if changes are needed.\n"
-        "• **Benefits:** Clear process, safe platform, and professional presentation of your offer.\n\n"
-        "Use the button below to go back to the main menu anytime.",
-        "fa": "📂 **دسته‌بندی: {category_name}**\n\n"
-        "در **ایرانيو** به شما کمک می‌کنیم به مخاطب درست برسید. "
-        "این دسته برای آگهی‌هایی مثل شما طراحی شده است.\n\n"
-        "• **چه می‌کنیم:** آگهی شما را بررسی و منتشر می‌کنیم تا به کاربران علاقه‌مند نمایش داده شود.\n"
-        "• **چطور کار می‌کند:** بعد از ارسال متن آگهی، آن را بررسی می‌کنیم و وقتی منتشر شد یا تغییری لازم باشد به شما خبر می‌دهیم.\n"
-        "• **مزایا:** فرایند شفاف، پلتفرم امن و ارائه حرفه‌ای پیشنهاد شما.\n\n"
-        "هر زمان می‌توانید با دکمه زیر به منوی اصلی برگردید.",
+        "en": "📂 Category: {category_name}\n\n"
+        "At Iraniu we help you reach the right audience. This category is designed for ads like yours.\n\n"
+        "• What we do: We review and publish your ad so it appears to interested users.\n"
+        "• How it works: After you send your ad text, we review it and keep you informed of publication status.",
+        "fa": "📂 دسته‌بندی: {category_name}\n\n"
+        "در ایرانيو به شما کمک می‌کنیم به مخاطب درست برسید. این دسته برای آگهی‌هایی مثل شما طراحی شده است.\n\n"
+        "• چه می‌کنیم: آگهی شما را بررسی و منتشر می‌کنیم تا به کاربران علاقه‌مند نمایش داده شود.\n"
+        "• چطور کار می‌کند: بعد از ارسال متن آگهی، آن را بررسی می‌کنیم و وضعیت انتشار را به شما اطلاع می‌دهیم.",
     },
     "choose_category": {
         "en": "📂 Choose category",
@@ -134,28 +128,20 @@ MESSAGES = {
         "fa": "⚠️ لطفاً آگهی خود را فقط به زبان فارسی بنویسید.\nPlease write your ad in Persian only.",
     },
     "enter_ad_text_detailed": {
-        "en": "✍️ **Write your ad — Category: {category_name}**\n\n"
-        "Please send your ad in **one message**. We'll review it and publish if it meets our guidelines.\n\n"
-        "**Important limits (حداکثر ۵۰۰ کاراکتر / max 500 characters):**\n"
-        "• Maximum **500 characters** (including spaces).\n"
-        "• **Persian only** — لأتین مجاز نیست / No Latin letters.\n\n"
-        "**Tips for better results:**\n"
-        "• Use a clear title or opening line.\n"
-        "• Include important details (location, price, contact if allowed).\n"
-        "• Keep it honest and professional.\n"
-        "• Avoid prohibited content (spam, illegal items).\n\n"
-        "You can use normal line breaks. When you're ready, send your text below. We're here to help! 🙏",
-        "fa": "✍️ **متن آگهی را بنویسید — دسته: {category_name}**\n\n"
-        "لطفاً آگهی را در **یک پیام** بفرستید. ما آن را بررسی می‌کنیم و در صورت رعایت ضوابط منتشر می‌کنیم.\n\n"
-        "**محدودیت‌های مهم (حداکثر ۵۰۰ کاراکتر / max 500 characters):**\n"
-        "• حداکثر **۵۰۰ کاراکتر** (با احتساب فاصله).\n"
-        "• **فقط فارسی** — لأتین مجاز نیست / No Latin letters.\n\n"
-        "**نکات برای نتیجه بهتر:**\n"
-        "• عنوان یا خط اول را واضح بنویسید.\n"
-        "• جزئیات مهم (مکان، قیمت، تماس در صورت مجاز) را ذکر کنید.\n"
-        "• صادق و حرفه‌ای باشید.\n"
-        "• از محتوای ممنوع (اسپم، موارد غیرقانونی) خودداری کنید.\n\n"
-        "می‌توانید از خط جدید استفاده کنید. وقتی آماده بودید متن را بفرستید. ما اینجا هستیم تا کمک کنیم! 🙏",
+        "en": "✍️ Write your ad\n\n"
+        "Please send your ad in one message. (Maximum 500 characters.)\n\n"
+        "Suggestions:\n"
+        "• Use a clear title for your ad.\n"
+        "• Include important details (location, price, and how to reach you).\n"
+        "• Avoid all-Latin wording where possible for a cleaner look.\n\n"
+        "We look forward to your message! 🙏",
+        "fa": "✍️ متن آگهی را بنویسید\n\n"
+        "لطفاً آگهی خود را در یک پیام بفرستید. (حداکثر ۵۰۰ کاراکتر)\n\n"
+        "نکات پیشنهادی:\n"
+        "• عنوان آگهی را واضح بنویسید.\n"
+        "• جزئیات مهم (مکان، قیمت و راه‌های ارتباطی) را ذکر کنید.\n"
+        "• از نوشتن کلمات تمام لاتین خودداری کنید تا آگهی ظاهر بهتری داشته باشد.\n\n"
+        "منتظر متن شما هستیم! 🙏",
     },
     "content_confirm": {
         "en": "📝 Your ad:",
@@ -277,9 +263,9 @@ MESSAGES = {
     },
     "resubmit_edit_prompt": {
         "en": "✍️ Send your new ad text (you can copy and edit the text above).\n\n"
-        "**Limits:** max 500 characters | Persian only / حداکثر ۵۰۰ کاراکتر | فقط فارسی",
+        "Maximum 500 characters per message.",
         "fa": "✍️ متن جدید آگهی را بفرستید (می‌توانید متن بالا را کپی و ویرایش کنید).\n\n"
-        "**محدودیت‌ها:** حداکثر ۵۰۰ کاراکتر | فقط فارسی / max 500 characters | Persian only",
+        "حداکثر ۵۰۰ کاراکتر در هر پیام.",
     },
     "resubmit_confirm": {
         "en": "✅ Submit this new version?",

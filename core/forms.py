@@ -6,6 +6,7 @@ from django import forms
 from django.core.validators import FileExtensionValidator
 
 from core.models import AdTemplate, SiteConfiguration, TelegramBot, TelegramChannel
+from core.validators import AD_CONTENT_MAX_LENGTH
 from core.utils.validation import validate_uploaded_image, parse_hex_color
 
 MAX_TEMPLATE_BG_SIZE_BYTES = 8 * 1024 * 1024
@@ -73,8 +74,15 @@ class TemplateTesterForm(forms.Form):
     )
     ad_text = forms.CharField(
         required=True,
+        max_length=AD_CONTENT_MAX_LENGTH,
         initial="Sample ad text for preview. Change this in the form.",
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 4,
+                "maxlength": str(AD_CONTENT_MAX_LENGTH),
+            }
+        ),
     )
     phone_number = forms.CharField(
         required=False,

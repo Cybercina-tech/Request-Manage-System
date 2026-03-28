@@ -1,5 +1,5 @@
 """
-Iraniu — Tests for ad content validators (length limit, Persian-only).
+Iraniu — Tests for ad content validators (length limit; optional Persian-only helper).
 """
 
 from django.core.exceptions import ValidationError
@@ -51,7 +51,7 @@ class AdContentPersianValidatorTests(TestCase):
 
 
 class AdContentFullValidatorTests(TestCase):
-    """Test combined validation."""
+    """Test combined validation (length only on model/API)."""
 
     def test_valid_content_passes(self):
         validate_ad_content("اجاره آپارتمان در تهران")
@@ -60,9 +60,8 @@ class AdContentFullValidatorTests(TestCase):
         with self.assertRaises(ValidationError):
             validate_ad_content("ف" * (AD_CONTENT_MAX_LENGTH + 1))
 
-    def test_latin_raises(self):
-        with self.assertRaises(ValidationError):
-            validate_ad_content("Hello world")
+    def test_latin_allowed(self):
+        validate_ad_content("Hello world")
 
 
 class ValidateAdContentWithFeedbackTests(TestCase):
@@ -78,7 +77,7 @@ class ValidateAdContentWithFeedbackTests(TestCase):
         self.assertFalse(valid)
         self.assertEqual(err, "ad_content_too_long")
 
-    def test_latin_returns_false_key(self):
+    def test_latin_returns_true(self):
         valid, err = validate_ad_content_with_feedback("Test")
-        self.assertFalse(valid)
-        self.assertEqual(err, "ad_content_not_persian")
+        self.assertTrue(valid)
+        self.assertIsNone(err)

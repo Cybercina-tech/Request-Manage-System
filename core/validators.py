@@ -1,6 +1,6 @@
 """
 Iraniu — Validators for AdRequest content.
-Enforces 500-char limit and Persian-only (letters, numbers, punctuation).
+Enforces max length; optional Persian-only check kept for rare reuse (not on model by default).
 """
 
 import re
@@ -42,18 +42,17 @@ def validate_ad_content_persian(value: str) -> None:
 
 def validate_ad_content(value: str) -> None:
     """
-    Run all ad content validations: length and Persian-only.
-    Raises ValidationError with appropriate message on failure.
+    Run ad content validations used for storage/API: length only.
+    Raises ValidationError on failure.
     """
     validate_ad_content_length(value)
-    validate_ad_content_persian(value)
 
 
 def validate_ad_content_with_feedback(text: str) -> tuple[bool, str | None]:
     """
     Validate ad content and return (is_valid, error_message).
     Use in bot/conversation flow to show localized errors via i18n keys.
-    Returns (False, "ad_content_too_long") or (False, "ad_content_not_persian") or (True, None).
+    Returns (False, "ad_content_too_long") or (True, None).
     """
     if not text or not isinstance(text, str):
         return True, None
@@ -64,6 +63,4 @@ def validate_ad_content_with_feedback(text: str) -> tuple[bool, str | None]:
         code = getattr(e, "code", None) or (e.error_list[0].code if e.error_list else None)
         if code == "ad_content_too_long":
             return False, "ad_content_too_long"
-        if code == "ad_content_not_persian":
-            return False, "ad_content_not_persian"
-        return False, "ad_content_not_persian"  # fallback
+        return False, "ad_content_too_long"

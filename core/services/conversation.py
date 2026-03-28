@@ -771,7 +771,7 @@ class ConversationEngine:
         message_id: int | None = None,
     ) -> dict:
         """
-        Send validation error for length or Persian-only. error_key: ad_content_too_long | ad_content_not_persian.
+        Send validation error for length. error_key: ad_content_too_long.
         Message is bilingual (FA + EN) per user request.
         """
         lang = session.language or "en"

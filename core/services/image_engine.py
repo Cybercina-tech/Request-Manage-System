@@ -309,6 +309,59 @@ def _line_pixel_width(draw, text: str, font) -> int:
     return max(1, bbox[2] - bbox[0])
 
 
+def _fit_category_font_single_line(
+    draw,
+    text: str,
+    ImageFont,
+    font_path: str | None,
+    base_size: int,
+    max_w: int,
+    *,
+    min_size: int = 28,
+    step: int = 3,
+):
+    """Shrink category title font until one line fits within max_w (all templates/categories)."""
+    size = base_size
+    while size >= min_size:
+        font = _load_font(ImageFont, size, font_path)
+        if _line_pixel_width(draw, text, font) <= max_w:
+            return font
+        size -= step
+    return _load_font(ImageFont, min_size, font_path)
+
+
+def _fit_description_font_block(
+    draw,
+    body: str,
+    ImageFont,
+    font_path: str | None,
+    base_size: int,
+    max_width: int,
+    available_height: int,
+    *,
+    min_size: int = 24,
+    step: int = 3,
+):
+    """
+    Step font size down until wrapped body fits vertically, or min_size is reached.
+    Long ads (up to AD_CONTENT_MAX_LENGTH) stay inside the banner area without clipping when possible.
+    """
+    size = base_size
+    while size >= min_size:
+        desc_font = _load_font(ImageFont, size, font_path)
+        line_gap = max(4, int(size * 0.15))
+        wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
+        block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
+        if block_h <= available_height:
+            return desc_font, wrapped_lines, line_gap, block_h
+        size -= step
+    desc_font = _load_font(ImageFont, min_size, font_path)
+    line_gap = max(4, int(min_size * 0.15))
+    wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
+    block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
+    return desc_font, wrapped_lines, line_gap, block_h
+
+
 def _split_long_word_to_width(draw, word: str, font, max_width: int) -> list[str]:
     """Break a single token into segments that each fit within max_width."""
     if not word:
@@ -736,11 +789,8 @@ def create_ad_image(
 
     # ── Category Layer (YekanBakh-Bold.ttf from config, no pseudo-bold) ──
     c_conf = coords.get("category", {})
-    cat_font = _load_font(
-        ImageFont,
-        _coerce_int(c_conf.get("size"), default=90, minimum=1, maximum=400),
-        c_conf.get("font_path"),
-    )
+    cat_base_size = _coerce_int(c_conf.get("size"), default=90, minimum=1, maximum=400)
+    cat_font_path = c_conf.get("font_path")
     cat_color = _hex_to_rgb(c_conf.get("color") or "#EEFF00")
     cat_x = _coerce_int(c_conf.get("x"), default=0, minimum=-img.width * 2, maximum=img.width * 2)
     cat_y = _coerce_int(c_conf.get("y"), default=0, minimum=-img.height * 2, maximum=img.height * 2)
@@ -751,12 +801,14 @@ def create_ad_image(
     # No pseudo-bold (stroke): YekanBakh-Bold.ttf handles weight naturally
     cat_text = prepare_text(category or "", is_phone=False)
     if cat_text:
+        cat_font = _fit_category_font_single_line(
+            draw, cat_text, ImageFont, cat_font_path, cat_base_size, cat_max_w
+        )
         _draw_aligned_line(draw, cat_text, cat_x, cat_y, cat_font, cat_color, cat_align, cat_max_w, bold=False)
 
     # ── Phone band (computed before description so body text stays above phone) ──
     PHONE_BOTTOM_PADDING = 80
     DESCRIPTION_PHONE_GAP = 36
-    DESCRIPTION_FALLBACK_FONT_SIZE = 45
     p_conf = coords.get("phone", {})
     phone_font = _load_english_font(
         "",  # Ignore font_path; phone must always use English/Latin font
@@ -783,17 +835,15 @@ def create_ad_image(
     body = prepare_text(text or "", is_phone=False)
     available_height = max(0, phone_y - DESCRIPTION_PHONE_GAP - desc_y)
 
-    desc_font = _load_font(ImageFont, desc_base_size, desc_font_path)
-    line_gap = max(6, int(desc_base_size * 0.15))
-    wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
-    block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
-
-    if block_h > available_height and desc_base_size > DESCRIPTION_FALLBACK_FONT_SIZE:
-        desc_font = _load_font(ImageFont, DESCRIPTION_FALLBACK_FONT_SIZE, desc_font_path)
-        line_gap = max(6, int(DESCRIPTION_FALLBACK_FONT_SIZE * 0.15))
-        wrapped_lines = _wrap_persian_text(draw, body, desc_font, max_width)
-        block_h = _measure_description_block_height(wrapped_lines, desc_font, draw, line_gap)
-
+    desc_font, wrapped_lines, line_gap, block_h = _fit_description_font_block(
+        draw,
+        body,
+        ImageFont,
+        desc_font_path,
+        desc_base_size,
+        max_width,
+        available_height,
+    )
     if block_h > available_height:
         wrapped_lines = _truncate_wrapped_lines_for_height(
             draw, wrapped_lines, desc_font, max_width, available_height, line_gap
