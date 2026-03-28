@@ -204,8 +204,8 @@ def api_v1_categories(request):
     ]
     return JsonResponse(
         {'results': results},
-        safe=False,
         json_dumps_params={'ensure_ascii': False},
+        content_type='application/json; charset=utf-8',
     )
 
 
