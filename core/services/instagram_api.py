@@ -27,20 +27,23 @@ DEFAULT_INSTAGRAM_BASE_URL = 'https://request.iraniu.uk'
 def get_instagram_base_url() -> str:
     """
     Return the absolute base URL (no trailing slash) for building media URLs.
-    Order: settings.INSTAGRAM_BASE_URL, env INSTAGRAM_BASE_URL, SiteConfiguration.production_base_url,
-    then DEFAULT_INSTAGRAM_BASE_URL.
+    Prefer SiteConfiguration.production_base_url (HTTPS) so webhook/media URLs match admin settings;
+    then settings.INSTAGRAM_BASE_URL, env INSTAGRAM_BASE_URL, then DEFAULT_INSTAGRAM_BASE_URL.
     """
+    from core.models import SiteConfiguration
+
+    site = SiteConfiguration.get_config()
+    db_base = (site.production_base_url or '').strip().rstrip('/')
+    if db_base.startswith('https://'):
+        return db_base
     base = (
         (getattr(settings, 'INSTAGRAM_BASE_URL', '') or '').strip()
         or os.environ.get('INSTAGRAM_BASE_URL', '').strip()
     )
     if base:
         return base.rstrip('/')
-    from core.models import SiteConfiguration
-    site = SiteConfiguration.get_config()
-    base = (site.production_base_url or '').strip().rstrip('/')
-    if base:
-        return base
+    if db_base:
+        return db_base
     return DEFAULT_INSTAGRAM_BASE_URL
 
 

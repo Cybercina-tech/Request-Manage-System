@@ -105,6 +105,7 @@ urlpatterns = [
     path('api/v1/submit/', views_api_v1.api_v1_submit, name='api_v1_submit'),
     path('api/v1/status/<uuid:uuid>/', views_api_v1.api_v1_status, name='api_v1_status'),
     path('api/v1/list/', views_api_v1.api_v1_list, name='api_v1_list'),
+    path('api/v1/categories/', views_api_v1.api_v1_categories, name='api_v1_categories'),
     path('api/v1/ads/latest/', views_api_v1.api_v1_ads_latest, name='api_v1_ads_latest'),
     path('telegram/webhook/<int:bot_id>/', telegram_views.telegram_webhook, name='telegram_webhook'),
     path('telegram/webhook/<uuid:webhook_secret_token>/', views.TelegramWebhookView.as_view(), name='telegram_webhook_by_token'),

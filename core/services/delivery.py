@@ -682,6 +682,7 @@ class DeliveryService:
         Payload: id, uuid, category, message, phone_number (E.164 +prefix), image_url, story_url, created_at.
         """
         import requests
+        from core.services.image_engine import ensure_feed_image, ensure_story_image
         from core.services.instagram_api import get_absolute_media_url
 
         config = SiteConfiguration.get_config()
@@ -690,9 +691,11 @@ class DeliveryService:
             log.error_message = 'External webhook URL not configured.'
             return False
         secret = (getattr(config, 'webhook_secret_key', None) or '').strip()
+        ensure_feed_image(ad)
+        ensure_story_image(ad)
         image_url = get_absolute_media_url(ad.generated_image) if ad.generated_image else None
         story_url = get_absolute_media_url(ad.generated_story_image) if ad.generated_story_image else None
-        category_name = ad.category.name if ad.category else 'Other'
+        category_name = ad.category.display_name_fa if ad.category else 'Other'
         payload = {
             'id': ad.pk,
             'uuid': str(ad.uuid),

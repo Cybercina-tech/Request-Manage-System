@@ -97,6 +97,11 @@ class ApiKeyAuthMiddleware:
             if ip_count > self.IP_RATE_LIMIT_PER_MIN:
                 return JsonResponse({'error': 'Rate limit exceeded', 'message': 'Too many requests from this IP.'}, status=429)
 
+        # Public read-only catalog: no API key (request.api_client stays None).
+        path_norm = request.path.rstrip('/') or '/'
+        if request.method == 'GET' and path_norm == '/api/v1/categories':
+            return self.get_response(request)
+
         key = (request.META.get(self.HEADER_API_KEY) or '').strip()
         if not key:
             auth = request.META.get('HTTP_AUTHORIZATION') or ''

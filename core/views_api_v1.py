@@ -1,9 +1,11 @@
 """
 Iraniu — Partner API v1. Submit, status, list, latest ads. Auth via X-API-KEY (middleware).
-All views assume request.api_client is set (middleware returns 401 otherwise).
+All views assume request.api_client is set (middleware returns 401 otherwise), except
+GET /api/v1/categories/ which is public (no API key).
 """
 
 import logging
+from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -149,6 +151,38 @@ def api_v1_list(request):
         for ad in page
     ]
     return JsonResponse({'results': results, 'count': count})
+
+
+@require_http_methods(['GET'])
+def api_v1_categories(request):
+    """
+    GET /api/v1/categories/
+    Public: no X-API-KEY required. Active categories with approved ad counts for filters/UI.
+    """
+    qs = (
+        Category.objects.filter(is_active=True)
+        .annotate(
+            ads_count=Count(
+                'ad_requests',
+                filter=Q(ad_requests__status=AdRequest.Status.APPROVED),
+            )
+        )
+        .order_by('order', 'name')
+    )
+    results = [
+        {
+            'id': c.pk,
+            'name': c.name,
+            'name_fa': c.name_fa or '',
+            'slug': c.slug,
+            'color': c.color,
+            'icon': c.icon or '',
+            'order': c.order,
+            'ads_count': c.ads_count,
+        }
+        for c in qs
+    ]
+    return JsonResponse({'results': results})
 
 
 @require_http_methods(['GET'])
