@@ -4,10 +4,9 @@ All views assume request.api_client is set (middleware returns 401 otherwise), e
 GET /api/v1/categories/ which is public (no API key).
 """
 
-import json
 import logging
 from django.db.models import Count, Q
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
@@ -188,8 +187,8 @@ def api_v1_categories(request):
       sort: "order" (default) or "ads" — by catalog order, or by approved count descending
             then order, name (popular categories first).
 
-    Response is UTF-8 JSON (ensure_ascii=False, explicit charset in Content-Type). If name/name_fa were
-    stored as mojibake (UTF-8 misread as Latin-1), they are repaired in the payload.
+    Response is JSON with non-ASCII text escaped as \\uXXXX (ensure_ascii=True). name/name_fa are repaired
+    if stored as mojibake. Content-Type includes charset=utf-8.
     """
     qs = (
         Category.objects.filter(is_active=True)
@@ -227,10 +226,9 @@ def api_v1_categories(request):
         }
         for c in qs
     ]
-    # Explicit UTF-8 bytes + charset so clients never mis-detect encoding; mojibake in DB is fixed above.
-    payload = json.dumps({'results': results}, ensure_ascii=False)
-    return HttpResponse(
-        payload.encode('utf-8'),
+    return JsonResponse(
+        {'results': results},
+        json_dumps_params={'ensure_ascii': True},
         content_type='application/json; charset=utf-8',
     )
 
