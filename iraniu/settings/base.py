@@ -1,4 +1,9 @@
-"""Iraniu Django settings."""
+"""Iraniu Django settings.
+
+Set ``DJANGO_ENV`` (or ``APP_ENV``) to ``production`` or ``development`` to align DEBUG,
+``ENVIRONMENT`` (PROD/DEV for Telegram bots), CSRF/Instagram defaults, and related flags.
+Explicit ``DJANGO_DEBUG`` / ``DEBUG`` / ``ENVIRONMENT`` / ``INSTAGRAM_*`` env vars still win.
+"""
 
 import os
 from pathlib import Path
@@ -18,6 +23,22 @@ if load_dotenv is not None:
     load_dotenv(BASE_DIR / ".env")
 
 
+def _normalize_django_env(raw: str) -> str | None:
+    """Map DJANGO_ENV / APP_ENV to 'production' or 'development'. Unknown/empty → None (legacy mode)."""
+    r = (raw or "").strip().lower()
+    if r in ("production", "prod", "live"):
+        return "production"
+    if r in ("development", "dev", "local"):
+        return "development"
+    return None
+
+
+# Single switch: production vs development. When set, drives DEBUG/ENVIRONMENT defaults and URL presets
+# unless DJANGO_DEBUG / DEBUG / ENVIRONMENT override explicitly.
+_DJANGO_ENV_RAW = (os.environ.get("DJANGO_ENV") or os.environ.get("APP_ENV") or "").strip()
+DJANGO_ENV = _normalize_django_env(_DJANGO_ENV_RAW)
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = (os.environ.get(name) or "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
@@ -34,31 +55,51 @@ def _env_list(name: str, default: Iterable[str] | None = None) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-# Prefer DJANGO_DEBUG; DEBUG is accepted for Dokploy/tools that only set DEBUG=False.
+# Prefer explicit DJANGO_DEBUG / DEBUG; else follow DJANGO_ENV; else legacy default (True for local).
 if "DJANGO_DEBUG" in os.environ:
     DEBUG = _env_bool("DJANGO_DEBUG", default=True)
 elif "DEBUG" in os.environ:
     DEBUG = _env_bool("DEBUG", default=True)
+elif DJANGO_ENV == "production":
+    DEBUG = False
+elif DJANGO_ENV == "development":
+    DEBUG = True
 else:
-    DEBUG = True  # default True for local; set False in production
+    DEBUG = True  # legacy: unset DJANGO_ENV → default True for local
 SECRET_KEY = (os.environ.get("DJANGO_SECRET_KEY") or "").strip() or "dev-change-in-production-iraniu"
 if not DEBUG and not (os.environ.get("DJANGO_SECRET_KEY") or "").strip():
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false.")
 
-ALLOWED_HOSTS = _env_list(
-    "DJANGO_ALLOWED_HOSTS",
-    default=[
-        "request.iraniu.uk",
-        "www.request.iraniu.uk",
-        "localhost",
-        "127.0.0.1",
-    ],
-)
+if (os.environ.get("DJANGO_ALLOWED_HOSTS") or "").strip():
+    ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", default=[])
+elif DJANGO_ENV == "development":
+    # testserver: Django test client default host
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "testserver"]
+else:
+    ALLOWED_HOSTS = _env_list(
+        "DJANGO_ALLOWED_HOSTS",
+        default=[
+            "request.iraniu.uk",
+            "www.request.iraniu.uk",
+            "localhost",
+            "127.0.0.1",
+        ],
+    )
 
-CSRF_TRUSTED_ORIGINS = _env_list(
-    "DJANGO_CSRF_TRUSTED_ORIGINS",
-    default=["https://request.iraniu.uk", "http://request.iraniu.uk"],
-)
+if (os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS") or "").strip():
+    CSRF_TRUSTED_ORIGINS = _env_list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
+elif DJANGO_ENV == "development":
+    CSRF_TRUSTED_ORIGINS = [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1",
+        "http://localhost",
+    ]
+else:
+    CSRF_TRUSTED_ORIGINS = _env_list(
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        default=["https://request.iraniu.uk", "http://request.iraniu.uk"],
+    )
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -209,14 +250,21 @@ CACHES = {
 MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
 MEDIA_ROOT = BASE_DIR / 'media'
 # Public base URL for Instagram image URLs (required; set in .env)
-INSTAGRAM_BASE_URL = os.environ.get('INSTAGRAM_BASE_URL', '')
+_INSTAGRAM_BASE_DEFAULT = (
+    'http://127.0.0.1:8000'
+    if DJANGO_ENV == 'development'
+    else ''
+)
+INSTAGRAM_BASE_URL = (os.environ.get('INSTAGRAM_BASE_URL') or '').strip() or _INSTAGRAM_BASE_DEFAULT
 
 # Instagram OAuth — redirect_uri must match exactly what is configured in Meta Developer portal.
 # Canonical value (used when building auth URL and when exchanging code for tokens):
-INSTAGRAM_REDIRECT_URI = (
-    (os.environ.get('INSTAGRAM_REDIRECT_URI') or '').strip()
-    or 'https://request.iraniu.uk/settings/hub/instagram/callback/'
+_INSTAGRAM_REDIRECT_DEFAULT = (
+    'http://127.0.0.1:8000/settings/hub/instagram/callback/'
+    if DJANGO_ENV == 'development'
+    else 'https://request.iraniu.uk/settings/hub/instagram/callback/'
 )
+INSTAGRAM_REDIRECT_URI = (os.environ.get('INSTAGRAM_REDIRECT_URI') or '').strip() or _INSTAGRAM_REDIRECT_DEFAULT
 # Manual OAuth (no social-auth-app-django). All Meta URLs must be HTTPS:
 INSTAGRAM_GRAPH_API_BASE = 'https://graph.facebook.com/v18.0'
 INSTAGRAM_OAUTH_AUTHORIZATION_URL = 'https://www.facebook.com/v18.0/dialog/oauth'
@@ -226,9 +274,11 @@ INSTAGRAM_WEBHOOK_VERIFY_TOKEN = os.environ.get('INSTAGRAM_WEBHOOK_VERIFY_TOKEN'
 # اجبار جنگو به تشخیص HTTPS از طریق هدرهای cPanel/پروکسی
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Security defaults
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+# Security defaults — DJANGO_ENV=development disables HTTPS-only settings automatically;
+# explicit DJANGO_SECURE_SSL_REDIRECT / DJANGO_SECURE_HSTS_SECONDS in env still win.
+_is_secure = DJANGO_ENV != "development" and not DEBUG
+SESSION_COOKIE_SECURE = _is_secure
+CSRF_COOKIE_SECURE = _is_secure
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
@@ -236,10 +286,16 @@ CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
-SECURE_SSL_REDIRECT = _env_bool("DJANGO_SECURE_SSL_REDIRECT", default=not DEBUG)
-SECURE_HSTS_SECONDS = int((os.environ.get("DJANGO_SECURE_HSTS_SECONDS") or "31536000").strip() or "31536000") if not DEBUG else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
-SECURE_HSTS_PRELOAD = not DEBUG
+if "DJANGO_SECURE_SSL_REDIRECT" in os.environ:
+    SECURE_SSL_REDIRECT = _env_bool("DJANGO_SECURE_SSL_REDIRECT", default=False)
+else:
+    SECURE_SSL_REDIRECT = _is_secure
+if _is_secure:
+    SECURE_HSTS_SECONDS = int((os.environ.get("DJANGO_SECURE_HSTS_SECONDS") or "31536000").strip() or "31536000")
+else:
+    SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _is_secure
+SECURE_HSTS_PRELOAD = _is_secure
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -251,8 +307,16 @@ LOGOUT_REDIRECT_URL = '/'
 _ENV_RAW = (os.environ.get('ENVIRONMENT') or '').strip().upper()
 if _ENV_RAW in ('PROD', 'DEV'):
     ENVIRONMENT = _ENV_RAW
+elif DJANGO_ENV == 'production':
+    ENVIRONMENT = 'PROD'
+elif DJANGO_ENV == 'development':
+    ENVIRONMENT = 'DEV'
 else:
     ENVIRONMENT = 'PROD' if not DEBUG else 'DEV'
+
+# Convenience flags (same meaning as ENVIRONMENT PROD/DEV)
+IS_PRODUCTION = ENVIRONMENT == 'PROD'
+IS_DEVELOPMENT = ENVIRONMENT == 'DEV'
 
 # Telegram Bot Runner
 # polling (default): runbots starts getUpdates workers. webhook: use setWebhook + HTTPS; runbots still starts polling workers for bots with mode=Polling in DB.

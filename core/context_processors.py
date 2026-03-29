@@ -42,6 +42,9 @@ def site_config(request):
     return {
         'config': config,
         'environment': environment,
+        'django_env': getattr(settings, 'DJANGO_ENV', None),
+        'is_production': getattr(settings, 'IS_PRODUCTION', environment == 'PROD'),
+        'is_development': getattr(settings, 'IS_DEVELOPMENT', environment == 'DEV'),
         'theme_preference': theme_preference,
         'is_instagram_enabled': is_instagram_enabled,
     }

@@ -5,13 +5,41 @@ Iraniu — Forms for staff views.
 from django import forms
 from django.core.validators import FileExtensionValidator
 
-from core.models import AdTemplate, SiteConfiguration, TelegramBot, TelegramChannel
+from core.models import AdRequest, AdTemplate, Category, SiteConfiguration, TelegramBot, TelegramChannel
 from core.validators import AD_CONTENT_MAX_LENGTH
 from core.utils.validation import validate_uploaded_image, parse_hex_color
 
 MAX_TEMPLATE_BG_SIZE_BYTES = 8 * 1024 * 1024
 MAX_TEST_BG_SIZE_BYTES = 8 * 1024 * 1024
 ALLOWED_FONT_EXTENSIONS = ["ttf", "otf"]
+
+
+class AdRequestUpdateForm(forms.ModelForm):
+    """Staff edit form for an existing AdRequest: content, category, status, phone_number."""
+
+    class Meta:
+        model = AdRequest
+        fields = ('content', 'category', 'status', 'phone_number')
+        widgets = {
+            'content': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 5,
+                'maxlength': str(AD_CONTENT_MAX_LENGTH),
+            }),
+            'category': forms.Select(attrs={'class': 'form-select form-control'}),
+            'status': forms.Select(attrs={'class': 'form-select form-control'}),
+            'phone_number': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': '+98 912 345 6789',
+                'maxlength': '20',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['category'].queryset = Category.objects.filter(is_active=True).order_by('name')
+        self.fields['category'].empty_label = '— Select —'
+        self.fields['phone_number'].required = False
 
 
 class AdTemplateCreateForm(forms.ModelForm):

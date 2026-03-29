@@ -1,4 +1,5 @@
 # Local development: hot-reload via bind mount (.:/app).
+# Use DJANGO_ENV=development in `.env` so DEBUG/ENVIRONMENT/CSRF/Instagram match local (see .env.example).
 # Override entrypoint for faster iteration (skip migrate/collectstatic each start):
 #   entrypoint: ["python"]
 #   command: ["manage.py", "runserver", "0.0.0.0:8000"]

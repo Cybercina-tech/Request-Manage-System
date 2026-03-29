@@ -67,6 +67,7 @@ from core.services.ad_actions import approve_one_ad, reject_one_ad, request_revi
 from core.services.activity_log import log_activity
 from core.view_utils import get_request_payload
 from core.forms import (
+    AdRequestUpdateForm,
     AdTemplateCreateForm,
     ChannelForm,
     DesignDefaultsForm,
@@ -285,13 +286,49 @@ def ad_detail(request, uuid):
         if feed_path:
             preview_image_url = _path_to_public_url(feed_path)
 
+    # Phone for edit form: prefer ad.phone_number, fallback to linked user
+    edit_phone = (ad.phone_number or '').strip()
+    if not edit_phone and client:
+        edit_phone = (getattr(client, 'phone_number', '') or '').strip()
+
     context = {
         'ad': ad,
         'client': client,
         'ai_suggested_reason': ad.ai_suggested_reason or '',
         'preview_image_url': preview_image_url,
+        'categories': Category.objects.filter(is_active=True).order_by('name'),
+        'status_choices': AdRequest.Status.choices,
+        'edit_phone': edit_phone,
     }
     return render(request, 'core/ad_detail.html', context)
+
+
+@staff_member_required
+@require_http_methods(['POST'])
+def ad_request_update(request, uuid):
+    """AJAX endpoint: update editable fields of an AdRequest (content, category, status, phone)."""
+    ad = get_object_or_404(AdRequest, uuid=uuid)
+    data = get_request_payload(request)
+    form = AdRequestUpdateForm(data, instance=ad)
+    if not form.is_valid():
+        errors = {f: errs[0] for f, errs in form.errors.items()}
+        return JsonResponse({'status': 'error', 'errors': errors}, status=400)
+
+    form.save()
+
+    # Sync phone to linked TelegramUser so Client details stay consistent
+    new_phone = (form.cleaned_data.get('phone_number') or '').strip()
+    if new_phone and ad.user_id and ad.user:
+        ad.user.phone_number = new_phone
+        ad.user.save(update_fields=['phone_number'])
+
+    log_activity(
+        user=request.user,
+        action='Edited ad request',
+        object_type='AdRequest',
+        object_repr=f'uuid={ad.uuid}',
+    )
+    return JsonResponse({'status': 'success'})
 
 
 @staff_member_required
@@ -303,7 +340,17 @@ def request_detail(request, uuid):
         client = ad.user
     elif ad.telegram_user_id:
         client = TelegramUser.objects.filter(telegram_user_id=ad.telegram_user_id).first()
-    context = {'ad': ad, 'client': client, 'ai_suggested_reason': ad.ai_suggested_reason or ''}
+    edit_phone = (ad.phone_number or '').strip()
+    if not edit_phone and client:
+        edit_phone = (getattr(client, 'phone_number', '') or '').strip()
+    context = {
+        'ad': ad,
+        'client': client,
+        'ai_suggested_reason': ad.ai_suggested_reason or '',
+        'categories': Category.objects.filter(is_active=True).order_by('name'),
+        'status_choices': AdRequest.Status.choices,
+        'edit_phone': edit_phone,
+    }
     return render(request, 'core/request_detail.html', context)
 
 
