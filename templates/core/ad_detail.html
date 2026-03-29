@@ -34,9 +34,9 @@
     </span>
     <span class="text-muted small"><i class="fa-solid fa-calendar-plus icon" aria-hidden="true"></i> Submitted {{ ad.created_at|date:"M d, Y H:i" }}</span>
     <span class="text-muted small"><i class="fa-solid fa-pen icon" aria-hidden="true"></i> Last update {{ ad.updated_at|date:"M d, Y H:i" }}</span>
-    <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" data-bs-toggle="modal" data-bs-target="#editAdModal">
+    <a href="{% url 'ad_request_update' ad.uuid %}" class="btn btn-outline-secondary btn-sm ms-auto">
       <i class="fa-solid fa-pen-to-square icon me-1" aria-hidden="true"></i> Edit
-    </button>
+    </a>
   </div>
 </div>
 
@@ -140,7 +140,6 @@
   </button>
 </div>
 
-{% include "core/partials/ad_edit_modal.html" %}
 {% endblock %}
 
 {% block extra_js %}

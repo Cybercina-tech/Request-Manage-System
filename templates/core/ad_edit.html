@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Edit Request {{ ad.uuid|truncatechars:8 }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb breadcrumb-soul mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'ad_list' %}">Requests</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'ad_detail' ad.uuid %}">{{ ad.uuid|truncatechars:8 }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Edit</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h1 class="mb-0" style="background: var(--soul-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+    <i class="fa-solid fa-pen-to-square icon me-2" aria-hidden="true"></i>Edit Request
+  </h1>
+  <a href="{% url 'ad_detail' ad.uuid %}" class="btn btn-action">
+    <i class="fa-solid fa-arrow-left icon" aria-hidden="true"></i> Back to Detail
+  </a>
+</div>
+
+{% if form.errors %}
+<div class="alert alert-danger mb-4">
+  <strong><i class="fa-solid fa-circle-exclamation icon me-1" aria-hidden="true"></i> Please fix the errors below:</strong>
+  <ul class="mb-0 mt-2">
+    {% for field, errors in form.errors.items %}
+      {% for error in errors %}
+      <li>{{ field|title }}: {{ error }}</li>
+      {% endfor %}
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post" action="{% url 'ad_request_update' ad.uuid %}" id="editAdForm" novalidate>
+  {% csrf_token %}
+
+  <div class="row g-4">
+    {# —— Left column: editable fields —— #}
+    <div class="col-lg-8">
+      <div class="card-soul">
+        <h5 class="text-muted mb-3"><i class="fa-solid fa-file-lines icon" aria-hidden="true"></i> Ad content</h5>
+        {{ form.content }}
+        {% if form.content.errors %}
+        <div class="text-danger small mt-1">{{ form.content.errors.0 }}</div>
+        {% endif %}
+        <div class="form-text text-end"><span id="editContentCount">0</span> / 500</div>
+      </div>
+
+      <div class="card-soul mt-4">
+        <h5 class="text-muted mb-3"><i class="fa-solid fa-sliders icon" aria-hidden="true"></i> Details</h5>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label for="{{ form.category.id_for_label }}" class="form-label fw-semibold">Category</label>
+            {{ form.category }}
+            {% if form.category.errors %}
+            <div class="text-danger small mt-1">{{ form.category.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <div class="col-md-4">
+            <label for="{{ form.status.id_for_label }}" class="form-label fw-semibold">Status</label>
+            {{ form.status }}
+            {% if form.status.errors %}
+            <div class="text-danger small mt-1">{{ form.status.errors.0 }}</div>
+            {% endif %}
+          </div>
+          <div class="col-md-4">
+            <label for="{{ form.phone_number.id_for_label }}" class="form-label fw-semibold">Phone</label>
+            {{ form.phone_number }}
+            {% if form.phone_number.errors %}
+            <div class="text-danger small mt-1">{{ form.phone_number.errors.0 }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# —— Right column: read-only client info + metadata —— #}
+    <div class="col-lg-4">
+      <div class="card-soul">
+        <h5 class="text-muted mb-3"><i class="fa-solid fa-user icon" aria-hidden="true"></i> Client details</h5>
+        {% if client %}
+        <ul class="list-unstyled mb-0 small">
+          <li class="mb-2"><span class="text-muted">Telegram User ID</span><br><code>{{ client.telegram_user_id }}</code></li>
+          <li class="mb-2"><span class="text-muted">Username</span><br>{% if client.username %}@{{ client.username }}{% else %}—{% endif %}</li>
+          <li class="mb-2"><span class="text-muted">Full name</span><br>{% if client.first_name or client.last_name %}{{ client.first_name|default:"" }} {{ client.last_name|default:"" }}{% else %}—{% endif %}</li>
+          <li class="mb-0"><span class="text-muted">Language</span><br>{{ client.language_code|default:"—" }}</li>
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0 small">No linked Telegram user.</p>
+        {% if ad.telegram_user_id %}
+        <p class="text-muted small mb-0 mt-1">Telegram ID: {{ ad.telegram_user_id }}</p>
+        {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="card-soul mt-4">
+        <h6 class="text-muted mb-2">Metadata</h6>
+        <ul class="list-unstyled mb-0 small text-muted">
+          <li class="mb-1">UUID: <code>{{ ad.uuid }}</code></li>
+          <li class="mb-1">Submitted: {{ ad.created_at|date:"M d, Y H:i" }}</li>
+          <li class="mb-0">Last update: {{ ad.updated_at|date:"M d, Y H:i" }}</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  {# —— Action buttons —— #}
+  <div class="card-soul mt-4">
+    <div class="d-flex flex-wrap gap-2">
+      <button type="submit" class="btn btn-soul px-4" id="saveBtn">
+        <i class="fa-solid fa-floppy-disk icon me-1" aria-hidden="true"></i> Save Changes
+      </button>
+      <a href="{% url 'ad_detail' ad.uuid %}" class="btn btn-secondary px-4">
+        <i class="fa-solid fa-times icon me-1" aria-hidden="true"></i> Cancel
+      </a>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var ta = document.getElementById('id_content');
+  var counter = document.getElementById('editContentCount');
+  if (ta && counter) {
+    counter.textContent = ta.value.length;
+    ta.addEventListener('input', function() { counter.textContent = ta.value.length; });
+  }
+  var form = document.getElementById('editAdForm');
+  var btn = document.getElementById('saveBtn');
+  if (form && btn) {
+    form.addEventListener('submit', function() {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Saving…';
+    });
+  }
+})();
+</script>
+{% endblock %}
